@@ -1,0 +1,39 @@
+# Qt Creator
+*.autosave
+*.user
+*.user.*
+
+# Build artifacts (qmake)
+*.o
+*.obj
+*.moc
+*.rcc
+*.ui.h
+moc_*.cpp
+ui_*.h
+qrc_*.cpp
+*.[0-9].s
+object_script.*.Release
+object_script.*.Debug
+object_script.*.RelWithDebInfo
+object_script.*.MinSizeRel
+
+# Build artifacts (CMake)
+CMakeLists.txt.user*
+# CMake build directories (if not handled by global .gitignore)
+/build*
+/bin*
+/lib*
+
+# Executables and libraries (platform-specific)
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Release/Debug folders
+[Rr]elease/
+[Dd]ebug/
+
+# Crash logs
+*.crash
