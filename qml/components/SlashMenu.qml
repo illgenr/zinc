@@ -23,6 +23,8 @@ Popup {
     }
     
     property string filterText: ""
+    signal linkPageRequested()
+    
     property var commands: [
         { type: "paragraph", label: "Text", description: "Plain text paragraph", icon: "📝" },
         { type: "heading", level: 1, label: "Heading 1", description: "Large heading", icon: "H1" },
@@ -32,7 +34,8 @@ Popup {
         { type: "code", label: "Code", description: "Code block", icon: "💻" },
         { type: "quote", label: "Quote", description: "Block quote", icon: "❝" },
         { type: "divider", label: "Divider", description: "Horizontal line", icon: "—" },
-        { type: "toggle", label: "Toggle", description: "Collapsible content", icon: "▶" }
+        { type: "toggle", label: "Toggle", description: "Collapsible content", icon: "▶" },
+        { type: "link", label: "Link to page", description: "Link to another page", icon: "🔗" }
     ]
     
     property var filteredCommands: commands

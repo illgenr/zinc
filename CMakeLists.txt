@@ -253,12 +253,14 @@ qt_add_qml_module(appzinc
         qml/components/blocks/QuoteBlock.qml
         qml/components/blocks/DividerBlock.qml
         qml/components/blocks/ToggleBlock.qml
+        qml/components/blocks/LinkBlock.qml
         qml/components/SlashMenu.qml
         qml/components/PageTree.qml
         qml/components/SearchDialog.qml
         qml/dialogs/PairingDialog.qml
         qml/dialogs/QRCodeDialog.qml
         qml/dialogs/SettingsDialog.qml
+        qml/dialogs/PagePickerDialog.qml
         qml/theme/Theme.qml
         qml/theme/ThemeManager.qml
     SOURCES

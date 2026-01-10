@@ -1,10 +1,18 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import Qt.labs.settings
 import zinc
 
 Item {
     id: root
+    
+    // Settings for block storage
+    Settings {
+        id: blockSettings
+        category: "BlockEditor"
+        property string blocksJson: "{}"  // Map of pageId -> blocks array
+    }
     
     // UUID generator (Qt.uuidCreate requires Qt 6.4+)
     function generateUuid() {
@@ -18,12 +26,24 @@ Item {
     property string pageId: ""
     
     signal blockFocused(int index)
+    signal titleEdited(string newTitle)
+    signal navigateToPage(string targetPageId)
+    signal showPagePicker(int blockIndex)
+    
+    property var availablePages: []  // Set by parent to provide page list for linking
     
     function loadPage(id) {
+        // Save current page first if we have one
+        if (pageId && pageId !== "" && pageId !== id) {
+            saveBlocks()
+        }
+        
         pageId = id
         blockModel.clear()
-        // Add initial empty paragraph if page is empty
-        if (blockModel.count === 0) {
+        
+        // Try to load blocks from storage
+        if (!loadBlocksFromStorage(id)) {
+            // Add initial empty paragraph if nothing saved
             blockModel.append({
                 blockId: generateUuid(),
                 blockType: "paragraph",
@@ -35,6 +55,74 @@ Item {
                 headingLevel: 0
             })
         }
+    }
+    
+    function saveBlocks() {
+        if (!pageId || pageId === "") return
+        
+        try {
+            let allBlocks = {}
+            try {
+                allBlocks = JSON.parse(blockSettings.blocksJson)
+            } catch (e) {
+                allBlocks = {}
+            }
+            
+            let blocks = []
+            for (let i = 0; i < blockModel.count; i++) {
+                let b = blockModel.get(i)
+                blocks.push({
+                    blockId: b.blockId,
+                    blockType: b.blockType,
+                    content: b.content,
+                    depth: b.depth,
+                    checked: b.checked,
+                    collapsed: b.collapsed,
+                    language: b.language,
+                    headingLevel: b.headingLevel
+                })
+            }
+            
+            allBlocks[pageId] = blocks
+            blockSettings.blocksJson = JSON.stringify(allBlocks)
+        } catch (e) {
+            console.log("Error saving blocks:", e)
+        }
+    }
+    
+    function loadBlocksFromStorage(id) {
+        try {
+            let allBlocks = JSON.parse(blockSettings.blocksJson)
+            if (allBlocks[id] && allBlocks[id].length > 0) {
+                for (let b of allBlocks[id]) {
+                    blockModel.append({
+                        blockId: b.blockId || generateUuid(),
+                        blockType: b.blockType || "paragraph",
+                        content: b.content || "",
+                        depth: b.depth || 0,
+                        checked: b.checked || false,
+                        collapsed: b.collapsed || false,
+                        language: b.language || "",
+                        headingLevel: b.headingLevel || 0
+                    })
+                }
+                return true
+            }
+        } catch (e) {
+            console.log("Error loading blocks:", e)
+        }
+        return false
+    }
+    
+    // Auto-save timer
+    Timer {
+        id: saveTimer
+        interval: 1000
+        onTriggered: saveBlocks()
+    }
+    
+    function scheduleAutosave() {
+        saveTimer.restart()
     }
     
     function scrollToBlock(blockId) {
@@ -90,6 +178,12 @@ Item {
                     font: parent.font
                     visible: parent.text.length === 0 && !parent.activeFocus
                 }
+                
+                onTextChanged: {
+                    if (text !== pageTitle) {
+                        root.titleEdited(text)
+                    }
+                }
             }
             
             // Blocks
@@ -112,6 +206,7 @@ Item {
                     onContentEdited: function(newContent) {
                         model.content = newContent
                         currentBlockIndex = index
+                        scheduleAutosave()
                         
                         // Check for slash command
                         if (newContent === "/" || (newContent.startsWith("/") && !newContent.includes(" "))) {
@@ -126,19 +221,35 @@ Item {
                     }
                     
                     onBlockEnterPressed: {
-                        // Insert new block after this one
+                        // For list types (todo), create another of the same type
+                        // unless the current block is empty (then convert to paragraph)
+                        let newBlockType = "paragraph"
+                        let newChecked = false
+                        
+                        if (model.blockType === "todo") {
+                            if (model.content.length === 0) {
+                                // Empty todo - convert current to paragraph and don't add new
+                                blockModel.setProperty(index, "blockType", "paragraph")
+                                return
+                            }
+                            newBlockType = "todo"
+                        }
+                        
                         let newBlock = {
                             blockId: generateUuid(),
-                            blockType: "paragraph",
+                            blockType: newBlockType,
                             content: "",
                             depth: model.depth,
-                            checked: false,
+                            checked: newChecked,
                             collapsed: false,
                             language: "",
                             headingLevel: 0
                         }
                         blockModel.insert(index + 1, newBlock)
-                        // Focus will be handled by the new block
+                        
+                        // Focus the new block after a brief delay
+                        focusTimer.targetIndex = index + 1
+                        focusTimer.start()
                     }
                     
                     onBlockBackspaceOnEmpty: {
@@ -183,6 +294,10 @@ Item {
                         currentBlockIndex = index
                         root.blockFocused(index)
                     }
+                    
+                    onLinkClicked: function(linkedPageId) {
+                        root.navigateToPage(linkedPageId)
+                    }
                 }
             }
             
@@ -219,8 +334,10 @@ Item {
                         id: addBlockMouse
                         anchors.fill: parent
                         hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
                         
                         onClicked: {
+                            let newIdx = blockModel.count
                             blockModel.append({
                                 blockId: generateUuid(),
                                 blockType: "paragraph",
@@ -231,6 +348,9 @@ Item {
                                 language: "",
                                 headingLevel: 0
                             })
+                            // Focus the new block
+                            focusTimer.targetIndex = newIdx
+                            focusTimer.start()
                         }
                     }
                 }
@@ -243,17 +363,62 @@ Item {
         id: slashMenu
         
         onCommandSelected: function(command) {
-            // Transform current block
             let idx = slashMenu.currentBlockIndex
             if (idx >= 0 && idx < blockModel.count) {
-                blockModel.setProperty(idx, "blockType", command.type)
-                blockModel.setProperty(idx, "content", "")
-                if (command.type === "heading") {
-                    blockModel.setProperty(idx, "headingLevel", command.level || 1)
+                if (command.type === "link") {
+                    // Show page picker for link blocks
+                    blockModel.setProperty(idx, "blockType", "link")
+                    blockModel.setProperty(idx, "content", "")
+                    pendingLinkBlockIndex = idx
+                    root.showPagePicker(idx)
+                } else {
+                    // Transform current block
+                    blockModel.setProperty(idx, "blockType", command.type)
+                    blockModel.setProperty(idx, "content", "")
+                    if (command.type === "heading") {
+                        blockModel.setProperty(idx, "headingLevel", command.level || 1)
+                    }
+                }
+                scheduleAutosave()
+            }
+        }
+    }
+    
+    property int pendingLinkBlockIndex: -1
+    
+    // Called when user selects a page from page picker
+    function setLinkTarget(pageId, pageTitle) {
+        if (pendingLinkBlockIndex >= 0 && pendingLinkBlockIndex < blockModel.count) {
+            blockModel.setProperty(pendingLinkBlockIndex, "content", pageId + "|" + pageTitle)
+            scheduleAutosave()
+        }
+        pendingLinkBlockIndex = -1
+    }
+    
+    property int currentBlockIndex: -1
+    
+    // Timer to focus blocks after they're created
+    Timer {
+        id: focusTimer
+        property int targetIndex: -1
+        interval: 50
+        onTriggered: {
+            if (targetIndex >= 0 && targetIndex < blockRepeater.count) {
+                let item = blockRepeater.itemAt(targetIndex)
+                if (item) {
+                    item.forceActiveFocus()
                 }
             }
         }
     }
     
-    property int currentBlockIndex: -1
+    // Focus a specific block by index
+    function focusBlock(idx) {
+        if (idx >= 0 && idx < blockRepeater.count) {
+            let item = blockRepeater.itemAt(idx)
+            if (item) {
+                item.forceActiveFocus()
+            }
+        }
+    }
 }
