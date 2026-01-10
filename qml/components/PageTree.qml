@@ -1,8 +1,8 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import Qt.labs.settings
 import zinc
+import Zinc 1.0 as ZincDb
 
 Item {
     id: root
@@ -14,17 +14,13 @@ Item {
     
     // Auto-load pages on component creation
     Component.onCompleted: {
+        // Initialize database
+        ZincDb.DataStore.initialize()
+        
         if (!loadPagesFromStorage()) {
             createDefaultPages()
         }
         pagesChanged()
-    }
-    
-    // Settings for persistence
-    Settings {
-        id: settings
-        category: "PageTree"
-        property string pagesJson: ""
     }
     
     // UUID generator
@@ -125,17 +121,16 @@ Item {
         pagesChanged()
     }
     
-    // Storage functions
+    // Storage functions - using SQLite via DataStore
     function savePagesToStorage() {
         let pages = getAllPages()
-        settings.pagesJson = JSON.stringify(pages)
+        ZincDb.DataStore.saveAllPages(pages)
     }
     
     function loadPagesFromStorage() {
         try {
-            let json = settings.pagesJson
-            if (json && json.length > 0) {
-                let pages = JSON.parse(json)
+            let pages = ZincDb.DataStore.getAllPages()
+            if (pages && pages.length > 0) {
                 pageModel.clear()
                 for (let p of pages) {
                     pageModel.append({

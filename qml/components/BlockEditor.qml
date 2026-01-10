@@ -1,18 +1,11 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import Qt.labs.settings
 import zinc
+import Zinc 1.0 as ZincDb
 
 Item {
     id: root
-    
-    // Settings for block storage
-    Settings {
-        id: blockSettings
-        category: "BlockEditor"
-        property string blocksJson: "{}"  // Map of pageId -> blocks array
-    }
     
     // UUID generator (Qt.uuidCreate requires Qt 6.4+)
     function generateUuid() {
@@ -61,13 +54,6 @@ Item {
         if (!pageId || pageId === "") return
         
         try {
-            let allBlocks = {}
-            try {
-                allBlocks = JSON.parse(blockSettings.blocksJson)
-            } catch (e) {
-                allBlocks = {}
-            }
-            
             let blocks = []
             for (let i = 0; i < blockModel.count; i++) {
                 let b = blockModel.get(i)
@@ -83,8 +69,7 @@ Item {
                 })
             }
             
-            allBlocks[pageId] = blocks
-            blockSettings.blocksJson = JSON.stringify(allBlocks)
+            ZincDb.DataStore.saveBlocksForPage(pageId, blocks)
         } catch (e) {
             console.log("Error saving blocks:", e)
         }
@@ -92,9 +77,9 @@ Item {
     
     function loadBlocksFromStorage(id) {
         try {
-            let allBlocks = JSON.parse(blockSettings.blocksJson)
-            if (allBlocks[id] && allBlocks[id].length > 0) {
-                for (let b of allBlocks[id]) {
+            let blocks = ZincDb.DataStore.getBlocksForPage(id)
+            if (blocks && blocks.length > 0) {
+                for (let b of blocks) {
                     blockModel.append({
                         blockId: b.blockId || generateUuid(),
                         blockType: b.blockType || "paragraph",

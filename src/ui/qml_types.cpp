@@ -1,4 +1,5 @@
 #include "ui/qml_types.hpp"
+#include "ui/DataStore.hpp"
 #include "ui/models/BlockModel.hpp"
 #include "ui/models/PageTreeModel.hpp"
 #include "ui/models/SearchResultModel.hpp"
@@ -9,6 +10,9 @@
 namespace zinc::ui {
 
 void registerQmlTypes() {
+    // Data Store singleton
+    qmlRegisterSingletonType<DataStore>("Zinc", 1, 0, "DataStore", DataStore::create);
+    
     // Models
     qmlRegisterType<BlockModel>("Zinc", 1, 0, "BlockModel");
     qmlRegisterType<PageTreeModel>("Zinc", 1, 0, "PageTreeModel");

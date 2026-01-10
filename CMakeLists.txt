@@ -206,6 +206,8 @@ target_link_libraries(zinc_network PUBLIC
 add_library(zinc_ui STATIC
     src/ui/qml_types.hpp
     src/ui/qml_types.cpp
+    src/ui/DataStore.hpp
+    src/ui/DataStore.cpp
     src/ui/models/BlockModel.hpp
     src/ui/models/BlockModel.cpp
     src/ui/models/PageTreeModel.hpp
@@ -222,6 +224,10 @@ add_library(zinc_ui STATIC
 
 target_include_directories(zinc_ui PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+
+target_link_libraries(zinc_ui PUBLIC
+    Qt6::Sql
 )
 
 target_link_libraries(zinc_ui PUBLIC

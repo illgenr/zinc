@@ -155,7 +155,7 @@ Dialog {
                                 ComboBox {
                                     id: fontSizeCombo
                                     model: ["Small", "Medium", "Large"]
-                                    currentIndex: 1
+                                    currentIndex: ThemeManager.fontSizeScale
                                     
                                     background: Rectangle {
                                         implicitWidth: 120
@@ -172,6 +172,10 @@ Dialog {
                                         font.pixelSize: ThemeManager.fontSizeSmall
                                         color: ThemeManager.text
                                         verticalAlignment: Text.AlignVCenter
+                                    }
+                                    
+                                    onCurrentIndexChanged: {
+                                        ThemeManager.setFontScale(currentIndex)
                                     }
                                 }
                             }

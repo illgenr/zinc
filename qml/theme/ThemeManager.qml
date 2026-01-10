@@ -1,8 +1,16 @@
 pragma Singleton
 import QtQuick
+import Qt.labs.settings
 
 QtObject {
     id: root
+    
+    // Persistent settings
+    property Settings settings: Settings {
+        category: "Appearance"
+        property alias themeMode: root.currentMode
+        property alias fontScale: root.fontSizeScale
+    }
     
     // Theme modes
     enum Mode {
@@ -11,7 +19,16 @@ QtObject {
         System
     }
     
+    // Font size scales
+    enum FontScale {
+        Small,
+        Medium,
+        Large
+    }
+    
     property int currentMode: ThemeManager.Mode.Dark
+    property int fontSizeScale: ThemeManager.FontScale.Medium
+    
     property bool isDark: {
         if (currentMode === ThemeManager.Mode.Light) return false
         if (currentMode === ThemeManager.Mode.Dark) return true
@@ -21,6 +38,19 @@ QtObject {
     
     function setMode(mode) {
         currentMode = mode
+    }
+    
+    function setFontScale(scale) {
+        fontSizeScale = scale
+    }
+    
+    // Font scale multiplier
+    readonly property real fontMultiplier: {
+        switch (fontSizeScale) {
+            case ThemeManager.FontScale.Small: return 0.9
+            case ThemeManager.FontScale.Large: return 1.15
+            default: return 1.0
+        }
     }
     
     // Color palette - switches based on isDark
@@ -51,13 +81,13 @@ QtObject {
     readonly property string fontFamily: "Inter, SF Pro Text, -apple-system, BlinkMacSystemFont, sans-serif"
     readonly property string monoFontFamily: "JetBrains Mono, SF Mono, Menlo, Consolas, monospace"
     
-    readonly property int fontSizeSmall: 12
-    readonly property int fontSizeNormal: 14
-    readonly property int fontSizeLarge: 16
-    readonly property int fontSizeXLarge: 20
-    readonly property int fontSizeH1: 30
-    readonly property int fontSizeH2: 24
-    readonly property int fontSizeH3: 20
+    readonly property int fontSizeSmall: Math.round(12 * fontMultiplier)
+    readonly property int fontSizeNormal: Math.round(14 * fontMultiplier)
+    readonly property int fontSizeLarge: Math.round(16 * fontMultiplier)
+    readonly property int fontSizeXLarge: Math.round(20 * fontMultiplier)
+    readonly property int fontSizeH1: Math.round(30 * fontMultiplier)
+    readonly property int fontSizeH2: Math.round(24 * fontMultiplier)
+    readonly property int fontSizeH3: Math.round(20 * fontMultiplier)
     
     // Spacing
     readonly property int spacingTiny: 4
