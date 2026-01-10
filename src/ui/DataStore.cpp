@@ -291,5 +291,98 @@ void DataStore::deleteBlocksForPage(const QString& pageId) {
     }
 }
 
+QString DataStore::databasePath() const {
+    QString dataPath = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    return dataPath + "/zinc.db";
+}
+
+bool DataStore::resetDatabase() {
+    qDebug() << "DataStore: Resetting database...";
+    
+    if (m_db.isOpen()) {
+        m_db.close();
+    }
+    
+    m_ready = false;
+    
+    QString dbPath = databasePath();
+    
+    // Remove the database file
+    if (QFile::exists(dbPath)) {
+        if (!QFile::remove(dbPath)) {
+            qWarning() << "DataStore: Failed to remove database file";
+            emit error("Failed to remove database file");
+            return false;
+        }
+        qDebug() << "DataStore: Database file removed";
+    }
+    
+    // Also remove the journal and wal files if they exist
+    QFile::remove(dbPath + "-journal");
+    QFile::remove(dbPath + "-wal");
+    QFile::remove(dbPath + "-shm");
+    
+    // Reinitialize
+    if (!initialize()) {
+        qWarning() << "DataStore: Failed to reinitialize database after reset";
+        return false;
+    }
+    
+    qDebug() << "DataStore: Database reset complete";
+    emit pagesChanged();
+    return true;
+}
+
+bool DataStore::runMigrations() {
+    if (!m_ready) {
+        qWarning() << "DataStore: Cannot run migrations - database not ready";
+        return false;
+    }
+    
+    QSqlQuery query(m_db);
+    
+    // Check current schema version
+    query.exec("PRAGMA user_version");
+    int currentVersion = 0;
+    if (query.next()) {
+        currentVersion = query.value(0).toInt();
+    }
+    
+    qDebug() << "DataStore: Current schema version:" << currentVersion;
+    
+    // Migration 1: Initial schema (version 0 -> 1)
+    if (currentVersion < 1) {
+        qDebug() << "DataStore: Running migration to version 1";
+        
+        m_db.transaction();
+        
+        // Ensure tables exist with all columns
+        createTables();
+        
+        // Mark migration complete
+        query.exec("PRAGMA user_version = 1");
+        
+        m_db.commit();
+        currentVersion = 1;
+    }
+    
+    // Future migrations would go here:
+    // if (currentVersion < 2) { ... }
+    
+    qDebug() << "DataStore: Migrations complete. Schema version:" << currentVersion;
+    return true;
+}
+
+int DataStore::schemaVersion() const {
+    if (!m_ready) return -1;
+    
+    QSqlQuery query(m_db);
+    query.exec("PRAGMA user_version");
+    if (query.next()) {
+        return query.value(0).toInt();
+    }
+    return -1;
+}
+
 } // namespace zinc::ui
 

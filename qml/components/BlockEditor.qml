@@ -2,7 +2,6 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import zinc
-import Zinc 1.0 as ZincDb
 
 Item {
     id: root
@@ -69,7 +68,7 @@ Item {
                 })
             }
             
-            ZincDb.DataStore.saveBlocksForPage(pageId, blocks)
+            if (DataStore) DataStore.saveBlocksForPage(pageId, blocks)
         } catch (e) {
             console.log("Error saving blocks:", e)
         }
@@ -77,7 +76,7 @@ Item {
     
     function loadBlocksFromStorage(id) {
         try {
-            let blocks = ZincDb.DataStore.getBlocksForPage(id)
+            let blocks = DataStore ? DataStore.getBlocksForPage(id) : []
             if (blocks && blocks.length > 0) {
                 for (let b of blocks) {
                     blockModel.append({

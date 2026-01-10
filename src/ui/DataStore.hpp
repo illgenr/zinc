@@ -43,6 +43,12 @@ public:
     Q_INVOKABLE bool initialize();
     Q_INVOKABLE bool isReady() const { return m_ready; }
     
+    // Database management
+    Q_INVOKABLE QString databasePath() const;
+    Q_INVOKABLE bool resetDatabase();
+    Q_INVOKABLE bool runMigrations();
+    Q_INVOKABLE int schemaVersion() const;
+    
 signals:
     void pagesChanged();
     void blocksChanged(const QString& pageId);

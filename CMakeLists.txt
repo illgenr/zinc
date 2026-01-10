@@ -13,9 +13,21 @@ option(ZINC_USE_SQLCIPHER "Use SQLCipher for database encryption" OFF)
 option(ZINC_USE_SYSTEM_SODIUM "Use system libsodium" OFF)
 
 # Find Qt packages
-find_package(Qt6 REQUIRED COMPONENTS Quick Sql Network)
+find_package(Qt6 REQUIRED COMPONENTS Quick Sql Network Multimedia)
 
 qt_standard_project_setup(REQUIRES 6.8)
+
+# Remove -fno-limit-debug-info flag for Android builds (not supported by Android NDK Clang)
+# This flag is added by Qt but causes issues with Android NDK's Clang compiler
+if(ANDROID)
+    # Remove from all CXX flag variables
+    foreach(flag_var CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_DEBUG CMAKE_CXX_FLAGS_RELEASE CMAKE_CXX_FLAGS_RELWITHDEBINFO CMAKE_CXX_FLAGS_MINSIZEREL)
+        string(REPLACE "-fno-limit-debug-info" "" ${flag_var} "${${flag_var}}")
+        string(REPLACE "  " " " ${flag_var} "${${flag_var}}")  # Clean up double spaces
+        string(STRIP "${${flag_var}}" ${flag_var})
+        set(${flag_var} "${${flag_var}}" CACHE STRING "" FORCE)
+    endforeach()
+endif()
 
 # Find system dependencies (optional)
 find_package(PkgConfig QUIET)
@@ -220,6 +232,8 @@ add_library(zinc_ui STATIC
     src/ui/controllers/SyncController.cpp
     src/ui/controllers/PairingController.hpp
     src/ui/controllers/PairingController.cpp
+    src/platform/android/android_utils.hpp
+    src/platform/android/android_utils.cpp
 )
 
 target_include_directories(zinc_ui PUBLIC
@@ -236,6 +250,7 @@ target_link_libraries(zinc_ui PUBLIC
     zinc_network
     Qt6::Quick
 )
+
 
 # Main executable
 qt_add_executable(appzinc
@@ -263,6 +278,7 @@ qt_add_qml_module(appzinc
         qml/components/SlashMenu.qml
         qml/components/PageTree.qml
         qml/components/SearchDialog.qml
+        qml/components/QRCodeImage.qml
         qml/dialogs/PairingDialog.qml
         qml/dialogs/QRCodeDialog.qml
         qml/dialogs/SettingsDialog.qml
@@ -281,6 +297,8 @@ set_target_properties(appzinc PROPERTIES
     WIN32_EXECUTABLE TRUE
 )
 
+
+
 target_link_libraries(appzinc PRIVATE
     zinc_ui
     zinc_storage
@@ -288,6 +306,7 @@ target_link_libraries(appzinc PRIVATE
     zinc_crypto
     Qt6::Quick
     Qt6::Sql
+    Qt6::Multimedia
 )
 
 include(GNUInstallDirs)

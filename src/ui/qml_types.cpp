@@ -6,12 +6,16 @@
 #include "ui/controllers/EditorController.hpp"
 #include "ui/controllers/SyncController.hpp"
 #include "ui/controllers/PairingController.hpp"
+#include "platform/android/android_utils.hpp"
 
 namespace zinc::ui {
 
 void registerQmlTypes() {
-    // Data Store singleton
-    qmlRegisterSingletonType<DataStore>("Zinc", 1, 0, "DataStore", DataStore::create);
+    // Data Store singleton (registered under "zinc" module to match QML imports)
+    qmlRegisterSingletonType<DataStore>("zinc", 1, 0, "DataStore", DataStore::create);
+    
+    // Platform utilities
+    qmlRegisterSingletonType<platform::AndroidUtils>("zinc", 1, 0, "AndroidUtils", platform::AndroidUtils::create);
     
     // Models
     qmlRegisterType<BlockModel>("Zinc", 1, 0, "BlockModel");

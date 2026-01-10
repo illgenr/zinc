@@ -3,6 +3,8 @@
 *.user
 *.user.*
 
+/.qt
+
 # Build artifacts (qmake)
 *.o
 *.obj
@@ -24,6 +26,7 @@ CMakeLists.txt.user*
 /build*
 /bin*
 /lib*
+/zinc*
 
 # Executables and libraries (platform-specific)
 *.exe
