@@ -40,3 +40,6 @@ CMakeLists.txt.user*
 
 # Crash logs
 *.crash
+
+# Test artifacts
+/Testing

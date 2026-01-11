@@ -143,7 +143,11 @@ public:
 };
 
 std::unique_ptr<DiscoveryBackend> createDiscoveryBackend() {
-#ifdef ZINC_HAS_AVAHI
+#ifdef Q_OS_ANDROID
+    // Implemented in platform/android/nsd_discovery.cpp
+    extern std::unique_ptr<DiscoveryBackend> createNsdBackend();
+    return createNsdBackend();
+#elif defined(ZINC_HAS_AVAHI)
     // Will be implemented in platform/linux/avahi_discovery.cpp
     extern std::unique_ptr<DiscoveryBackend> createAvahiBackend();
     return createAvahiBackend();
@@ -153,4 +157,3 @@ std::unique_ptr<DiscoveryBackend> createDiscoveryBackend() {
 }
 
 } // namespace zinc::network
-

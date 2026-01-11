@@ -2,14 +2,63 @@ pragma Singleton
 import QtQuick
 import Qt.labs.settings
 
-QtObject {
+Item {
     id: root
     
-    // Persistent settings
-    property Settings settings: Settings {
-        category: "Appearance"
-        property alias themeMode: root.currentMode
-        property alias fontScale: root.fontSizeScale
+    // Persistent settings (disabled in headless tests)
+    readonly property bool settingsEnabled: Qt.application.name !== "zinc_qml_tests"
+    property var settings: settingsLoader.item
+
+    Loader {
+        id: settingsLoader
+        active: settingsEnabled
+        sourceComponent: Settings {
+            id: settings
+            category: "Appearance"
+            property int themeMode: ThemeManager.Mode.Dark
+            property int fontScale: ThemeManager.FontScale.Medium
+        }
+
+        onLoaded: {
+            if (item) {
+                root.currentMode = item.themeMode
+                root.fontSizeScale = item.fontScale
+            }
+        }
+    }
+
+    Connections {
+        target: settingsLoader.item
+        enabled: settingsLoader.item
+
+        function onThemeModeChanged() {
+            if (root.currentMode !== settingsLoader.item.themeMode) {
+                root.currentMode = settingsLoader.item.themeMode
+            }
+        }
+
+        function onFontScaleChanged() {
+            if (root.fontSizeScale !== settingsLoader.item.fontScale) {
+                root.fontSizeScale = settingsLoader.item.fontScale
+            }
+        }
+    }
+
+    Connections {
+        target: root
+        enabled: settingsLoader.item
+
+        function onCurrentModeChanged() {
+            if (settingsLoader.item && settingsLoader.item.themeMode !== root.currentMode) {
+                settingsLoader.item.themeMode = root.currentMode
+            }
+        }
+
+        function onFontSizeScaleChanged() {
+            if (settingsLoader.item && settingsLoader.item.fontScale !== root.fontSizeScale) {
+                settingsLoader.item.fontScale = root.fontSizeScale
+            }
+        }
     }
     
     // Theme modes
@@ -118,4 +167,3 @@ QtObject {
     readonly property int animationNormal: 200
     readonly property int animationSlow: 300
 }
-

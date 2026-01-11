@@ -3,6 +3,7 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import QtMultimedia
 import zinc
+import Zinc 1.0
 import "../components"
 
 Dialog {
@@ -18,12 +19,44 @@ Dialog {
     width: isMobile ? parent.width * 0.95 : Math.min(420, parent.width * 0.9)
     height: isMobile ? parent.height * 0.85 : Math.min(520, parent.height * 0.9)
     
+    readonly property bool qrEnabled: FeatureFlags.qrEnabled
+    property var qrCamera: null
+
     property string mode: "select"  // select, qr_show, qr_scan, code, passphrase
-    property string verificationCode: ""
-    property string qrData: ""
-    property string status: "Ready"
+    property string verificationCode: pairingController.verificationCode
+    property string qrData: pairingController.qrCodeData
+    property string statusOverride: ""
+    property string statusMessage: statusOverride !== "" ? statusOverride : pairingController.status
     property bool cameraActive: false
     property bool cameraPermissionGranted: false
+    property bool scanInProgress: false
+    property string workspaceId: ""
+    property string deviceName: "Zinc Device"
+
+    PairingController {
+        id: pairingController
+
+        onPairingComplete: function() {
+            statusOverride = ""
+            scanInProgress = false
+        }
+
+        onPairingFailed: function(reason) {
+            statusOverride = reason
+            scanInProgress = false
+            cameraActive = false
+        }
+    }
+
+    SyncController {
+        id: syncController
+
+        onError: function(message) {
+            statusOverride = message
+            scanInProgress = false
+            cameraActive = false
+        }
+    }
     
     background: Rectangle {
         color: ThemeManager.surface
@@ -54,7 +87,9 @@ Dialog {
                 onClicked: {
                     cameraActive = false
                     mode = "select"
-                    status = "Ready"
+                    statusOverride = ""
+                    scanInProgress = false
+                    pairingController.cancel()
                 }
             }
             
@@ -114,22 +149,39 @@ Dialog {
                 
                 PairingOption {
                     Layout.fillWidth: true
+                    visible: qrEnabled
                     icon: "📱"
                     label: "Show QR Code"
                     description: "Let another device scan your code"
                     onClicked: {
-                        generatePairingData()
+                        statusOverride = ""
+                        scanInProgress = false
+                        cameraActive = false
+                        var wsId = ensureWorkspaceId()
+                        if (!startSyncForWorkspace(wsId)) {
+                            statusOverride = "Failed to start sync"
+                            return
+                        }
+                        pairingController.configureLocalDevice(deviceName, wsId,
+                            syncController.listeningPort())
+                        pairingController.startPairingAsInitiator("qr")
                         mode = "qr_show"
                     }
                 }
                 
                 PairingOption {
                     Layout.fillWidth: true
+                    visible: qrEnabled
                     icon: "📷"
                     label: "Scan QR Code"
                     description: "Scan a code from another device"
                     onClicked: {
+                        statusOverride = "Scanning for QR..."
+                        scanInProgress = false
+                        workspaceId = ""
                         mode = "qr_scan"
+                        pairingController.configureLocalDevice(deviceName, "", 0)
+                        pairingController.startPairingAsResponder()
                         requestCameraPermission()
                     }
                 }
@@ -140,7 +192,10 @@ Dialog {
                     label: "Enter Code"
                     description: "Type a 6-digit pairing code"
                     onClicked: {
-                        generatePairingData()
+                        statusOverride = ""
+                        pairingController.configureLocalDevice(deviceName,
+                            ensureWorkspaceId(), 0)
+                        pairingController.startPairingAsInitiator("numeric")
                         mode = "code"
                     }
                 }
@@ -150,306 +205,27 @@ Dialog {
                     icon: "🔐"
                     label: "Use Passphrase"
                     description: "Enter a shared secret phrase"
-                    onClicked: mode = "passphrase"
-                }
-            }
-            
-            // QR Code display
-            ColumnLayout {
-                Layout.fillWidth: true
-                Layout.margins: ThemeManager.spacingMedium
-                spacing: ThemeManager.spacingMedium
-                visible: mode === "qr_show"
-                
-                Item {
-                    Layout.alignment: Qt.AlignHCenter
-                    Layout.preferredWidth: 200
-                    Layout.preferredHeight: 200
-                    
-                    Rectangle {
-                        anchors.fill: parent
-                        color: "white"
-                        radius: ThemeManager.radiusSmall
-                        
-                        QRCodeImage {
-                            anchors.fill: parent
-                            anchors.margins: 8
-                            data: qrData
-                            foregroundColor: "#000000"
-                            backgroundColor: "#ffffff"
-                        }
-                    }
-                }
-                
-                Text {
-                    Layout.alignment: Qt.AlignHCenter
-                    text: "Scan this code with another device"
-                    color: ThemeManager.textSecondary
-                    font.pixelSize: ThemeManager.fontSizeNormal
-                }
-                
-                Rectangle {
-                    Layout.alignment: Qt.AlignHCenter
-                    Layout.preferredWidth: codeText.width + ThemeManager.spacingLarge * 2
-                    Layout.preferredHeight: 48
-                    color: ThemeManager.background
-                    radius: ThemeManager.radiusSmall
-                    border.width: 1
-                    border.color: ThemeManager.border
-                    
-                    Text {
-                        id: codeText
-                        anchors.centerIn: parent
-                        text: verificationCode
-                        color: ThemeManager.text
-                        font.pixelSize: ThemeManager.fontSizeH2
-                        font.weight: Font.Bold
-                        font.family: ThemeManager.monoFontFamily
-                        font.letterSpacing: 4
-                    }
-                }
-                
-                Text {
-                    Layout.alignment: Qt.AlignHCenter
-                    text: "Or enter this code manually"
-                    color: ThemeManager.textMuted
-                    font.pixelSize: ThemeManager.fontSizeSmall
-                }
-            }
-            
-            // QR Code scanner
-            ColumnLayout {
-                Layout.fillWidth: true
-                Layout.margins: ThemeManager.spacingMedium
-                spacing: ThemeManager.spacingMedium
-                visible: mode === "qr_scan"
-                
-                Rectangle {
-                    Layout.alignment: Qt.AlignHCenter
-                    Layout.preferredWidth: Math.min(280, root.width - 60)
-                    Layout.preferredHeight: Layout.preferredWidth
-                    color: "#000000"
-                    radius: ThemeManager.radiusSmall
-                    clip: true
-                    
-                    // Camera viewfinder
-                    CaptureSession {
-                        id: captureSession
-                        camera: Camera {
-                            id: camera
-                            active: cameraActive && cameraPermissionGranted
-                            
-                            onActiveChanged: {
-                                console.log("Camera active:", active)
-                            }
-                            
-                            onErrorOccurred: function(error, errorString) {
-                                console.log("Camera error:", error, errorString)
-                                cameraPermissionGranted = false
-                            }
-                        }
-                        videoOutput: videoOutput
-                    }
-                    
-                    VideoOutput {
-                        id: videoOutput
-                        anchors.fill: parent
-                        fillMode: VideoOutput.PreserveAspectCrop
-                    }
-                    
-                    // Viewfinder overlay
-                    Item {
-                        anchors.fill: parent
-                        visible: cameraActive && cameraPermissionGranted
-                        
-                        Rectangle {
-                            anchors.centerIn: parent
-                            width: parent.width * 0.7
-                            height: width
-                            color: "transparent"
-                            border.width: 2
-                            border.color: ThemeManager.accent
-                            radius: 4
-                        }
-                        
-                        // Scanning animation
-                        Rectangle {
-                            id: scanLine
-                            width: parent.width * 0.7
-                            height: 2
-                            color: ThemeManager.accent
-                            anchors.horizontalCenter: parent.horizontalCenter
-                            
-                            SequentialAnimation on y {
-                                loops: Animation.Infinite
-                                running: cameraActive
-                                NumberAnimation {
-                                    from: parent.height * 0.15
-                                    to: parent.height * 0.85
-                                    duration: 2000
-                                    easing.type: Easing.InOutQuad
-                                }
-                                NumberAnimation {
-                                    from: parent.height * 0.85
-                                    to: parent.height * 0.15
-                                    duration: 2000
-                                    easing.type: Easing.InOutQuad
-                                }
-                            }
-                        }
-                    }
-                    
-                    // No camera permission message
-                    ColumnLayout {
-                        anchors.centerIn: parent
-                        spacing: ThemeManager.spacingMedium
-                        visible: !cameraPermissionGranted || !camera.active
-                        
-                        Text {
-                            Layout.alignment: Qt.AlignHCenter
-                            text: "📷"
-                            font.pixelSize: 48
-                        }
-                        
-                        Text {
-                            Layout.alignment: Qt.AlignHCenter
-                            text: "Camera not available"
-                            color: "white"
-                            font.pixelSize: ThemeManager.fontSizeNormal
-                            font.weight: Font.Medium
-                        }
-                        
-                        Text {
-                            Layout.alignment: Qt.AlignHCenter
-                            Layout.preferredWidth: 200
-                            text: Qt.platform.os === "android" 
-                                ? "Please grant camera permission in Settings"
-                                : "Check if camera is connected"
-                            color: "#aaaaaa"
-                            font.pixelSize: ThemeManager.fontSizeSmall
-                            wrapMode: Text.Wrap
-                            horizontalAlignment: Text.AlignHCenter
-                        }
-                        
-                        Button {
-                            Layout.alignment: Qt.AlignHCenter
-                            visible: Qt.platform.os === "android"
-                            text: "Open App Settings"
-                            
-                            background: Rectangle {
-                                implicitWidth: 180
-                                implicitHeight: 40
-                                radius: ThemeManager.radiusSmall
-                                color: parent.pressed ? ThemeManager.accentHover : ThemeManager.accent
-                            }
-                            
-                            contentItem: Text {
-                                text: parent.text
-                                color: "white"
-                                font.pixelSize: ThemeManager.fontSizeNormal
-                                horizontalAlignment: Text.AlignHCenter
-                                verticalAlignment: Text.AlignVCenter
-                            }
-                            
-                            onClicked: {
-                                // Try to open app settings using AndroidUtils
-                                if (typeof AndroidUtils !== 'undefined' && AndroidUtils && AndroidUtils.isAndroid()) {
-                                    AndroidUtils.openAppSettings()
-                                } else if (Qt.platform.os === "android") {
-                                    // Try using Qt.openUrlExternally as fallback
-                                    // This works on some Android versions
-                                    Qt.openUrlExternally("package:org.qtproject.example.appzinc")
-                                    permissionInstructions.visible = true
-                                } else {
-                                    // Fallback: show instructions
-                                    permissionInstructions.visible = true
-                                }
-                            }
-                        }
-                        
-                        // Instructions for manual navigation to settings
-                        ColumnLayout {
-                            id: permissionInstructions
-                            Layout.alignment: Qt.AlignHCenter
-                            Layout.preferredWidth: 240
-                            visible: false
-                            spacing: ThemeManager.spacingSmall
-                            
-                            Text {
-                                Layout.fillWidth: true
-                                text: "If the settings didn't open automatically:"
-                                color: ThemeManager.textSecondary
-                                font.pixelSize: ThemeManager.fontSizeSmall
-                                wrapMode: Text.Wrap
-                                horizontalAlignment: Text.AlignHCenter
-                            }
-                            
-                            Rectangle {
-                                Layout.fillWidth: true
-                                Layout.preferredHeight: instructionsText.implicitHeight + 16
-                                color: ThemeManager.surfaceAlt
-                                radius: ThemeManager.radiusSmall
-                                
-                                Text {
-                                    id: instructionsText
-                                    anchors.fill: parent
-                                    anchors.margins: 8
-                                    text: "1. Open Android Settings\n2. Go to Apps → Zinc Notes\n3. Tap Permissions\n4. Enable Camera"
-                                    color: ThemeManager.text
-                                    font.pixelSize: ThemeManager.fontSizeSmall
-                                    font.family: "monospace"
-                                    wrapMode: Text.Wrap
-                                    lineHeight: 1.4
-                                }
-                            }
-                        }
-                        
-                        Button {
-                            Layout.alignment: Qt.AlignHCenter
-                            visible: Qt.platform.os === "android"
-                            text: "I've granted permission"
-                            flat: true
-                            
-                            contentItem: Text {
-                                text: parent.text
-                                color: ThemeManager.accent
-                                font.pixelSize: ThemeManager.fontSizeSmall
-                                font.underline: true
-                            }
-                            
-                            background: Item {}
-                            
-                            onClicked: requestCameraPermission()
-                        }
-                    }
-                }
-                
-                Text {
-                    Layout.alignment: Qt.AlignHCenter
-                    text: "Position the QR code in the frame"
-                    color: ThemeManager.textSecondary
-                    font.pixelSize: ThemeManager.fontSizeNormal
-                    visible: cameraActive && cameraPermissionGranted
-                }
-                
-                Button {
-                    Layout.alignment: Qt.AlignHCenter
-                    text: "Enter code manually instead"
-                    flat: true
-                    
-                    contentItem: Text {
-                        text: parent.text
-                        color: ThemeManager.accent
-                        font.pixelSize: ThemeManager.fontSizeSmall
-                        font.underline: true
-                    }
-                    
-                    background: Item {}
-                    
                     onClicked: {
-                        cameraActive = false
-                        generatePairingData()
-                        mode = "code"
+                        statusOverride = ""
+                        pairingController.configureLocalDevice(deviceName,
+                            ensureWorkspaceId(), 0)
+                        pairingController.startPairingAsInitiator("passphrase")
+                        mode = "passphrase"
+                    }
+                }
+            }
+            
+            Loader {
+                id: qrPaneLoader
+                Layout.fillWidth: true
+                active: qrEnabled
+                source: qrEnabled ? "PairingDialogQrPane.qml" : ""
+
+                onStatusChanged: {
+                    if (status === Loader.Ready && item) {
+                        item.dialog = root
+                        item.pairingController = pairingController
+                        item.syncController = syncController
                     }
                 }
             }
@@ -545,8 +321,8 @@ Dialog {
                     }
                     
                     onClicked: {
-                        status = "Connecting..."
-                        connectTimer.start()
+                        statusOverride = ""
+                        pairingController.submitCode(codeField.text)
                     }
                 }
             }
@@ -638,8 +414,8 @@ Dialog {
                     }
                     
                     onClicked: {
-                        status = "Connecting..."
-                        connectTimer.start()
+                        statusOverride = ""
+                        pairingController.submitCode(passphraseField.text)
                     }
                 }
             }
@@ -649,58 +425,33 @@ Dialog {
                 Layout.alignment: Qt.AlignHCenter
                 Layout.margins: ThemeManager.spacingMedium
                 spacing: ThemeManager.spacingSmall
-                visible: status !== "Ready"
+                visible: statusMessage !== "Ready"
                 
                 BusyIndicator {
                     Layout.preferredWidth: 24
                     Layout.preferredHeight: 24
-                    running: status === "Connecting..." || status === "Verifying..."
+                    running: pairingController.pairing
                 }
                 
                 Text {
-                    text: status
-                    color: status === "Connected!" ? ThemeManager.success : ThemeManager.textSecondary
+                    text: statusMessage
+                    color: statusMessage === "Pairing complete!" ? ThemeManager.success : ThemeManager.textSecondary
                     font.pixelSize: ThemeManager.fontSizeNormal
                 }
             }
         }
     }
     
-    // Connection simulation timers
-    Timer {
-        id: connectTimer
-        interval: 1500
-        onTriggered: {
-            status = "Verifying..."
-            verifyTimer.start()
-        }
-    }
-    
-    Timer {
-        id: verifyTimer
-        interval: 1000
-        onTriggered: {
-            status = "Connected!"
-            successTimer.start()
-        }
-    }
-    
-    Timer {
-        id: successTimer
-        interval: 1000
-        onTriggered: root.close()
-    }
-    
     // Request camera permission (Android)
     function requestCameraPermission() {
         if (Qt.platform.os === "android" && AndroidUtils) {
             // First check if we already have permission
-            if (AndroidUtils.hasPermission("android.permission.CAMERA")) {
+            if (AndroidUtils.hasCameraPermission()) {
                 cameraPermissionGranted = true
                 cameraActive = true
             } else {
                 // Request permission - system will show dialog
-                AndroidUtils.requestPermission("android.permission.CAMERA")
+                AndroidUtils.requestCameraPermission()
             }
         } else {
             // Non-Android, just try to use camera
@@ -710,7 +461,7 @@ Dialog {
         
         // Check if camera actually works after a short delay
         Qt.callLater(function() {
-            if (camera.error !== Camera.NoError) {
+            if (qrCamera && qrCamera.error !== Camera.NoError) {
                 cameraPermissionGranted = false
             }
         })
@@ -721,47 +472,56 @@ Dialog {
         target: AndroidUtils
         enabled: Qt.platform.os === "android" && AndroidUtils !== null
         
-        function onPermissionGranted(permission) {
-            if (permission === "android.permission.CAMERA") {
-                console.log("Camera permission granted!")
-                cameraPermissionGranted = true
-                cameraActive = true
-            }
+        function onCameraPermissionGranted() {
+            console.log("Camera permission granted!")
+            cameraPermissionGranted = true
+            cameraActive = true
         }
         
-        function onPermissionDenied(permission) {
-            if (permission === "android.permission.CAMERA") {
-                console.log("Camera permission denied")
-                cameraPermissionGranted = false
-            }
+        function onCameraPermissionDenied() {
+            console.log("Camera permission denied")
+            cameraPermissionGranted = false
         }
     }
     
-    // Generate pairing data
-    function generatePairingData() {
-        verificationCode = String(Math.floor(100000 + Math.random() * 900000))
-        
-        var pairingInfo = {
-            "v": 1,
-            "code": verificationCode,
-            "name": "Zinc Device",
-            "ts": Date.now()
-        }
-        qrData = JSON.stringify(pairingInfo)
-        console.log("Generated QR data:", qrData)
+    function normalizeUuid(uuidString) {
+        return uuidString.replace(/[{}]/g, "")
     }
-    
+
+    function ensureWorkspaceId() {
+        if (workspaceId === "") {
+            workspaceId = normalizeUuid(Qt.createUuid().toString())
+        }
+        return workspaceId
+    }
+
+    function startSyncForWorkspace(wsId) {
+        if (!syncController.configured || syncController.workspaceId !== wsId) {
+            if (syncController.syncing) {
+                syncController.stopSync()
+            }
+            if (!syncController.configure(wsId, deviceName)) {
+                return false
+            }
+        }
+        return syncController.startSync()
+    }
+
     onOpened: {
         mode = "select"
-        status = "Ready"
+        statusOverride = ""
         codeField.text = ""
         passphraseField.text = ""
         cameraActive = false
-        generatePairingData()
+        scanInProgress = false
+        pairingController.cancel()
     }
     
     onClosed: {
         cameraActive = false
+        scanInProgress = false
+        statusOverride = ""
+        pairingController.cancel()
     }
     
     // Pairing option button component

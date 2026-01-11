@@ -44,6 +44,12 @@ public:
      * Note: For Qt 6.5+, this triggers the system permission dialog.
      */
     Q_INVOKABLE void requestPermission(const QPermission& permission);
+
+    /**
+     * Camera permission helpers for QML.
+     */
+    Q_INVOKABLE bool hasCameraPermission();
+    Q_INVOKABLE void requestCameraPermission();
     
     /**
      * Check if we're running on Android.
@@ -53,7 +59,8 @@ public:
 signals:
     void permissionGranted(const QPermission& permission);
     void permissionDenied(const QPermission& permission);
+    void cameraPermissionGranted();
+    void cameraPermissionDenied();
 };
 
 } // namespace zinc::platform
-

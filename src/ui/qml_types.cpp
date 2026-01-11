@@ -1,11 +1,15 @@
 #include "ui/qml_types.hpp"
 #include "ui/DataStore.hpp"
+#include "ui/FeatureFlags.hpp"
 #include "ui/models/BlockModel.hpp"
 #include "ui/models/PageTreeModel.hpp"
 #include "ui/models/SearchResultModel.hpp"
 #include "ui/controllers/EditorController.hpp"
 #include "ui/controllers/SyncController.hpp"
 #include "ui/controllers/PairingController.hpp"
+#if ZINC_ENABLE_QR
+#include "ui/QrScanner.hpp"
+#endif
 #include "platform/android/android_utils.hpp"
 
 namespace zinc::ui {
@@ -16,6 +20,9 @@ void registerQmlTypes() {
     
     // Platform utilities
     qmlRegisterSingletonType<platform::AndroidUtils>("zinc", 1, 0, "AndroidUtils", platform::AndroidUtils::create);
+
+    // Feature flags
+    qmlRegisterSingletonType<FeatureFlags>("Zinc", 1, 0, "FeatureFlags", FeatureFlags::create);
     
     // Models
     qmlRegisterType<BlockModel>("Zinc", 1, 0, "BlockModel");
@@ -26,7 +33,9 @@ void registerQmlTypes() {
     qmlRegisterType<EditorController>("Zinc", 1, 0, "EditorController");
     qmlRegisterType<SyncController>("Zinc", 1, 0, "SyncController");
     qmlRegisterType<PairingController>("Zinc", 1, 0, "PairingController");
+#if ZINC_ENABLE_QR
+    qmlRegisterType<QrScanner>("Zinc", 1, 0, "QrScanner");
+#endif
 }
 
 } // namespace zinc::ui
-

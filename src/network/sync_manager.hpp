@@ -73,6 +73,13 @@ public:
      * Connect to a specific peer.
      */
     Q_INVOKABLE void connectToPeer(const Uuid& device_id);
+
+    /**
+     * Connect to a peer directly using endpoint info (e.g., from QR).
+     */
+    void connectToEndpoint(const Uuid& device_id,
+                           const QHostAddress& host,
+                           uint16_t port);
     
     /**
      * Disconnect from a peer.
@@ -92,6 +99,7 @@ public:
     
     [[nodiscard]] bool isSyncing() const { return syncing_; }
     [[nodiscard]] int connectedPeerCount() const;
+    [[nodiscard]] uint16_t listeningPort() const;
     [[nodiscard]] DiscoveryService* discovery() { return discovery_.get(); }
 
 signals:
@@ -131,4 +139,3 @@ private:
 };
 
 } // namespace zinc::network
-

@@ -9,8 +9,15 @@ set(CMAKE_AUTOMOC ON)
 
 # Options
 option(ZINC_BUILD_TESTS "Build unit tests" OFF)
+option(ZINC_ENABLE_QR "Enable QR-based pairing flow" OFF)
 option(ZINC_USE_SQLCIPHER "Use SQLCipher for database encryption" OFF)
 option(ZINC_USE_SYSTEM_SODIUM "Use system libsodium" OFF)
+
+if(ZINC_ENABLE_QR)
+    add_compile_definitions(ZINC_ENABLE_QR=1)
+else()
+    add_compile_definitions(ZINC_ENABLE_QR=0)
+endif()
 
 # Find Qt packages
 find_package(Qt6 REQUIRED COMPONENTS Quick Sql Network Multimedia)
@@ -204,6 +211,12 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT ANDROID AND AVAHI_FOUND)
     target_link_libraries(zinc_network PRIVATE ${AVAHI_LIBRARIES})
 endif()
 
+if(ANDROID)
+    target_sources(zinc_network PRIVATE
+        src/platform/android/nsd_discovery.cpp
+    )
+endif()
+
 target_include_directories(zinc_network PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
@@ -218,6 +231,8 @@ target_link_libraries(zinc_network PUBLIC
 add_library(zinc_ui STATIC
     src/ui/qml_types.hpp
     src/ui/qml_types.cpp
+    src/ui/FeatureFlags.hpp
+    src/ui/FeatureFlags.cpp
     src/ui/DataStore.hpp
     src/ui/DataStore.cpp
     src/ui/models/BlockModel.hpp
@@ -236,6 +251,34 @@ add_library(zinc_ui STATIC
     src/platform/android/android_utils.cpp
 )
 
+if(ZINC_ENABLE_QR)
+    target_sources(zinc_ui PRIVATE
+        src/ui/QrScanner.hpp
+        src/ui/QrScanner.cpp
+    )
+endif()
+
+if(ZINC_ENABLE_QR)
+    set(ZXING_CPP_DIR "")
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/third_party/zxing-cpp/CMakeLists.txt)
+        set(ZXING_CPP_DIR third_party/zxing-cpp)
+    elseif(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/third_party/zxing/CMakeLists.txt)
+        set(ZXING_CPP_DIR third_party/zxing)
+    endif()
+
+    if(ZXING_CPP_DIR)
+        add_subdirectory(${ZXING_CPP_DIR} EXCLUDE_FROM_ALL)
+        target_link_libraries(zinc_ui PRIVATE ZXing::ZXing)
+        target_compile_definitions(zinc_ui PRIVATE ZINC_HAS_ZXING)
+    elseif(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/third_party/zxing-cpp)
+        message(WARNING "ZXing C++ submodule not initialized (missing third_party/zxing-cpp/CMakeLists.txt); QR scanning disabled.")
+    elseif(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/third_party/zxing)
+        message(WARNING "Found third_party/zxing, but QR scanning needs zxing-cpp; QR scanning disabled.")
+    else()
+        message(WARNING "QR pairing enabled but no ZXing source found; QR scanning disabled.")
+    endif()
+endif()
+
 target_include_directories(zinc_ui PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
@@ -249,6 +292,7 @@ target_link_libraries(zinc_ui PUBLIC
     zinc_storage
     zinc_network
     Qt6::Quick
+    Qt6::Multimedia
 )
 
 
@@ -257,6 +301,38 @@ qt_add_executable(appzinc
     src/main.cpp
 )
 
+set(ZINC_QML_FILES
+    qml/Main.qml
+    qml/components/BlockEditor.qml
+    qml/components/Block.qml
+    qml/components/blocks/ParagraphBlock.qml
+    qml/components/blocks/HeadingBlock.qml
+    qml/components/blocks/TodoBlock.qml
+    qml/components/blocks/CodeBlock.qml
+    qml/components/blocks/QuoteBlock.qml
+    qml/components/blocks/DividerBlock.qml
+    qml/components/blocks/ToggleBlock.qml
+    qml/components/blocks/LinkBlock.qml
+    qml/components/SlashMenu.qml
+    qml/components/PageTree.qml
+    qml/components/SearchDialog.qml
+    qml/dialogs/PairingDialog.qml
+    qml/dialogs/SettingsDialog.qml
+    qml/dialogs/PagePickerDialog.qml
+    qml/theme/Theme.qml
+    qml/theme/ThemeManager.qml
+)
+
+set(ZINC_QML_QR_FILES
+    qml/components/QRCodeImage.qml
+    qml/dialogs/PairingDialogQrPane.qml
+    qml/dialogs/QRCodeDialog.qml
+)
+
+if(ZINC_ENABLE_QR)
+    list(APPEND ZINC_QML_FILES ${ZINC_QML_QR_FILES})
+endif()
+
 # Mark ThemeManager as a singleton BEFORE qt_add_qml_module
 set_source_files_properties(qml/theme/ThemeManager.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
 
@@ -264,27 +340,7 @@ qt_add_qml_module(appzinc
     URI zinc
     VERSION 1.0
     QML_FILES
-        qml/Main.qml
-        qml/components/BlockEditor.qml
-        qml/components/Block.qml
-        qml/components/blocks/ParagraphBlock.qml
-        qml/components/blocks/HeadingBlock.qml
-        qml/components/blocks/TodoBlock.qml
-        qml/components/blocks/CodeBlock.qml
-        qml/components/blocks/QuoteBlock.qml
-        qml/components/blocks/DividerBlock.qml
-        qml/components/blocks/ToggleBlock.qml
-        qml/components/blocks/LinkBlock.qml
-        qml/components/SlashMenu.qml
-        qml/components/PageTree.qml
-        qml/components/SearchDialog.qml
-        qml/components/QRCodeImage.qml
-        qml/dialogs/PairingDialog.qml
-        qml/dialogs/QRCodeDialog.qml
-        qml/dialogs/SettingsDialog.qml
-        qml/dialogs/PagePickerDialog.qml
-        qml/theme/Theme.qml
-        qml/theme/ThemeManager.qml
+        ${ZINC_QML_FILES}
     SOURCES
         src/ui/qml_types.hpp
         src/ui/qml_types.cpp
@@ -393,10 +449,40 @@ if(ZINC_BUILD_TESTS)
     target_include_directories(zinc_integration_tests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
     )
+
+    add_executable(zinc_qml_tests
+        tests/qml/test_main.cpp
+        tests/qml/test_feature_flags.cpp
+        tests/qml/test_pairing_dialog_qml.cpp
+    )
+
+    qt_add_qml_module(zinc_qml_tests
+        URI zinc
+        VERSION 1.0
+        OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/zinc_qml_tests_qml
+        QML_FILES
+            ${ZINC_QML_FILES}
+    )
+
+    target_link_libraries(zinc_qml_tests PRIVATE
+        zinc_ui
+        Qt6::Gui
+        Qt6::Qml
+        Qt6::Quick
+        Catch2::Catch2
+    )
+
+    target_include_directories(zinc_qml_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+    )
     
     include(CTest)
     include(Catch)
     catch_discover_tests(zinc_tests)
     catch_discover_tests(zinc_property_tests)
     catch_discover_tests(zinc_integration_tests)
+    add_test(NAME zinc_qml_tests
+        COMMAND ${CMAKE_COMMAND} -E env QT_QPA_PLATFORM=offscreen $<TARGET_FILE:zinc_qml_tests>
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    )
 endif()

@@ -24,6 +24,7 @@ enum class PairingMethod {
  */
 struct PairingInfo {
     Uuid device_id;
+    Uuid workspace_id;
     QString device_name;
     crypto::PublicKey public_key;
     QHostAddress address;
@@ -80,6 +81,16 @@ public:
      * Submit verification code (for numeric code or passphrase methods).
      */
     Q_INVOKABLE void submitCode(const QString& code);
+
+    /**
+     * Submit QR code payload (for QR scan).
+     */
+    Q_INVOKABLE void submitQrCodeData(const QString& qrData);
+
+    /**
+     * Set the local listen port for QR payload generation.
+     */
+    void setListenPort(uint16_t port);
     
     /**
      * Cancel the pairing session.
@@ -129,6 +140,7 @@ private:
     QString qr_code_data_;
     
     PairingInfo paired_device_;
+    uint16_t listen_port_ = 0;
     
     // Ephemeral keys for this pairing session
     crypto::KeyPair ephemeral_keys_;
@@ -159,4 +171,3 @@ Result<PairingInfo, Error> parseQRCodeJson(const QString& json);
 } // namespace zinc::network
 
 Q_DECLARE_METATYPE(zinc::network::PairingSession::PairingState)
-

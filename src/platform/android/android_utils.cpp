@@ -1,4 +1,10 @@
 #include "platform/android/android_utils.hpp"
+#if __has_include(<QCameraPermission>)
+#include <QCameraPermission>
+#define ZINC_HAS_QCAMERAPERMISSION 1
+#else
+#define ZINC_HAS_QCAMERAPERMISSION 0
+#endif
 #include <QDebug>
 #include <QDesktopServices>
 #include <QUrl>
@@ -107,6 +113,46 @@ void AndroidUtils::requestPermission(const QPermission& permission) {
 #else
     Q_UNUSED(permission)
     emit permissionGranted(permission);
+#endif
+}
+
+bool AndroidUtils::hasCameraPermission() {
+#ifdef Q_OS_ANDROID
+#if ZINC_HAS_QCAMERAPERMISSION
+    QCameraPermission permission;
+    return hasPermission(permission);
+#else
+    return true;
+#endif
+#else
+    return true;
+#endif
+}
+
+void AndroidUtils::requestCameraPermission() {
+#ifdef Q_OS_ANDROID
+#if ZINC_HAS_QCAMERAPERMISSION
+    auto* app = qApp;
+    if (!app) {
+        qWarning() << "AndroidUtils: No application instance available";
+        emit cameraPermissionDenied();
+        return;
+    }
+    QCameraPermission permission;
+    app->requestPermission(permission, [this](const QPermission& p) {
+        if (p.status() == Qt::PermissionStatus::Granted) {
+            qDebug() << "Camera permission granted";
+            emit cameraPermissionGranted();
+        } else {
+            qDebug() << "Camera permission denied";
+            emit cameraPermissionDenied();
+        }
+    });
+#else
+    emit cameraPermissionGranted();
+#endif
+#else
+    emit cameraPermissionGranted();
 #endif
 }
 

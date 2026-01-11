@@ -118,6 +118,35 @@ void SyncManager::connectToPeer(const Uuid& device_id) {
     peers_[device_id] = std::move(peer);
 }
 
+void SyncManager::connectToEndpoint(const Uuid& device_id,
+                                    const QHostAddress& host,
+                                    uint16_t port) {
+    if (device_id.is_nil()) {
+        emit error("Invalid peer device ID");
+        return;
+    }
+    if (device_id == device_id_) {
+        return;
+    }
+    
+    // Check if already connected
+    auto it = peers_.find(device_id);
+    if (it != peers_.end() && it->second->connection &&
+        it->second->connection->isConnected()) {
+        return;
+    }
+    
+    auto peer = std::make_unique<PeerConnection>();
+    peer->device_id = device_id;
+    peer->connection = std::make_unique<Connection>(this);
+    peer->sync_state = SyncState::Connecting;
+    
+    setupConnection(*peer);
+    peer->connection->connectToPeer(host, port, identity_);
+    
+    peers_[device_id] = std::move(peer);
+}
+
 void SyncManager::disconnectFromPeer(const Uuid& device_id) {
     auto it = peers_.find(device_id);
     if (it != peers_.end()) {
@@ -169,6 +198,10 @@ int SyncManager::connectedPeerCount() const {
         }
     }
     return count;
+}
+
+uint16_t SyncManager::listeningPort() const {
+    return server_ ? server_->port() : 0;
 }
 
 void SyncManager::setupConnection(PeerConnection& peer) {
@@ -304,4 +337,3 @@ void SyncManager::handleChangeNotify(const Uuid& peer_id,
 }
 
 } // namespace zinc::network
-

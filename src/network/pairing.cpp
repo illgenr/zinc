@@ -18,6 +18,13 @@ void PairingSession::startAsInitiator(const crypto::KeyPair& identity,
                                       const Uuid& workspace_id,
                                       const QString& device_name,
                                       PairingMethod method) {
+#if !ZINC_ENABLE_QR
+    if (method == PairingMethod::QRCode) {
+        setState(PairingState::Failed);
+        emit pairingFailed("QR pairing disabled in this build");
+        return;
+    }
+#endif
     identity_ = identity;
     workspace_id_ = workspace_id;
     device_name_ = device_name;
@@ -48,6 +55,10 @@ void PairingSession::startAsResponder(const crypto::KeyPair& identity,
     setState(PairingState::WaitingForPeer);
 }
 
+void PairingSession::setListenPort(uint16_t port) {
+    listen_port_ = port;
+}
+
 void PairingSession::submitCode(const QString& code) {
     if (state_ != PairingState::WaitingForPeer) {
         return;
@@ -63,6 +74,37 @@ void PairingSession::submitCode(const QString& code) {
     // 4. Exchange workspace keys
     
     // For now, simulate success
+    setState(PairingState::Complete);
+    emit pairingComplete(paired_device_);
+}
+
+void PairingSession::submitQrCodeData(const QString& qrData) {
+#if !ZINC_ENABLE_QR
+    Q_UNUSED(qrData)
+    setState(PairingState::Failed);
+    emit pairingFailed("QR pairing disabled in this build");
+    return;
+#endif
+    if (state_ != PairingState::WaitingForPeer) {
+        return;
+    }
+    
+    auto parsed = parseQRCodeJson(qrData);
+    if (parsed.is_err()) {
+        setState(PairingState::Failed);
+        emit pairingFailed(QString::fromStdString(parsed.unwrap_err().message));
+        return;
+    }
+    
+    paired_device_ = parsed.unwrap();
+    verification_code_ = paired_device_.verification_code;
+    workspace_id_ = paired_device_.workspace_id;
+    method_ = PairingMethod::QRCode;
+    emit verificationCodeChanged();
+    
+    setState(PairingState::Verifying);
+    
+    // Simulate success for now.
     setState(PairingState::Complete);
     emit pairingComplete(paired_device_);
 }
@@ -88,6 +130,11 @@ void PairingSession::generateVerificationCode() {
 }
 
 void PairingSession::generateQRCodeData() {
+#if !ZINC_ENABLE_QR
+    qr_code_data_.clear();
+    emit qrCodeDataChanged();
+    return;
+#endif
     // Get local IP address
     QHostAddress local_address;
     for (const auto& address : QNetworkInterface::allAddresses()) {
@@ -100,10 +147,11 @@ void PairingSession::generateQRCodeData() {
     
     PairingInfo info{
         .device_id = Uuid::generate(),  // Would use actual device ID
+        .workspace_id = workspace_id_,
         .device_name = device_name_,
         .public_key = ephemeral_keys_.public_key,
         .address = local_address,
-        .port = 0,  // Would use actual port
+        .port = listen_port_,
         .verification_code = verification_code_,
         .method = method_
     };
@@ -113,9 +161,14 @@ void PairingSession::generateQRCodeData() {
 }
 
 QString generateQRCodeJson(const PairingInfo& info) {
+#if !ZINC_ENABLE_QR
+    Q_UNUSED(info)
+    return {};
+#endif
     QJsonObject obj;
     obj["v"] = 1;
     obj["id"] = QString::fromStdString(info.device_id.to_string());
+    obj["ws"] = QString::fromStdString(info.workspace_id.to_string());
     obj["name"] = info.device_name;
     obj["pk"] = QString::fromStdString(crypto::to_base64(
         std::vector<uint8_t>(info.public_key.begin(), info.public_key.end())));
@@ -127,6 +180,10 @@ QString generateQRCodeJson(const PairingInfo& info) {
 }
 
 Result<PairingInfo, Error> parseQRCodeJson(const QString& json) {
+#if !ZINC_ENABLE_QR
+    Q_UNUSED(json)
+    return Result<PairingInfo, Error>::err(Error{"QR pairing disabled in this build"});
+#endif
     QJsonParseError error;
     auto doc = QJsonDocument::fromJson(json.toUtf8(), &error);
     
@@ -149,6 +206,15 @@ Result<PairingInfo, Error> parseQRCodeJson(const QString& json) {
     }
     info.device_id = *id;
     
+    auto ws = obj["ws"].toString();
+    if (!ws.isEmpty()) {
+        auto ws_id = Uuid::parse(ws.toStdString());
+        if (!ws_id) {
+            return Result<PairingInfo, Error>::err(Error{"Invalid workspace ID"});
+        }
+        info.workspace_id = *ws_id;
+    }
+    
     info.device_name = obj["name"].toString();
     
     auto pk_result = crypto::from_base64(obj["pk"].toString().toStdString());
@@ -161,9 +227,9 @@ Result<PairingInfo, Error> parseQRCodeJson(const QString& json) {
     info.address = QHostAddress(obj["addr"].toString());
     info.port = static_cast<uint16_t>(obj["port"].toInt());
     info.verification_code = obj["code"].toString();
+    info.method = PairingMethod::QRCode;
     
     return Result<PairingInfo, Error>::ok(info);
 }
 
 } // namespace zinc::network
-
