@@ -4,6 +4,27 @@
 #include <QNetworkInterface>
 
 namespace zinc::network {
+namespace {
+
+Uuid deriveWorkspaceIdFromSecret(const QString& secret) {
+    const auto bytes = secret.toUtf8();
+    const auto hashed = crypto::hash(
+        std::vector<uint8_t>(bytes.begin(), bytes.end()),
+        static_cast<size_t>(Uuid::BYTE_SIZE));
+
+    Uuid::Bytes uuid_bytes{};
+    for (size_t i = 0; i < uuid_bytes.size() && i < hashed.size(); ++i) {
+        uuid_bytes[i] = hashed[i];
+    }
+
+    // Mark as RFC 4122 variant and "v5-like" version.
+    uuid_bytes[6] = (uuid_bytes[6] & 0x0F) | 0x50;
+    uuid_bytes[8] = (uuid_bytes[8] & 0x3F) | 0x80;
+
+    return Uuid(uuid_bytes);
+}
+
+} // namespace
 
 PairingSession::PairingSession(QObject* parent)
     : QObject(parent)
@@ -35,6 +56,15 @@ void PairingSession::startAsInitiator(const crypto::KeyPair& identity,
     
     // Generate verification code
     generateVerificationCode();
+
+    // For code/passphrase pairing, derive a deterministic workspace id from the secret.
+    // This lets mobile/desktop clients join the same workspace without needing a
+    // separate pairing transport.
+    if (method_ == PairingMethod::NumericCode) {
+        workspace_id_ = deriveWorkspaceIdFromSecret(QStringLiteral("code:") + verification_code_);
+    } else {
+        workspace_id_ = workspace_id;
+    }
     
     // Generate QR code data if applicable
     if (method == PairingMethod::QRCode) {
@@ -48,6 +78,7 @@ void PairingSession::startAsResponder(const crypto::KeyPair& identity,
                                       const QString& device_name) {
     identity_ = identity;
     device_name_ = device_name;
+    method_ = PairingMethod::NumericCode;
     
     // Generate ephemeral keys
     ephemeral_keys_ = crypto::generate_keypair();
@@ -63,17 +94,21 @@ void PairingSession::submitCode(const QString& code) {
     if (state_ != PairingState::WaitingForPeer) {
         return;
     }
-    
+
     verification_code_ = code;
+    emit verificationCodeChanged();
     setState(PairingState::Verifying);
-    
-    // In a real implementation, this would:
-    // 1. Connect to the initiator using info from QR/code
-    // 2. Perform Noise handshake
-    // 3. Verify codes match
-    // 4. Exchange workspace keys
-    
-    // For now, simulate success
+
+    if (method_ == PairingMethod::NumericCode) {
+        workspace_id_ = deriveWorkspaceIdFromSecret(QStringLiteral("code:") + verification_code_);
+    } else if (method_ == PairingMethod::Passphrase) {
+        workspace_id_ = deriveWorkspaceIdFromSecret(QStringLiteral("pass:") + verification_code_);
+    }
+
+    paired_device_.workspace_id = workspace_id_;
+    paired_device_.verification_code = verification_code_;
+    paired_device_.method = method_;
+
     setState(PairingState::Complete);
     emit pairingComplete(paired_device_);
 }

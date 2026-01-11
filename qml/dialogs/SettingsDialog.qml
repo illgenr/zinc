@@ -7,6 +7,26 @@ Dialog {
     id: root
     
     signal pairDeviceRequested()
+
+    ListModel {
+        id: pairedDevicesModel
+    }
+
+    function refreshPairedDevices() {
+        pairedDevicesModel.clear()
+        var devices = DataStore.getPairedDevices()
+        for (var i = 0; i < devices.length; i++) {
+            pairedDevicesModel.append(devices[i])
+        }
+    }
+
+    Connections {
+        target: DataStore
+
+        function onPairedDevicesChanged() {
+            refreshPairedDevices()
+        }
+    }
     
     title: "Settings"
     anchors.centerIn: parent
@@ -475,6 +495,9 @@ Dialog {
     component DevicesSettings: SettingsPage {
         signal pairDevice()
         
+        Component.onCompleted: root.refreshPairedDevices()
+        onVisibleChanged: if (visible) root.refreshPairedDevices()
+        
         SettingsSection {
             title: "Paired Devices"
             
@@ -482,6 +505,104 @@ Dialog {
                 text: "No devices paired"
                 color: ThemeManager.textSecondary
                 font.pixelSize: ThemeManager.fontSizeNormal
+                visible: pairedDevicesModel.count === 0
+            }
+
+            Repeater {
+                model: pairedDevicesModel
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: implicitHeight
+                    implicitHeight: deviceRow.implicitHeight + ThemeManager.spacingSmall * 2
+                    radius: ThemeManager.radiusSmall
+                    color: ThemeManager.surfaceHover
+                    border.width: 1
+                    border.color: ThemeManager.border
+
+                    RowLayout {
+                        id: deviceRow
+                        anchors.fill: parent
+                        anchors.margins: ThemeManager.spacingSmall
+                        spacing: ThemeManager.spacingSmall
+
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            Layout.minimumWidth: 0
+                            spacing: 2
+                            clip: true
+
+                            Text {
+                                text: deviceName
+                                color: ThemeManager.text
+                                font.pixelSize: ThemeManager.fontSizeNormal
+                                font.weight: Font.Medium
+                                elide: Text.ElideRight
+                                wrapMode: Text.NoWrap
+                                maximumLineCount: 1
+                                Layout.fillWidth: true
+                            }
+
+                            Text {
+                                text: workspaceId
+                                color: ThemeManager.textMuted
+                                font.pixelSize: ThemeManager.fontSizeSmall
+                                elide: Text.ElideRight
+                                wrapMode: Text.NoWrap
+                                maximumLineCount: 1
+                                Layout.fillWidth: true
+                            }
+                        }
+
+                        Button {
+                            text: "Remove"
+                            Layout.preferredHeight: 28
+                            Layout.preferredWidth: 80
+                            Layout.minimumWidth: 80
+
+                            background: Rectangle {
+                                radius: ThemeManager.radiusSmall
+                                color: parent.pressed ? ThemeManager.surfaceActive : ThemeManager.surface
+                                border.width: 1
+                                border.color: ThemeManager.border
+                            }
+
+                            contentItem: Text {
+                                text: parent.text
+                                color: ThemeManager.text
+                                font.pixelSize: ThemeManager.fontSizeSmall
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                            }
+
+                            onClicked: DataStore.removePairedDevice(deviceId)
+                        }
+                    }
+                }
+            }
+
+            Button {
+                Layout.fillWidth: true
+                text: "Remove All Devices"
+                visible: pairedDevicesModel.count > 0
+
+                background: Rectangle {
+                    implicitHeight: 44
+                    radius: ThemeManager.radiusSmall
+                    color: parent.pressed ? ThemeManager.surfaceActive : ThemeManager.surface
+                    border.width: 1
+                    border.color: ThemeManager.border
+                }
+
+                contentItem: Text {
+                    text: parent.text
+                    color: ThemeManager.text
+                    font.pixelSize: ThemeManager.fontSizeNormal
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
+
+                onClicked: DataStore.clearPairedDevices()
             }
             
             Button {

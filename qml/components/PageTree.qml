@@ -23,6 +23,15 @@ Item {
         }
         pagesChanged()
     }
+
+    Connections {
+        target: DataStore
+
+        function onPagesChanged() {
+            loadPagesFromStorage()
+            pagesChanged()
+        }
+    }
     
     // UUID generator
     function generateUuid() {
@@ -438,5 +447,4 @@ Item {
         }
     }
 }
-
 

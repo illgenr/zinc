@@ -41,7 +41,12 @@ Result<void, Error> Statement::bind_double(int index, double value) {
 }
 
 Result<void, Error> Statement::bind_blob(int index, const void* data, size_t size) {
-    int rc = sqlite3_bind_blob(stmt_.get(), index, data, 
+    if (size > 0 && !data) {
+        return Result<void, Error>::err(Error{"Failed to bind blob (null data)", SQLITE_MISUSE});
+    }
+    const char* empty = "";
+    const void* safe_data = (size == 0) ? static_cast<const void*>(empty) : data;
+    int rc = sqlite3_bind_blob(stmt_.get(), index, safe_data,
                                static_cast<int>(size), SQLITE_TRANSIENT);
     if (rc != SQLITE_OK) {
         return Result<void, Error>::err(Error{"Failed to bind blob", rc});
@@ -269,4 +274,3 @@ void TransactionGuard::rollback() {
 }
 
 } // namespace zinc::storage
-

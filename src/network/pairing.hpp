@@ -117,6 +117,11 @@ public:
      */
     [[nodiscard]] const PairingInfo& pairedDevice() const { return paired_device_; }
 
+    /**
+     * Get the workspace id for this session.
+     */
+    [[nodiscard]] const Uuid& workspaceId() const { return workspace_id_; }
+
 signals:
     void stateChanged(PairingState state);
     void verificationCodeChanged();

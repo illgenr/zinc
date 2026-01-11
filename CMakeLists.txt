@@ -195,6 +195,8 @@ target_link_libraries(zinc_crypto PUBLIC
 add_library(zinc_network STATIC
     src/network/discovery.hpp
     src/network/discovery.cpp
+    src/network/udp_discovery_backend.hpp
+    src/network/udp_discovery_backend.cpp
     src/network/transport.hpp
     src/network/transport.cpp
     src/network/sync_manager.hpp
@@ -211,11 +213,8 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT ANDROID AND AVAHI_FOUND)
     target_link_libraries(zinc_network PRIVATE ${AVAHI_LIBRARIES})
 endif()
 
-if(ANDROID)
-    target_sources(zinc_network PRIVATE
-        src/platform/android/nsd_discovery.cpp
-    )
-endif()
+# Android: use UDP discovery backend by default (no Qt private headers / JNI glue).
+# If NSD support is reintroduced, add it behind an explicit option.
 
 target_include_directories(zinc_network PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -453,6 +452,7 @@ if(ZINC_BUILD_TESTS)
     add_executable(zinc_qml_tests
         tests/qml/test_main.cpp
         tests/qml/test_feature_flags.cpp
+        tests/qml/test_datastore_sync.cpp
         tests/qml/test_pairing_dialog_qml.cpp
     )
 
@@ -482,7 +482,7 @@ if(ZINC_BUILD_TESTS)
     catch_discover_tests(zinc_property_tests)
     catch_discover_tests(zinc_integration_tests)
     add_test(NAME zinc_qml_tests
-        COMMAND ${CMAKE_COMMAND} -E env QT_QPA_PLATFORM=offscreen $<TARGET_FILE:zinc_qml_tests>
+        COMMAND ${CMAKE_COMMAND} -E env QT_QPA_PLATFORM=offscreen ZINC_DB_PATH=${CMAKE_CURRENT_BINARY_DIR}/zinc_qml_tests.db $<TARGET_FILE:zinc_qml_tests>
         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     )
 endif()

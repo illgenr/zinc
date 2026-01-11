@@ -29,15 +29,27 @@ public:
     
     // Page operations
     Q_INVOKABLE QVariantList getAllPages();
+    Q_INVOKABLE QVariantList getPagesForSync();
     Q_INVOKABLE QVariantMap getPage(const QString& pageId);
     Q_INVOKABLE void savePage(const QVariantMap& page);
     Q_INVOKABLE void deletePage(const QString& pageId);
     Q_INVOKABLE void saveAllPages(const QVariantList& pages);
+    Q_INVOKABLE void applyPageUpdates(const QVariantList& pages);
     
     // Block operations  
     Q_INVOKABLE QVariantList getBlocksForPage(const QString& pageId);
+    Q_INVOKABLE QVariantList getBlocksForSync();
     Q_INVOKABLE void saveBlocksForPage(const QString& pageId, const QVariantList& blocks);
     Q_INVOKABLE void deleteBlocksForPage(const QString& pageId);
+    Q_INVOKABLE void applyBlockUpdates(const QVariantList& blocks);
+
+    // Paired device operations
+    Q_INVOKABLE QVariantList getPairedDevices();
+    Q_INVOKABLE void savePairedDevice(const QString& deviceId,
+                                      const QString& deviceName,
+                                      const QString& workspaceId);
+    Q_INVOKABLE void removePairedDevice(const QString& deviceId);
+    Q_INVOKABLE void clearPairedDevices();
     
     // Initialize database
     Q_INVOKABLE bool initialize();
@@ -52,6 +64,7 @@ public:
 signals:
     void pagesChanged();
     void blocksChanged(const QString& pageId);
+    void pairedDevicesChanged();
     void error(const QString& message);
 
 private:
@@ -63,4 +76,3 @@ private:
 };
 
 } // namespace zinc::ui
-

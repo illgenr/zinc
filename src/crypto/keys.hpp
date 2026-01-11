@@ -86,8 +86,10 @@ namespace detail {
 #ifdef ZINC_HAS_SODIUM
     crypto_box_keypair(kp.public_key.data(), kp.secret_key.data());
 #else
-    detail::fill_random(kp.public_key.data(), PUBLIC_KEY_SIZE);
     detail::fill_random(kp.secret_key.data(), SECRET_KEY_SIZE);
+    // Test-only fallback: keep public/secret related so our simplified DH stays commutative.
+    // This makes secret_a ^ public_b == secret_b ^ public_a.
+    kp.public_key = kp.secret_key;
 #endif
     return kp;
 }
@@ -101,10 +103,8 @@ namespace detail {
     crypto_box_seed_keypair(kp.public_key.data(), kp.secret_key.data(), seed.data());
 #else
     // Simple deterministic derivation (NOT secure, just for testing)
-    std::memcpy(kp.public_key.data(), seed.data(), PUBLIC_KEY_SIZE);
-    for (size_t i = 0; i < SECRET_KEY_SIZE; ++i) {
-        kp.secret_key[i] = seed[i] ^ 0xFF;
-    }
+    std::memcpy(kp.secret_key.data(), seed.data(), SECRET_KEY_SIZE);
+    kp.public_key = kp.secret_key;
 #endif
     return kp;
 }

@@ -35,7 +35,10 @@ enum class MessageType : uint8_t {
     // Control
     Ping = 0x30,
     Pong = 0x31,
-    Disconnect = 0x3F
+    Disconnect = 0x3F,
+
+    // Pages sync
+    PagesSnapshot = 0x40
 };
 
 /**
@@ -129,11 +132,12 @@ private:
     State state_ = State::Disconnected;
     std::unique_ptr<QTcpSocket> socket_;
     std::unique_ptr<crypto::NoiseSession> noise_;
+    crypto::NoiseRole noise_role_ = crypto::NoiseRole::Initiator;
     crypto::KeyPair local_keys_;
     QByteArray read_buffer_;
     
     void setState(State state);
-    void processHandshake();
+    void processHandshake(MessageType type, const std::vector<uint8_t>& payload);
     void processMessage();
     Result<void, Error> sendRaw(MessageType type, const std::vector<uint8_t>& data);
 };
@@ -192,4 +196,3 @@ std::vector<uint8_t> serializeHeader(const MessageHeader& header);
 Result<MessageHeader, Error> deserializeHeader(const std::vector<uint8_t>& data);
 
 } // namespace zinc::network
-

@@ -28,6 +28,7 @@ Connection::~Connection() {
 void Connection::connectToPeer(const QHostAddress& host, uint16_t port,
                                const crypto::KeyPair& local_keys) {
     local_keys_ = local_keys;
+    noise_role_ = crypto::NoiseRole::Initiator;
     noise_ = std::make_unique<crypto::NoiseSession>(
         crypto::NoiseRole::Initiator, local_keys_);
     
@@ -38,6 +39,7 @@ void Connection::connectToPeer(const QHostAddress& host, uint16_t port,
 void Connection::acceptConnection(QTcpSocket* socket,
                                   const crypto::KeyPair& local_keys) {
     local_keys_ = local_keys;
+    noise_role_ = crypto::NoiseRole::Responder;
     noise_ = std::make_unique<crypto::NoiseSession>(
         crypto::NoiseRole::Responder, local_keys_);
     
@@ -166,7 +168,7 @@ void Connection::onReadyRead() {
             if (header.type == MessageType::NoiseMessage1 ||
                 header.type == MessageType::NoiseMessage2 ||
                 header.type == MessageType::NoiseMessage3) {
-                processHandshake();
+                processHandshake(header.type, payload);
             }
         } else if (state_ == State::Connected) {
             // Decrypt and emit
@@ -182,13 +184,86 @@ void Connection::onReadyRead() {
     }
 }
 
-void Connection::processHandshake() {
-    // Simplified handshake processing
-    // In production, this would properly handle the Noise XX pattern
-    
-    // For now, just transition to connected after receiving message
-    setState(State::Connected);
-    emit connected();
+void Connection::processHandshake(MessageType type, const std::vector<uint8_t>& payload) {
+    if (!noise_) {
+        emit error("Noise session not initialized");
+        setState(State::Failed);
+        socket_->disconnectFromHost();
+        return;
+    }
+
+    if (type == MessageType::NoiseMessage1 && noise_role_ == crypto::NoiseRole::Responder) {
+        auto msg1 = crypto::deserialize_message1(payload);
+        if (msg1.is_err()) {
+            emit error(QString::fromStdString(msg1.unwrap_err().message));
+            setState(State::Failed);
+            socket_->disconnectFromHost();
+            return;
+        }
+
+        auto msg2 = noise_->process_message1(msg1.unwrap(), {});
+        if (msg2.is_err()) {
+            emit error(QString::fromStdString(msg2.unwrap_err().message));
+            setState(State::Failed);
+            socket_->disconnectFromHost();
+            return;
+        }
+
+        auto msg2_bytes = crypto::serialize_message2(msg2.unwrap());
+        sendRaw(MessageType::NoiseMessage2, msg2_bytes);
+        return;
+    }
+
+    if (type == MessageType::NoiseMessage2 && noise_role_ == crypto::NoiseRole::Initiator) {
+        auto msg2 = crypto::deserialize_message2(payload);
+        if (msg2.is_err()) {
+            emit error(QString::fromStdString(msg2.unwrap_err().message));
+            setState(State::Failed);
+            socket_->disconnectFromHost();
+            return;
+        }
+
+        auto msg3 = noise_->process_message2(msg2.unwrap(), {});
+        if (msg3.is_err()) {
+            emit error(QString::fromStdString(msg3.unwrap_err().message));
+            setState(State::Failed);
+            socket_->disconnectFromHost();
+            return;
+        }
+
+        auto msg3_bytes = crypto::serialize_message3(msg3.unwrap());
+        sendRaw(MessageType::NoiseMessage3, msg3_bytes);
+
+        if (noise_->is_transport_ready()) {
+            setState(State::Connected);
+            emit connected();
+        }
+        return;
+    }
+
+    if (type == MessageType::NoiseMessage3 && noise_role_ == crypto::NoiseRole::Responder) {
+        auto msg3 = crypto::deserialize_message3(payload);
+        if (msg3.is_err()) {
+            emit error(QString::fromStdString(msg3.unwrap_err().message));
+            setState(State::Failed);
+            socket_->disconnectFromHost();
+            return;
+        }
+
+        auto final_payload = noise_->process_message3(msg3.unwrap());
+        if (final_payload.is_err()) {
+            emit error(QString::fromStdString(final_payload.unwrap_err().message));
+            setState(State::Failed);
+            socket_->disconnectFromHost();
+            return;
+        }
+
+        if (noise_->is_transport_ready()) {
+            setState(State::Connected);
+            emit connected();
+        }
+        return;
+    }
 }
 
 Result<void, Error> Connection::sendRaw(MessageType type, 
@@ -294,4 +369,3 @@ Result<MessageHeader, Error> deserializeHeader(const std::vector<uint8_t>& data)
 }
 
 } // namespace zinc::network
-

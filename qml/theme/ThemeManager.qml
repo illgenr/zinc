@@ -1,6 +1,6 @@
 pragma Singleton
 import QtQuick
-import Qt.labs.settings
+import QtCore
 
 Item {
     id: root

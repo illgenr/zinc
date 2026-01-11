@@ -43,3 +43,6 @@ CMakeLists.txt.user*
 
 # Test artifacts
 /Testing
+
+# Cursor plans
+.plan*

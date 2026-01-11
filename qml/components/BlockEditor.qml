@@ -16,6 +16,8 @@ Item {
     
     property string pageTitle: ""
     property string pageId: ""
+    property double lastLocalEditMs: 0
+    property bool pendingRemoteRefresh: false
     
     signal blockFocused(int index)
     signal titleEdited(string newTitle)
@@ -106,7 +108,101 @@ Item {
     }
     
     function scheduleAutosave() {
+        lastLocalEditMs = Date.now()
         saveTimer.restart()
+    }
+
+    function mergeBlocksFromStorage() {
+        if (!pageId || pageId === "") return
+
+        let stored = DataStore ? DataStore.getBlocksForPage(pageId) : []
+        if (!stored) stored = []
+
+        let byId = {}
+        for (let i = 0; i < stored.length; i++) {
+            let b = stored[i]
+            if (b && b.blockId) {
+                byId[b.blockId] = b
+            }
+        }
+
+        // Update existing blocks in place
+        for (let i = 0; i < blockModel.count; i++) {
+            let local = blockModel.get(i)
+            let remote = byId[local.blockId]
+            if (!remote) continue
+
+            if (remote.blockType !== undefined && remote.blockType !== local.blockType) {
+                blockModel.setProperty(i, "blockType", remote.blockType)
+            }
+            if (remote.content !== undefined && remote.content !== local.content) {
+                blockModel.setProperty(i, "content", remote.content)
+            }
+            if (remote.depth !== undefined && remote.depth !== local.depth) {
+                blockModel.setProperty(i, "depth", remote.depth)
+            }
+            if (remote.checked !== undefined && remote.checked !== local.checked) {
+                blockModel.setProperty(i, "checked", remote.checked)
+            }
+            if (remote.collapsed !== undefined && remote.collapsed !== local.collapsed) {
+                blockModel.setProperty(i, "collapsed", remote.collapsed)
+            }
+            if (remote.language !== undefined && remote.language !== local.language) {
+                blockModel.setProperty(i, "language", remote.language)
+            }
+            if (remote.headingLevel !== undefined && remote.headingLevel !== local.headingLevel) {
+                blockModel.setProperty(i, "headingLevel", remote.headingLevel)
+            }
+        }
+
+        // Append blocks we don't have yet
+        for (let i = 0; i < stored.length; i++) {
+            let remote = stored[i]
+            if (!remote || !remote.blockId) continue
+
+            let found = false
+            for (let j = 0; j < blockModel.count; j++) {
+                if (blockModel.get(j).blockId === remote.blockId) {
+                    found = true
+                    break
+                }
+            }
+            if (found) continue
+
+            blockModel.append({
+                blockId: remote.blockId,
+                blockType: remote.blockType || "paragraph",
+                content: remote.content || "",
+                depth: remote.depth || 0,
+                checked: remote.checked || false,
+                collapsed: remote.collapsed || false,
+                language: remote.language || "",
+                headingLevel: remote.headingLevel || 0
+            })
+        }
+    }
+
+    onActiveFocusChanged: {
+        if (!activeFocus && pendingRemoteRefresh) {
+            pendingRemoteRefresh = false
+            mergeBlocksFromStorage()
+        }
+    }
+
+    Connections {
+        target: DataStore
+
+        function onBlocksChanged(changedPageId) {
+            if (!changedPageId || changedPageId === "") return
+            if (changedPageId !== pageId) return
+
+            // Don't disrupt active local edits; apply when focus is lost.
+            if (activeFocus || (Date.now() - lastLocalEditMs) < 1500) {
+                pendingRemoteRefresh = true
+                return
+            }
+            mergeBlocksFromStorage()
+        }
     }
     
     function scrollToBlock(blockId) {

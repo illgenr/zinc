@@ -3,6 +3,7 @@
 #include "network/sync_manager.hpp"
 #include <QObject>
 #include <QQmlEngine>
+#include <QVariantList>
 
 namespace zinc::ui {
 
@@ -35,14 +36,21 @@ public:
                                    const QString& host,
                                    int port);
     Q_INVOKABLE int listeningPort() const;
+    Q_INVOKABLE void sendPageSnapshot(const QString& jsonPayload);
 
 signals:
     void syncingChanged();
     void peerCountChanged();
     void peersChanged();
     void configuredChanged();
+    void peerDiscovered(const QString& deviceId,
+                        const QString& deviceName,
+                        const QString& workspaceId);
     void peerConnected(const QString& deviceName);
     void peerDisconnected(const QString& deviceName);
+    void pageSnapshotReceived(const QString& jsonPayload);
+    void pageSnapshotReceivedPages(const QVariantList& pages);
+    void blockSnapshotReceivedBlocks(const QVariantList& blocks);
     void error(const QString& message);
 
 private:

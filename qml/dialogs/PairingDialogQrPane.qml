@@ -401,10 +401,10 @@ ColumnLayout {
             onClicked: handleQrCodeDetected(qrPasteField.text)
         }
 
-        Button {
-            Layout.alignment: Qt.AlignHCenter
-            text: "Enter code manually instead"
-            flat: true
+	        Button {
+	            Layout.alignment: Qt.AlignHCenter
+	            text: "Enter code manually instead"
+	            flat: true
 
             contentItem: Text {
                 text: parent.text
@@ -415,16 +415,21 @@ ColumnLayout {
 
             background: Item {}
 
-            onClicked: {
-                dialog.cameraActive = false
-                dialog.statusOverride = ""
-                pairingController.configureLocalDevice(dialog.deviceName,
-                    dialog.ensureWorkspaceId(), 0)
-                pairingController.startPairingAsInitiator("numeric")
-                dialog.mode = "code"
-            }
-        }
-    }
+	            onClicked: {
+	                dialog.cameraActive = false
+	                dialog.statusOverride = ""
+	                pairingController.configureLocalDevice(dialog.deviceName, "", 0)
+	                pairingController.startPairingAsInitiator("numeric")
+	                var wsId = pairingController.workspaceId
+	                dialog.workspaceId = wsId
+	                if (!dialog.startSyncForWorkspace(wsId)) {
+	                    dialog.statusOverride = "Failed to start sync"
+	                    return
+	                }
+	                dialog.mode = "code_show"
+	            }
+	        }
+	    }
 
     function handleQrCodeDetected(qrData) {
         if (dialog.scanInProgress) {

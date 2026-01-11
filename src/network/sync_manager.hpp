@@ -6,6 +6,7 @@
 #include "network/transport.hpp"
 #include "crypto/keys.hpp"
 #include <QObject>
+#include <QByteArray>
 #include <map>
 #include <memory>
 
@@ -57,7 +58,8 @@ public:
      */
     void initialize(const crypto::KeyPair& identity,
                    const Uuid& workspace_id,
-                   const QString& device_name);
+                   const QString& device_name,
+                   const Uuid& device_id);
     
     /**
      * Start discovery and listening for connections.
@@ -107,6 +109,8 @@ signals:
     void peersChanged();
     void peerConnected(const Uuid& device_id);
     void peerDisconnected(const Uuid& device_id);
+    void peerDiscovered(const PeerInfo& peer);
+    void pageSnapshotReceived(const QByteArray& payload);
     void changeReceived(const QString& doc_id, const QByteArray& change_bytes);
     void syncRequested(const Uuid& device_id, const QString& doc_id);
     void error(const QString& message);
@@ -131,11 +135,15 @@ private:
     
     bool syncing_ = false;
     bool started_ = false;
+    bool stopping_ = false;
     
     void setupConnection(PeerConnection& peer);
     void handleSyncRequest(const Uuid& peer_id, const std::vector<uint8_t>& payload);
     void handleSyncResponse(const Uuid& peer_id, const std::vector<uint8_t>& payload);
     void handleChangeNotify(const Uuid& peer_id, const std::vector<uint8_t>& payload);
+
+public:
+    void sendPageSnapshot(const std::vector<uint8_t>& payload);
 };
 
 } // namespace zinc::network

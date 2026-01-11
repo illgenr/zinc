@@ -22,7 +22,7 @@ Dialog {
     readonly property bool qrEnabled: FeatureFlags.qrEnabled
     property var qrCamera: null
 
-    property string mode: "select"  // select, qr_show, qr_scan, code, passphrase
+    property string mode: "select"  // select, qr_show, qr_scan, code_show, code_enter, passphrase
     property string verificationCode: pairingController.verificationCode
     property string qrData: pairingController.qrCodeData
     property string statusOverride: ""
@@ -32,6 +32,7 @@ Dialog {
     property bool scanInProgress: false
     property string workspaceId: ""
     property string deviceName: "Zinc Device"
+    property bool suppressOutgoingSnapshots: false
 
     PairingController {
         id: pairingController
@@ -39,6 +40,21 @@ Dialog {
         onPairingComplete: function() {
             statusOverride = ""
             scanInProgress = false
+            var deviceId = pairingController.peerDeviceId
+            if (deviceId !== "") {
+                var name = pairingController.peerName
+                if (name === "") {
+                    name = "Paired device"
+                }
+                var wsId = pairingController.workspaceId
+                if (wsId === "") {
+                    wsId = workspaceId
+                }
+                if (wsId !== "") {
+                    DataStore.savePairedDevice(deviceId, name, wsId)
+                }
+            }
+            Qt.callLater(function() { root.close() })
         }
 
         onPairingFailed: function(reason) {
@@ -56,6 +72,93 @@ Dialog {
             scanInProgress = false
             cameraActive = false
         }
+    }
+
+    Connections {
+        target: syncController
+
+        function onPeerCountChanged() {
+            if (syncController.peerCount > 0 &&
+                (mode === "code_show" || mode === "qr_show")) {
+                statusOverride = "Pairing complete!"
+            }
+        }
+
+        function onPeerDiscovered(deviceId, deviceName, workspaceId) {
+            if (deviceId === "" || workspaceId === "") {
+                return
+            }
+            var name = deviceName
+            if (name === "") {
+                name = "Paired device"
+            }
+            DataStore.savePairedDevice(deviceId, name, workspaceId)
+        }
+
+        function onPeerConnected(deviceName) {
+            console.log("PairingDialog: peer connected", deviceName)
+            sendLocalPagesSnapshot()
+        }
+
+        function onPageSnapshotReceivedPages(pages) {
+            if (!pages) {
+                return
+            }
+            console.log("PairingDialog: received snapshot pages", pages.length)
+            suppressOutgoingSnapshots = true
+            DataStore.applyPageUpdates(pages)
+            Qt.callLater(function() { suppressOutgoingSnapshots = false })
+        }
+
+        function onBlockSnapshotReceivedBlocks(blocks) {
+            if (!blocks) {
+                return
+            }
+            console.log("PairingDialog: received snapshot blocks", blocks.length)
+            suppressOutgoingSnapshots = true
+            DataStore.applyBlockUpdates(blocks)
+            Qt.callLater(function() { suppressOutgoingSnapshots = false })
+        }
+    }
+
+    onStatusMessageChanged: {
+        if (statusMessage === "Pairing complete!") {
+            Qt.callLater(function() { root.close() })
+        }
+    }
+
+    Connections {
+        target: DataStore
+
+        function onPagesChanged() {
+            if (syncController.syncing && !suppressOutgoingSnapshots) {
+                console.log("PairingDialog: pages changed, send snapshot")
+                sendLocalPagesSnapshot()
+            }
+        }
+
+        function onBlocksChanged(pageId) {
+            if (syncController.syncing && !suppressOutgoingSnapshots) {
+                console.log("PairingDialog: blocks changed, send snapshot", pageId)
+                sendLocalPagesSnapshot()
+            }
+        }
+    }
+
+    function sendLocalPagesSnapshot() {
+        if (!syncController.syncing) {
+            return
+        }
+        var pages = DataStore.getPagesForSync()
+        var blocks = DataStore.getBlocksForSync()
+        var payload = JSON.stringify({
+            v: 1,
+            workspaceId: syncController.workspaceId,
+            pages: pages,
+            blocks: blocks
+        })
+        console.log("PairingDialog: sending snapshot pages", pages.length, "blocks", blocks.length)
+        syncController.sendPageSnapshot(payload)
     }
     
     background: Rectangle {
@@ -99,7 +202,8 @@ Dialog {
                     if (mode === "select") return "Pair Device"
                     if (mode === "qr_show") return "Show QR Code"
                     if (mode === "qr_scan") return "Scan QR Code"
-                    if (mode === "code") return "Enter Code"
+                    if (mode === "code_show") return "Share Code"
+                    if (mode === "code_enter") return "Enter Code"
                     if (mode === "passphrase") return "Enter Passphrase"
                     return "Pair Device"
                 }
@@ -189,26 +293,53 @@ Dialog {
                 PairingOption {
                     Layout.fillWidth: true
                     icon: "🔢"
-                    label: "Enter Code"
-                    description: "Type a 6-digit pairing code"
+                    label: "Show Pairing Code"
+                    description: "Share a 6-digit code to join your workspace"
                     onClicked: {
                         statusOverride = ""
-                        pairingController.configureLocalDevice(deviceName,
-                            ensureWorkspaceId(), 0)
+                        scanInProgress = false
+                        cameraActive = false
+                        workspaceId = ""
+                        pairingController.configureLocalDevice(deviceName, "", 0)
                         pairingController.startPairingAsInitiator("numeric")
-                        mode = "code"
+                        workspaceId = pairingController.workspaceId
+                        if (!startSyncForWorkspace(workspaceId)) {
+                            statusOverride = "Failed to start sync"
+                            return
+                        }
+                        mode = "code_show"
                     }
                 }
                 
                 PairingOption {
                     Layout.fillWidth: true
-                    icon: "🔐"
-                    label: "Use Passphrase"
-                    description: "Enter a shared secret phrase"
+                    icon: "⌨️"
+                    label: "Enter Pairing Code"
+                    description: "Join a workspace using a 6-digit code"
                     onClicked: {
                         statusOverride = ""
-                        pairingController.configureLocalDevice(deviceName,
-                            ensureWorkspaceId(), 0)
+                        scanInProgress = false
+                        cameraActive = false
+                        workspaceId = ""
+                        codeField.text = ""
+                        pairingController.configureLocalDevice(deviceName, "", 0)
+                        pairingController.startPairingAsResponder()
+                        mode = "code_enter"
+                    }
+                }
+
+                PairingOption {
+                    Layout.fillWidth: true
+                    icon: "🔐"
+                    label: "Use Passphrase"
+                    description: "Join using a shared phrase"
+                    onClicked: {
+                        statusOverride = ""
+                        scanInProgress = false
+                        cameraActive = false
+                        workspaceId = ""
+                        passphraseField.text = ""
+                        pairingController.configureLocalDevice(deviceName, "", 0)
                         pairingController.startPairingAsInitiator("passphrase")
                         mode = "passphrase"
                     }
@@ -235,7 +366,7 @@ Dialog {
                 Layout.fillWidth: true
                 Layout.margins: ThemeManager.spacingMedium
                 spacing: ThemeManager.spacingMedium
-                visible: mode === "code"
+                visible: mode === "code_show" || mode === "code_enter"
                 
                 // Your code display
                 Rectangle {
@@ -245,6 +376,7 @@ Dialog {
                     radius: ThemeManager.radiusSmall
                     border.width: 1
                     border.color: ThemeManager.border
+                    visible: mode === "code_show"
                     
                     ColumnLayout {
                         anchors.fill: parent
@@ -270,7 +402,8 @@ Dialog {
                 }
                 
                 Text {
-                    text: "Enter their code:"
+                    visible: mode === "code_enter"
+                    text: "Enter pairing code:"
                     color: ThemeManager.textSecondary
                     font.pixelSize: ThemeManager.fontSizeNormal
                 }
@@ -279,6 +412,7 @@ Dialog {
                     id: codeField
                     Layout.fillWidth: true
                     Layout.preferredHeight: 56
+                    visible: mode === "code_enter"
                     
                     horizontalAlignment: Text.AlignHCenter
                     font.pixelSize: ThemeManager.fontSizeH2
@@ -302,7 +436,8 @@ Dialog {
                     Layout.fillWidth: true
                     Layout.preferredHeight: 48
                     text: "Connect"
-                    enabled: codeField.text.length === 6
+                    visible: mode === "code_enter"
+                    enabled: mode === "code_enter" && codeField.text.length === 6
                     
                     background: Rectangle {
                         radius: ThemeManager.radiusSmall
@@ -323,6 +458,10 @@ Dialog {
                     onClicked: {
                         statusOverride = ""
                         pairingController.submitCode(codeField.text)
+                        workspaceId = pairingController.workspaceId
+                        if (!startSyncForWorkspace(workspaceId)) {
+                            statusOverride = "Failed to start sync"
+                        }
                     }
                 }
             }
@@ -416,6 +555,10 @@ Dialog {
                     onClicked: {
                         statusOverride = ""
                         pairingController.submitCode(passphraseField.text)
+                        workspaceId = pairingController.workspaceId
+                        if (!startSyncForWorkspace(workspaceId)) {
+                            statusOverride = "Failed to start sync"
+                        }
                     }
                 }
             }
@@ -488,9 +631,25 @@ Dialog {
         return uuidString.replace(/[{}]/g, "")
     }
 
+    function createUuidV4() {
+        // Qt.createUuid() is not available on all Qt/QML versions we target.
+        // This is sufficient for generating a local workspace id.
+        function hex(n) { return n.toString(16).padStart(2, "0") }
+        var bytes = []
+        for (var i = 0; i < 16; i++) bytes.push(Math.floor(Math.random() * 256))
+        bytes[6] = (bytes[6] & 0x0f) | 0x40
+        bytes[8] = (bytes[8] & 0x3f) | 0x80
+        var s = ""
+        for (var j = 0; j < 16; j++) {
+            s += hex(bytes[j])
+            if (j === 3 || j === 5 || j === 7 || j === 9) s += "-"
+        }
+        return s
+    }
+
     function ensureWorkspaceId() {
         if (workspaceId === "") {
-            workspaceId = normalizeUuid(Qt.createUuid().toString())
+            workspaceId = createUuidV4()
         }
         return workspaceId
     }

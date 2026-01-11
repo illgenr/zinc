@@ -144,15 +144,20 @@ inline const std::vector<Migration> ALL_MIGRATIONS = {
         .up_sql = R"SQL(
             -- Backlinks index for bi-directional linking
             CREATE TABLE IF NOT EXISTS block_links (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
                 source_block_id TEXT NOT NULL REFERENCES blocks(id) ON DELETE CASCADE,
                 target_page_id TEXT NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
                 target_block_id TEXT REFERENCES blocks(id) ON DELETE SET NULL,
-                PRIMARY KEY (source_block_id, target_page_id, COALESCE(target_block_id, ''))
+                created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
             );
+            -- Ensure uniqueness even when target_block_id is NULL (SQLite UNIQUE treats NULLs as distinct).
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_block_links_unique
+                ON block_links(source_block_id, target_page_id, IFNULL(target_block_id, ''));
             CREATE INDEX IF NOT EXISTS idx_block_links_target ON block_links(target_page_id);
             CREATE INDEX IF NOT EXISTS idx_block_links_target_block ON block_links(target_block_id);
         )SQL",
         .down_sql = R"SQL(
+            DROP INDEX IF EXISTS idx_block_links_unique;
             DROP TABLE IF EXISTS block_links;
         )SQL"
     },
@@ -271,4 +276,3 @@ private:
 }
 
 } // namespace zinc::storage
-

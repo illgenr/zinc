@@ -106,7 +106,7 @@ void PairingController::startPairingAsInitiator(const QString& method) {
 #endif
     
     auto keys = crypto::generate_keypair();
-    Uuid workspace_id = Uuid::generate();
+    Uuid workspace_id{};
     if (!workspace_id_.isEmpty()) {
         auto parsed = Uuid::parse(workspace_id_.toStdString());
         if (parsed) {
@@ -115,7 +115,7 @@ void PairingController::startPairingAsInitiator(const QString& method) {
     }
     session_->setListenPort(static_cast<uint16_t>(std::max(0, listen_port_)));
     session_->startAsInitiator(keys, workspace_id, device_name_, pm);
-    workspace_id_ = QString::fromStdString(workspace_id.to_string());
+    workspace_id_ = QString::fromStdString(session_->workspaceId().to_string());
     emit workspaceIdChanged();
 }
 
@@ -126,6 +126,8 @@ void PairingController::startPairingAsResponder() {
 
 void PairingController::submitCode(const QString& code) {
     session_->submitCode(code);
+    workspace_id_ = QString::fromStdString(session_->workspaceId().to_string());
+    emit workspaceIdChanged();
 }
 
 void PairingController::submitQrCodeData(const QString& qrData) {

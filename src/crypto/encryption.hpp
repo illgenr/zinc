@@ -113,6 +113,20 @@ constexpr size_t BOX_MAC_SIZE = 16;
     for (size_t i = 0; i < plaintext_size; ++i) {
         plaintext[i] = ciphertext[SECRETBOX_NONCE_SIZE + i] ^ key[i % SYMMETRIC_KEY_SIZE] ^ nonce[i % SECRETBOX_NONCE_SIZE];
     }
+
+    // Validate the simple MAC used in encrypt_symmetric (NOT secure, test-only).
+    uint8_t mac = 0;
+    for (size_t i = 0; i < plaintext.size(); ++i) {
+        mac ^= plaintext[i];
+    }
+    const size_t mac_offset = SECRETBOX_NONCE_SIZE + plaintext_size;
+    for (size_t i = 0; i < SECRETBOX_MAC_SIZE; ++i) {
+        const uint8_t expected = mac ^ key[i];
+        if (ciphertext[mac_offset + i] != expected) {
+            return Result<std::vector<uint8_t>, Error>::err(
+                Error{"Decryption failed (invalid key or corrupted data)"});
+        }
+    }
 #endif
     
     return Result<std::vector<uint8_t>, Error>::ok(std::move(plaintext));

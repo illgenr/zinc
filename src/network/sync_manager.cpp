@@ -23,11 +23,12 @@ SyncManager::~SyncManager() {
 
 void SyncManager::initialize(const crypto::KeyPair& identity,
                              const Uuid& workspace_id,
-                             const QString& device_name) {
+                             const QString& device_name,
+                             const Uuid& device_id) {
     identity_ = identity;
     workspace_id_ = workspace_id;
     device_name_ = device_name;
-    device_id_ = Uuid::generate();  // Generate a stable device ID
+    device_id_ = device_id.is_nil() ? Uuid::generate() : device_id;
 }
 
 bool SyncManager::start(uint16_t port) {
@@ -74,6 +75,7 @@ bool SyncManager::start(uint16_t port) {
 void SyncManager::stop() {
     if (!started_) return;
     
+    stopping_ = true;
     // Disconnect all peers
     for (auto& [id, peer] : peers_) {
         if (peer->connection) {
@@ -88,6 +90,7 @@ void SyncManager::stop() {
     
     started_ = false;
     syncing_ = false;
+    stopping_ = false;
     emit syncingChanged();
     emit peersChanged();
 }
@@ -220,6 +223,7 @@ void SyncManager::onPeerDiscovered(const PeerInfo& peer) {
     if (peer.workspace_id == workspace_id_ && peer.device_id != device_id_) {
         connectToPeer(peer.device_id);
     }
+    emit peerDiscovered(peer);
 }
 
 void SyncManager::onPeerLost(const Uuid& device_id) {
@@ -258,6 +262,7 @@ void SyncManager::onConnectionConnected() {
 void SyncManager::onConnectionDisconnected() {
     auto* conn = qobject_cast<Connection*>(sender());
     if (!conn) return;
+    if (stopping_) return;
     
     // Find and remove the peer
     for (auto it = peers_.begin(); it != peers_.end(); ++it) {
@@ -286,6 +291,14 @@ void SyncManager::onMessageReceived(MessageType type,
     }
     
     switch (type) {
+        case MessageType::PagesSnapshot: {
+            qInfo() << "SYNC: Received PagesSnapshot bytes=" << payload.size();
+            QByteArray data(
+                reinterpret_cast<const char*>(payload.data()),
+                static_cast<int>(payload.size()));
+            emit pageSnapshotReceived(data);
+            break;
+        }
         case MessageType::SyncRequest:
             handleSyncRequest(peer_id, payload);
             break;
@@ -334,6 +347,16 @@ void SyncManager::handleChangeNotify(const Uuid& peer_id,
                                      const std::vector<uint8_t>& payload) {
     // Same format as sync response
     handleSyncResponse(peer_id, payload);
+}
+
+void SyncManager::sendPageSnapshot(const std::vector<uint8_t>& payload) {
+    qInfo() << "SYNC: Sending PagesSnapshot bytes=" << payload.size()
+             << "peers=" << peers_.size();
+    for (const auto& [id, peer] : peers_) {
+        if (peer->connection && peer->connection->isConnected()) {
+            peer->connection->send(MessageType::PagesSnapshot, payload);
+        }
+    }
 }
 
 } // namespace zinc::network

@@ -155,8 +155,33 @@ ApplicationWindow {
                         onClicked: searchDialog.open()
                     }
                 }
+
+                Button {
+                    Layout.fillWidth: true
+                    Layout.margins: ThemeManager.spacingMedium
+                    text: "+ New Page"
+
+                    background: Rectangle {
+                        implicitHeight: 44
+                        radius: ThemeManager.radiusSmall
+                        color: parent.pressed ? ThemeManager.accentHover : ThemeManager.accent
+                    }
+
+                    contentItem: Text {
+                        text: parent.text
+                        color: "white"
+                        font.pixelSize: ThemeManager.fontSizeNormal
+                        font.weight: Font.Medium
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                    }
+
+                    onClicked: {
+                        pageTree.createPage("")
+                    }
+                }
                 
-                // Notes list - uses shared pageTree model
+                // Notes list
                 ListView {
                     id: mobileNotesList
                     Layout.fillWidth: true
@@ -703,12 +728,30 @@ ApplicationWindow {
     
     // Initial page (desktop only)
     Component.onCompleted: {
+        if (DataStore) {
+            DataStore.initialize()
+        }
+        if (isMobile && DataStore) {
+            root.mobilePagesList = DataStore.getAllPages()
+        }
         // Pages are loaded by PageTree's Component.onCompleted
         // Just need to select the first page for desktop
         if (!isMobile) {
             pageTree.ensureInitialPage()
         }
         // Mobile list is updated via pagesChanged signal
+    }
+
+    Connections {
+        target: DataStore
+
+        function onPagesChanged() {
+            if (isMobile) {
+                Qt.callLater(function() {
+                    root.mobilePagesList = DataStore.getAllPages()
+                })
+            }
+        }
     }
     
     // Handle Android back button

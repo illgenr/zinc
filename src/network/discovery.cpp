@@ -1,5 +1,7 @@
 #include "network/discovery.hpp"
+#include "network/udp_discovery_backend.hpp"
 #include <QDebug>
+#include <QProcessEnvironment>
 
 namespace zinc::network {
 
@@ -143,16 +145,29 @@ public:
 };
 
 std::unique_ptr<DiscoveryBackend> createDiscoveryBackend() {
+#if QT_CONFIG(processenvironment)
+    const auto backend = qEnvironmentVariable("ZINC_DISCOVERY_BACKEND").trimmed().toLower();
+    if (backend == "udp") {
+        return std::make_unique<UdpDiscoveryBackend>();
+    }
+#endif
+
 #ifdef Q_OS_ANDROID
-    // Implemented in platform/android/nsd_discovery.cpp
-    extern std::unique_ptr<DiscoveryBackend> createNsdBackend();
-    return createNsdBackend();
+    // Prefer UDP to avoid platform-specific Java/JNI glue.
+    return std::make_unique<UdpDiscoveryBackend>();
 #elif defined(ZINC_HAS_AVAHI)
+    // Allow forcing UDP even when Avahi is available.
+#if QT_CONFIG(processenvironment)
+    if (backend == "mdns") {
+        extern std::unique_ptr<DiscoveryBackend> createAvahiBackend();
+        return createAvahiBackend();
+    }
+#endif
     // Will be implemented in platform/linux/avahi_discovery.cpp
     extern std::unique_ptr<DiscoveryBackend> createAvahiBackend();
     return createAvahiBackend();
 #else
-    return std::make_unique<FallbackDiscoveryBackend>();
+    return std::make_unique<UdpDiscoveryBackend>();
 #endif
 }
 

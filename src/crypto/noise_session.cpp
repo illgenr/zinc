@@ -271,8 +271,11 @@ Result<std::vector<uint8_t>, Error> NoiseSession::decrypt(std::span<const uint8_
     
     return Result<std::vector<uint8_t>, Error>::ok(std::move(plaintext));
 #else
-    ++recv_nonce_;
-    return decrypt_symmetric(ciphertext, recv_key_);
+    auto result = decrypt_symmetric(ciphertext, recv_key_);
+    if (result.is_ok()) {
+        ++recv_nonce_;
+    }
+    return result;
 #endif
 }
 
