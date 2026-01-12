@@ -321,6 +321,8 @@ set(ZINC_QML_FILES
     qml/components/blocks/ParagraphBlock.qml
     qml/components/blocks/HeadingBlock.qml
     qml/components/blocks/TodoBlock.qml
+    qml/components/blocks/ImageBlock.qml
+    qml/components/blocks/ColumnsBlock.qml
     qml/components/blocks/CodeBlock.qml
     qml/components/blocks/QuoteBlock.qml
     qml/components/blocks/DividerBlock.qml

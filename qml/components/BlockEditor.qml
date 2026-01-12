@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtQuick.Dialogs
 import zinc
 
 Item {
@@ -233,6 +234,16 @@ Item {
         Clipboard.setText(MarkdownBlocks.serialize(selectedBlocksForMarkdown()))
     }
 
+    function pasteFromClipboard(atIndex) {
+        if (pasteBlocksFromClipboard(atIndex)) {
+            return true
+        }
+        if (Clipboard.hasImage && Clipboard.hasImage()) {
+            return pasteImageFromClipboard(atIndex)
+        }
+        return false
+    }
+
     function pasteBlocksFromClipboard(atIndex) {
         const markdown = Clipboard.text()
         if (!MarkdownBlocks.isZincBlocksPayload(markdown)) {
@@ -280,6 +291,44 @@ Item {
         return true
     }
 
+    function pasteImageFromClipboard(atIndex) {
+        if (!Clipboard.saveClipboardImage) return false
+        const imageUrl = Clipboard.saveClipboardImage()
+        if (!imageUrl || imageUrl.length === 0) return false
+
+        const imageBlock = {
+            blockId: generateUuid(),
+            blockType: "image",
+            content: imageUrl,
+            depth: 0,
+            checked: false,
+            collapsed: false,
+            language: "",
+            headingLevel: 0
+        }
+
+        const target = (atIndex >= 0 && atIndex < blockModel.count) ? atIndex : currentBlockIndex
+        let insertAt = Math.max(0, target + 1)
+        if (target >= 0 && target < blockModel.count) {
+            const current = blockModel.get(target)
+            if (current.blockType === "paragraph" && (current.content || "") === "") {
+                blockModel.remove(target)
+                blockModel.insert(target, imageBlock)
+                insertAt = target + 1
+            } else {
+                blockModel.insert(insertAt, imageBlock)
+            }
+        } else {
+            blockModel.append(imageBlock)
+        }
+
+        scheduleAutosave()
+        clearCrossBlockSelection()
+        focusTimer.targetIndex = Math.max(0, target)
+        focusTimer.start()
+        return true
+    }
+
     function startReorderBlock(index) {
         reorderDragging = true
         reorderBlockIndex = index
@@ -301,6 +350,13 @@ Item {
         reorderDragging = false
         reorderBlockIndex = -1
         if (debugSelection) console.log("BlockEditor: reorder end")
+    }
+
+    property int pendingImageUploadBlockIndex: -1
+
+    function startImageUpload(atIndex) {
+        pendingImageUploadBlockIndex = atIndex
+        imageFileDialog.open()
     }
     
     function loadPage(id) {
@@ -710,6 +766,14 @@ Item {
                     blockModel.setProperty(idx, "content", "")
                     pendingLinkBlockIndex = idx
                     root.showPagePicker(idx)
+                } else if (command.type === "image") {
+                    startImageUpload(idx)
+                } else if (command.type === "columns") {
+                    const count = command.count || 2
+                    let cols = []
+                    for (let i = 0; i < count; i++) cols.push("")
+                    blockModel.setProperty(idx, "blockType", "columns")
+                    blockModel.setProperty(idx, "content", JSON.stringify({ cols: cols }))
                 } else {
                     // Transform current block
                     blockModel.setProperty(idx, "blockType", command.type)
@@ -721,6 +785,31 @@ Item {
                 scheduleAutosave()
             }
         }
+    }
+
+    FileDialog {
+        id: imageFileDialog
+        title: "Select an image"
+        nameFilters: ["Images (*.png *.jpg *.jpeg *.gif *.webp *.bmp)", "All files (*)"]
+
+        onAccepted: {
+            const imported = Clipboard.importImageFile(selectedFile)
+            if (!imported || imported.length === 0) {
+                console.log("BlockEditor: Failed to import image:", selectedFile)
+                pendingImageUploadBlockIndex = -1
+                return
+            }
+
+            const idx = pendingImageUploadBlockIndex
+            pendingImageUploadBlockIndex = -1
+            if (idx < 0 || idx >= blockModel.count) return
+
+            blockModel.setProperty(idx, "blockType", "image")
+            blockModel.setProperty(idx, "content", imported)
+            scheduleAutosave()
+        }
+
+        onRejected: pendingImageUploadBlockIndex = -1
     }
     
     property int pendingLinkBlockIndex: -1

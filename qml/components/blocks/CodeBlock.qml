@@ -134,7 +134,7 @@ Rectangle {
                     event.accepted = true
                     root.editor.copyCrossBlockSelectionToClipboard()
                 } else if ((event.modifiers & Qt.ControlModifier) && event.key === Qt.Key_V && root.editor) {
-                    if (root.editor.pasteBlocksFromClipboard(root.blockIndex)) {
+                    if (root.editor.pasteFromClipboard(root.blockIndex)) {
                         event.accepted = true
                     }
                 }

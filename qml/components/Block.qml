@@ -141,6 +141,8 @@ Item {
                 switch (blockType) {
                     case "heading": return headingComponent
                     case "todo": return todoComponent
+                    case "image": return imageComponent
+                    case "columns": return columnsComponent
                     case "code": return codeComponent
                     case "quote": return quoteComponent
                     case "divider": return dividerComponent
@@ -205,6 +207,32 @@ Item {
             onEnterPressed: root.blockEnterPressed()
             onBackspaceOnEmpty: root.blockBackspaceOnEmpty()
             onCheckedToggled: root.blockCheckedToggled()
+            onBlockFocused: root.blockFocused()
+        }
+    }
+
+    Component {
+        id: imageComponent
+        ImageBlock {
+            content: root.content
+            editor: root.editor
+            blockIndex: root.blockIndex
+            onContentEdited: (newContent) => root.contentEdited(newContent)
+            onEnterPressed: root.blockEnterPressed()
+            onBackspaceOnEmpty: root.blockBackspaceOnEmpty()
+            onBlockFocused: root.blockFocused()
+        }
+    }
+
+    Component {
+        id: columnsComponent
+        ColumnsBlock {
+            content: root.content
+            editor: root.editor
+            blockIndex: root.blockIndex
+            onContentEdited: (newContent) => root.contentEdited(newContent)
+            onEnterPressed: root.blockEnterPressed()
+            onBackspaceOnEmpty: root.blockBackspaceOnEmpty()
             onBlockFocused: root.blockFocused()
         }
     }

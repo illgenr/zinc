@@ -1,6 +1,8 @@
 #include "ui/MarkdownBlocks.hpp"
 
 #include <QRegularExpression>
+#include <QJsonDocument>
+#include <QJsonParseError>
 #include <QStringList>
 #include <algorithm>
 #include <optional>
@@ -41,6 +43,18 @@ QString link_to_markdown(const QString& content) {
     return QStringLiteral("[%1](zinc://page/%2)").arg(title, pageId);
 }
 
+QString image_to_markdown(const QString& content) {
+    QString url = content.trimmed();
+    if (url.isEmpty()) {
+        return QStringLiteral("![]()");
+    }
+    const bool needsAngle = url.contains(' ') || url.contains('(') || url.contains(')');
+    if (needsAngle) {
+        return QStringLiteral("![](<%1>)").arg(url);
+    }
+    return QStringLiteral("![](%1)").arg(url);
+}
+
 std::optional<QString> parse_link(const QString& line) {
     static const QRegularExpression re(
         R"(^\[(.*)\]\(zinc://page/([^)]+)\)\s*$)");
@@ -49,6 +63,32 @@ std::optional<QString> parse_link(const QString& line) {
     const auto title = m.captured(1);
     const auto pageId = m.captured(2);
     return pageId + "|" + title;
+}
+
+std::optional<QString> parse_image(const QString& line) {
+    static const QRegularExpression re1(R"(^!\[[^\]]*\]\(<([^>]+)>\)\s*$)");
+    if (const auto m = re1.match(line); m.hasMatch()) {
+        return m.captured(1).trimmed();
+    }
+    static const QRegularExpression re2(R"(^!\[[^\]]*\]\(([^)]+)\)\s*$)");
+    if (const auto m = re2.match(line); m.hasMatch()) {
+        return m.captured(1).trimmed();
+    }
+    return std::nullopt;
+}
+
+std::optional<QString> parse_columns(const QString& line) {
+    static const QRegularExpression re(
+        R"(^<!--\s*zinc-columns\s+v1\s+(.+?)\s*-->\s*$)");
+    const auto m = re.match(line);
+    if (!m.hasMatch()) return std::nullopt;
+    const auto json = m.captured(1).trimmed();
+    QJsonParseError err{};
+    const auto doc = QJsonDocument::fromJson(json.toUtf8(), &err);
+    if (err.error != QJsonParseError::NoError || !doc.isObject()) {
+        return std::nullopt;
+    }
+    return json;
 }
 
 bool is_bulleted_list_item(const QString& line) {
@@ -101,6 +141,13 @@ QString MarkdownBlocks::serialize(const QVariantList& blocks) const {
         } else if (type == "todo") {
             const auto indent = QString(depth * 2, QChar(' '));
             emit_block(indent + "- [" + (checked ? "x" : " ") + "] " + content);
+        } else if (type == "image") {
+            emit_block(image_to_markdown(content));
+        } else if (type == "columns") {
+            const auto json = content.trimmed().isEmpty()
+                                  ? QStringLiteral(R"({"cols":["",""]})")
+                                  : content.trimmed();
+            emit_block(QStringLiteral("<!-- zinc-columns v1 %1 -->").arg(json));
         } else if (type == "quote") {
             const auto lines = content.split('\n');
             QStringList quoted;
@@ -161,6 +208,13 @@ QString MarkdownBlocks::serializeContent(const QVariantList& blocks) const {
         } else if (type == "todo") {
             const auto indent = QString(depth * 2, QChar(' '));
             emit_block(indent + "- [" + (checked ? "x" : " ") + "] " + content);
+        } else if (type == "image") {
+            emit_block(image_to_markdown(content));
+        } else if (type == "columns") {
+            const auto json = content.trimmed().isEmpty()
+                                  ? QStringLiteral(R"({"cols":["",""]})")
+                                  : content.trimmed();
+            emit_block(QStringLiteral("<!-- zinc-columns v1 %1 -->").arg(json));
         } else if (type == "quote") {
             const auto lines = content.split('\n');
             QStringList quoted;
@@ -250,6 +304,18 @@ QVariantList MarkdownBlocks::parse(const QString& markdown) const {
                 break;
             }
             blocks.append(make_block("bulleted", listLines.join('\n')));
+            continue;
+        }
+
+        if (auto cols = parse_columns(line)) {
+            emit_paragraph(paragraph);
+            blocks.append(make_block("columns", *cols));
+            continue;
+        }
+
+        if (auto image = parse_image(line)) {
+            emit_paragraph(paragraph);
+            blocks.append(make_block("image", *image));
             continue;
         }
 
@@ -405,6 +471,18 @@ QVariantList MarkdownBlocks::parseWithSpans(const QString& markdown) const {
         const int blockStartLine = i;
         const int blockStartOffset = lines[i].start;
         const auto trimmed = lines[i].trimmed;
+
+        if (auto cols = parse_columns(lines[i].view)) {
+            addBlock(make_block("columns", *cols), blockStartOffset, lines[i].end);
+            i = i + 1;
+            continue;
+        }
+
+        if (auto image = parse_image(lines[i].view)) {
+            addBlock(make_block("image", *image), blockStartOffset, lines[i].end);
+            i = i + 1;
+            continue;
+        }
 
         if (trimmed.startsWith("```")) {
             const auto language = trimmed.mid(3).trimmed();

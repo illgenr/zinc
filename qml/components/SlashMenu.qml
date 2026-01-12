@@ -32,6 +32,9 @@ Popup {
         { type: "heading", level: 3, label: "Heading 3", description: "Small heading", icon: "H3" },
         { type: "bulleted", label: "Bulleted list", description: "Multi-line list block", icon: "•" },
         { type: "todo", label: "To-do", description: "Checkbox item", icon: "☑️" },
+        { type: "image", label: "Image", description: "Upload an image", icon: "🖼" },
+        { type: "columns", count: 2, label: "2 columns", description: "Side-by-side columns", icon: "▦" },
+        { type: "columns", count: 3, label: "3 columns", description: "Three columns", icon: "▦" },
         { type: "code", label: "Code", description: "Code block", icon: "💻" },
         { type: "quote", label: "Quote", description: "Block quote", icon: "❝" },
         { type: "divider", label: "Divider", description: "Horizontal line", icon: "—" },
@@ -55,7 +58,7 @@ Popup {
     }
     
     width: 280
-    height: Math.min(filteredCommands.length * 44 + 16, 300)
+    height: Math.min(filteredCommands.length * 44 + 54, 340)
     padding: ThemeManager.spacingSmall
     closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
     
@@ -66,102 +69,137 @@ Popup {
         radius: ThemeManager.radiusMedium
     }
     
-    contentItem: ListView {
-        id: commandList
-        
-        model: filteredCommands
-        clip: true
-        currentIndex: 0
-        spacing: 2
+    contentItem: ColumnLayout {
+        spacing: ThemeManager.spacingSmall
 
-        ScrollBar.vertical: ScrollBar {
-            policy: ScrollBar.AsNeeded
-        }
-        
-        delegate: Rectangle {
-            id: delegateItem
-            width: commandList.width
-            height: 44
-            radius: ThemeManager.radiusSmall
-            color: commandList.currentIndex === index || delegateMouseArea.containsMouse 
-                   ? ThemeManager.surfaceHover : "transparent"
-            
-            RowLayout {
-                anchors.fill: parent
-                anchors.margins: ThemeManager.spacingSmall
-                spacing: ThemeManager.spacingSmall
-                
-                // Icon
-                Rectangle {
-                    width: 28
-                    height: 28
-                    radius: ThemeManager.radiusSmall
-                    color: ThemeManager.background
-                    
-                    Text {
-                        anchors.centerIn: parent
-                        text: modelData.icon
-                        font.pixelSize: 14
-                    }
-                }
-                
-                // Label and description
-                ColumnLayout {
-                    Layout.fillWidth: true
-                    spacing: 2
-                    
-                    Text {
-                        text: modelData.label
-                        color: ThemeManager.text
-                        font.pixelSize: ThemeManager.fontSizeNormal
-                    }
-                    
-                    Text {
-                        text: modelData.description
-                        color: ThemeManager.textSecondary
-                        font.pixelSize: ThemeManager.fontSizeSmall
-                    }
+        TextField {
+            id: filterInput
+            Layout.fillWidth: true
+            placeholderText: "Type to filter..."
+            selectByMouse: true
+
+            onTextChanged: {
+                if (text !== root.filterText) {
+                    root.filterText = text
                 }
             }
-            
-            MouseArea {
-                id: delegateMouseArea
-                anchors.fill: parent
-                hoverEnabled: true
-                cursorShape: Qt.PointingHandCursor
-                
-                onEntered: {
-                    commandList.currentIndex = index
-                }
-                
-                onClicked: {
-                    root.commandSelected(modelData)
+
+            Keys.onUpPressed: commandList.currentIndex = Math.max(0, commandList.currentIndex - 1)
+            Keys.onDownPressed: commandList.currentIndex = Math.min(commandList.count - 1, commandList.currentIndex + 1)
+
+            Keys.onReturnPressed: {
+                if (commandList.currentIndex >= 0 && commandList.currentIndex < filteredCommands.length) {
+                    root.commandSelected(filteredCommands[commandList.currentIndex])
                     root.close()
                 }
             }
+
+            Keys.onEscapePressed: root.close()
         }
-        
-        Keys.onUpPressed: {
-            if (currentIndex > 0) currentIndex--
-        }
-        
-        Keys.onDownPressed: {
-            if (currentIndex < count - 1) currentIndex++
-        }
-        
-        Keys.onReturnPressed: {
-            if (currentIndex >= 0 && currentIndex < filteredCommands.length) {
-                root.commandSelected(filteredCommands[currentIndex])
-                root.close()
+
+        ListView {
+            id: commandList
+
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            model: filteredCommands
+            clip: true
+            currentIndex: 0
+            spacing: 2
+
+            ScrollBar.vertical: ScrollBar {
+                policy: ScrollBar.AsNeeded
             }
+
+            delegate: Rectangle {
+                id: delegateItem
+                width: commandList.width
+                height: 44
+                radius: ThemeManager.radiusSmall
+                color: commandList.currentIndex === index || delegateMouseArea.containsMouse
+                       ? ThemeManager.surfaceHover : "transparent"
+
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.margins: ThemeManager.spacingSmall
+                    spacing: ThemeManager.spacingSmall
+
+                    // Icon
+                    Rectangle {
+                        width: 28
+                        height: 28
+                        radius: ThemeManager.radiusSmall
+                        color: ThemeManager.background
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: modelData.icon
+                            font.pixelSize: 14
+                        }
+                    }
+
+                    // Label and description
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 2
+
+                        Text {
+                            text: modelData.label
+                            color: ThemeManager.text
+                            font.pixelSize: ThemeManager.fontSizeNormal
+                        }
+
+                        Text {
+                            text: modelData.description
+                            color: ThemeManager.textSecondary
+                            font.pixelSize: ThemeManager.fontSizeSmall
+                        }
+                    }
+                }
+
+                MouseArea {
+                    id: delegateMouseArea
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+
+                    onEntered: commandList.currentIndex = index
+
+                    onClicked: {
+                        root.commandSelected(modelData)
+                        root.close()
+                    }
+                }
+            }
+
+            Keys.onUpPressed: {
+                if (currentIndex > 0) currentIndex--
+            }
+
+            Keys.onDownPressed: {
+                if (currentIndex < count - 1) currentIndex++
+            }
+
+            Keys.onReturnPressed: {
+                if (currentIndex >= 0 && currentIndex < filteredCommands.length) {
+                    root.commandSelected(filteredCommands[currentIndex])
+                    root.close()
+                }
+            }
+
+            Keys.onEscapePressed: root.close()
         }
-        
-        Keys.onEscapePressed: root.close()
     }
     
-    onFilterTextChanged: updateFilteredCommands()
+    onFilterTextChanged: {
+        updateFilteredCommands()
+        if (filterInput.text !== filterText) {
+            filterInput.text = filterText
+        }
+    }
     
     onOpened: {
-        commandList.forceActiveFocus()
+        filterInput.text = filterText
+        filterInput.forceActiveFocus()
     }
 }

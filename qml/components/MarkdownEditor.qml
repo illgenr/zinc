@@ -475,6 +475,13 @@ Item {
                 replaceWith("- " + content)
             } else if (command.type === "todo") {
                 replaceWith("- [ ] " + content)
+            } else if (command.type === "image") {
+                replaceWith("![]()")
+            } else if (command.type === "columns") {
+                const count = command.count || 2
+                let cols = []
+                for (let i = 0; i < count; i++) cols.push("")
+                replaceWith("<!-- zinc-columns v1 " + JSON.stringify({ cols: cols }) + " -->")
             } else if (command.type === "quote") {
                 const lines = content.split("\n")
                 replaceWith(lines.map(l => "> " + l).join("\n"))

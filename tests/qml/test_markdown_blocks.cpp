@@ -35,6 +35,8 @@ TEST_CASE("MarkdownBlocks: serialize/parse round-trip", "[qml][markdown]") {
     blocks.append(block("paragraph", "Hello\nWorld"));
     blocks.append(block("bulleted", "- item 1\n  continuation\n- item 2"));
     blocks.append(block("todo", "Task", 1, true));
+    blocks.append(block("image", "file:///tmp/example.png"));
+    blocks.append(block("columns", R"({"cols":["Left","Right"]})"));
     blocks.append(block("quote", "A\nB"));
     blocks.append(block("code", "int main() {\n  return 0;\n}", 0, false, false, "cpp"));
     blocks.append(block("divider", ""));
@@ -68,6 +70,10 @@ TEST_CASE("MarkdownBlocks: parseWithSpans returns raw slices", "[qml][markdown]"
         "\n"
         "## Title\n"
         "\n"
+        "<!-- zinc-columns v1 {\"cols\":[\"A\",\"B\"]} -->\n"
+        "\n"
+        "![](/tmp/example.png)\n"
+        "\n"
         "- item 1\n"
         "  continuation\n"
         "- item 2\n"
@@ -80,20 +86,26 @@ TEST_CASE("MarkdownBlocks: parseWithSpans returns raw slices", "[qml][markdown]"
         "\n");
 
     const auto spans = codec.parseWithSpans(md);
-    REQUIRE(spans.size() == 5);
+    REQUIRE(spans.size() == 7);
 
     REQUIRE(spans[0].toMap().value("blockType").toString() == QStringLiteral("heading"));
     REQUIRE(spans[0].toMap().value("raw").toString() == QStringLiteral("## Title\n"));
 
-    REQUIRE(spans[1].toMap().value("blockType").toString() == QStringLiteral("bulleted"));
-    REQUIRE(spans[1].toMap().value("raw").toString().startsWith("- item 1"));
+    REQUIRE(spans[1].toMap().value("blockType").toString() == QStringLiteral("columns"));
+    REQUIRE(spans[1].toMap().value("raw").toString().startsWith("<!-- zinc-columns"));
 
-    REQUIRE(spans[2].toMap().value("blockType").toString() == QStringLiteral("todo"));
-    REQUIRE(spans[2].toMap().value("raw").toString() == QStringLiteral("- [ ] Task\n"));
+    REQUIRE(spans[2].toMap().value("blockType").toString() == QStringLiteral("image"));
+    REQUIRE(spans[2].toMap().value("raw").toString() == QStringLiteral("![](/tmp/example.png)\n"));
 
-    REQUIRE(spans[3].toMap().value("blockType").toString() == QStringLiteral("divider"));
-    REQUIRE(spans[3].toMap().value("raw").toString() == QStringLiteral("---\n"));
+    REQUIRE(spans[3].toMap().value("blockType").toString() == QStringLiteral("bulleted"));
+    REQUIRE(spans[3].toMap().value("raw").toString().startsWith("- item 1"));
 
-    REQUIRE(spans[4].toMap().value("blockType").toString() == QStringLiteral("link"));
-    REQUIRE(spans[4].toMap().value("raw").toString().startsWith("[Example]("));
+    REQUIRE(spans[4].toMap().value("blockType").toString() == QStringLiteral("todo"));
+    REQUIRE(spans[4].toMap().value("raw").toString() == QStringLiteral("- [ ] Task\n"));
+
+    REQUIRE(spans[5].toMap().value("blockType").toString() == QStringLiteral("divider"));
+    REQUIRE(spans[5].toMap().value("raw").toString() == QStringLiteral("---\n"));
+
+    REQUIRE(spans[6].toMap().value("blockType").toString() == QStringLiteral("link"));
+    REQUIRE(spans[6].toMap().value("raw").toString().startsWith("[Example]("));
 }

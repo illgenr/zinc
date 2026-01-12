@@ -282,7 +282,7 @@ Item {
             event.accepted = true
             root.editor.copyCrossBlockSelectionToClipboard()
         } else if ((event.modifiers & Qt.ControlModifier) && event.key === Qt.Key_V && root.editor) {
-            if (root.editor.pasteBlocksFromClipboard(root.blockIndex)) {
+            if (root.editor.pasteFromClipboard(root.blockIndex)) {
                 event.accepted = true
             }
         } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
