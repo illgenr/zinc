@@ -73,6 +73,10 @@ Popup {
         clip: true
         currentIndex: 0
         spacing: 2
+
+        ScrollBar.vertical: ScrollBar {
+            policy: ScrollBar.AsNeeded
+        }
         
         delegate: Rectangle {
             id: delegateItem

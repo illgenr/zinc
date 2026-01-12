@@ -38,7 +38,7 @@ Item {
 
     Rectangle {
         anchors.fill: parent
-        color: root.rangeSelected && !root.textControl ? ThemeManager.accentLight : "transparent"
+        color: root.rangeSelected ? ThemeManager.accentLight : "transparent"
         radius: ThemeManager.radiusSmall
     }
 
@@ -49,6 +49,39 @@ Item {
         // Indent spacing
         Item {
             width: depth * ThemeManager.blockIndent
+        }
+
+        // Selection gutter (drag to select a range of blocks)
+        Item {
+            width: 14
+            height: parent.height
+
+            MouseArea {
+                id: selectionGutter
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.IBeamCursor
+                preventStealing: true
+
+                onPressed: function(mouse) {
+                    if (!root.editor) return
+                    root.editor.startBlockRangeSelection(root.blockIndex)
+                    const p = selectionGutter.mapToItem(root.editor, mouse.x, mouse.y)
+                    root.editor.updateBlockRangeSelectionByEditorY(p.y)
+                    mouse.accepted = true
+                }
+
+                onPositionChanged: function(mouse) {
+                    if (!pressed || !root.editor) return
+                    const p = selectionGutter.mapToItem(root.editor, mouse.x, mouse.y)
+                    root.editor.updateBlockRangeSelectionByEditorY(p.y)
+                    mouse.accepted = true
+                }
+
+                onReleased: {
+                    if (root.editor) root.editor.endBlockRangeSelection()
+                }
+            }
         }
 
         // Drag handle (appears on hover)

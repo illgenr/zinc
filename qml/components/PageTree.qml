@@ -78,6 +78,7 @@ Item {
         pagesChanged()
         
         pageSelected(id, "Untitled")
+        return id
     }
     
     // Get all pages as a list (for mobile and linking)

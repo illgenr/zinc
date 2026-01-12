@@ -69,51 +69,73 @@ Rectangle {
         }
         
         // Code content
-        ScrollView {
+        TextEdit {
+            id: codeEdit
+
             Layout.fillWidth: true
             Layout.fillHeight: true
-            
-            TextEdit {
-                id: codeEdit
-                
-                width: parent.width
-                
-                text: root.content
-                color: ThemeManager.text
-                font.family: ThemeManager.monoFontFamily
-                font.pixelSize: ThemeManager.fontSizeNormal
-                wrapMode: TextEdit.NoWrap
-                selectByMouse: true
-                tabStopDistance: 40
-                
-                // Placeholder
-                Text {
-                    text: "// Enter code here"
-                    color: ThemeManager.textPlaceholder
-                    font: parent.font
-                    visible: parent.text.length === 0 && !parent.activeFocus
-                }
-                
-                onTextChanged: {
-                    if (text !== root.content) {
-                        root.contentEdited(text)
-                    }
-                }
-                
-                onActiveFocusChanged: {
-                    if (activeFocus) {
-                        root.blockFocused()
-                    }
-                }
 
-                Keys.onPressed: function(event) {
-                    if ((event.modifiers & Qt.ControlModifier) && event.key === Qt.Key_C && root.multiBlockSelectionActive && root.editor) {
+            text: root.content
+            color: ThemeManager.text
+            font.family: ThemeManager.monoFontFamily
+            font.pixelSize: ThemeManager.fontSizeNormal
+            wrapMode: TextEdit.NoWrap
+            selectByMouse: true
+            tabStopDistance: 40
+
+            // Placeholder
+            Text {
+                text: "// Enter code here"
+                color: ThemeManager.textPlaceholder
+                font: parent.font
+                visible: parent.text.length === 0 && !parent.activeFocus
+            }
+
+            onTextChanged: {
+                if (text !== root.content) {
+                    root.contentEdited(text)
+                }
+            }
+
+            onActiveFocusChanged: {
+                if (activeFocus) {
+                    root.blockFocused()
+                }
+            }
+
+            function insertAtCursor(s) {
+                const pos = codeEdit.cursorPosition
+                codeEdit.insert(pos, s)
+                codeEdit.cursorPosition = pos + s.length
+            }
+
+            Keys.onReturnPressed: function(event) {
+                event.accepted = true
+                insertAtCursor("\n")
+            }
+
+            Keys.onEnterPressed: function(event) {
+                event.accepted = true
+                insertAtCursor("\n")
+            }
+
+            Keys.onTabPressed: function(event) {
+                event.accepted = true
+                insertAtCursor("\t")
+            }
+
+            Keys.onPressed: function(event) {
+                if (event.key === Qt.Key_Tab) {
+                    event.accepted = true
+                    insertAtCursor("\t")
+                    return
+                }
+                if ((event.modifiers & Qt.ControlModifier) && event.key === Qt.Key_C && root.multiBlockSelectionActive && root.editor) {
+                    event.accepted = true
+                    root.editor.copyCrossBlockSelectionToClipboard()
+                } else if ((event.modifiers & Qt.ControlModifier) && event.key === Qt.Key_V && root.editor) {
+                    if (root.editor.pasteBlocksFromClipboard(root.blockIndex)) {
                         event.accepted = true
-                        root.editor.copyCrossBlockSelectionToClipboard()
-                    } else if ((event.modifiers & Qt.ControlModifier) && event.key === Qt.Key_V && root.editor) {
-                        if (root.editor.pasteBlocksFromClipboard(root.blockIndex)) {
-                            event.accepted = true
-                        }
                     }
                 }
             }

@@ -16,8 +16,46 @@ Item {
     signal backspaceOnEmpty()
     signal blockFocused()
     
-    implicitHeight: Math.max(textEdit.contentHeight + ThemeManager.spacingSmall * 2, 40)
+    readonly property bool showRendered: root.editor && root.editor.renderBlocksWhenNotFocused && !textEdit.activeFocus
+
+    function markdownForRender() {
+        const hashes = level === 1 ? "#" : level === 2 ? "##" : "###"
+        return hashes + " " + (root.content || "")
+    }
+
+    implicitHeight: Math.max((showRendered ? rendered.implicitHeight : textEdit.contentHeight) + ThemeManager.spacingSmall * 2, 40)
     
+    TextEdit {
+        id: rendered
+
+        anchors.fill: parent
+        anchors.margins: ThemeManager.spacingSmall
+
+        textFormat: Text.RichText
+        text: Cmark.toHtml(root.markdownForRender())
+        color: ThemeManager.text
+        wrapMode: TextEdit.Wrap
+        readOnly: true
+        selectByMouse: false
+        visible: root.showRendered
+
+        MouseArea {
+            anchors.fill: parent
+            cursorShape: Qt.IBeamCursor
+            onClicked: function(mouse) {
+                if (!root.editor) return
+                if (mouse.modifiers & Qt.ControlModifier) {
+                    const link = rendered.linkAt(mouse.x, mouse.y)
+                    if (link && link.indexOf("zinc://page/") === 0) {
+                        root.editor.navigateToPage(link.substring("zinc://page/".length))
+                        return
+                    }
+                }
+                textEdit.forceActiveFocus()
+            }
+        }
+    }
+
     TextEdit {
         id: textEdit
         
@@ -32,6 +70,7 @@ Item {
         font.weight: Font.Bold
         wrapMode: TextEdit.Wrap
         selectByMouse: true
+        visible: !root.showRendered
         
         // Placeholder
         Text {

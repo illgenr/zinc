@@ -52,6 +52,17 @@ ApplicationWindow {
         enabled: !isMobile
         onActivated: sidebarCollapsed = !sidebarCollapsed
     }
+
+    ShortcutsDialog {
+        id: shortcutsDialog
+    }
+
+    Shortcut {
+        enabled: !isMobile
+        context: Qt.ApplicationShortcut
+        sequences: ["Ctrl+Shift+?", "Ctrl+Shift+/"]
+        onActivated: shortcutsDialog.open()
+    }
     
     // Mobile layout using StackView
     StackView {
@@ -321,9 +332,43 @@ ApplicationWindow {
                         pageTree.updatePageTitle(root.currentPage.id, newTitle)
                     }
                 }
+
+                onShowPagePicker: function(blockIndex) {
+                    mobilePagePickerDialog.pages = pageTree.getAllPages()
+                    mobilePagePickerDialog.open()
+                    mobilePagePickerDialog._targetEditor = mobileBlockEditor
+                }
+
+                onNavigateToPage: function(targetPageId) {
+                    if (!targetPageId || targetPageId === "") return
+                    var page = DataStore ? DataStore.getPage(targetPageId) : null
+                    var title = page && page.title ? page.title : "Untitled"
+                    root.currentPage = { id: targetPageId, title: title }
+                    mobileBlockEditor.loadPage(targetPageId)
+                }
+
+                onCreateChildPageRequested: function(title, blockIndex) {
+                    if (!title || title === "") return
+                    var newId = pageTree.createPage(mobileBlockEditor.pageId)
+                    if (!newId || newId === "") return
+                    pageTree.updatePageTitle(newId, title)
+                    mobileBlockEditor.setLinkAtIndex(blockIndex, newId, title)
+                }
             }
             
-            PagePickerDialog { id: mobilePagePickerDialog; parent: Overlay.overlay; visible: false }
+            PagePickerDialog {
+                id: mobilePagePickerDialog
+                parent: Overlay.overlay
+                visible: false
+
+                property var _targetEditor: null
+
+                onPageSelected: function(pageId, pageTitle) {
+                    if (_targetEditor) {
+                        _targetEditor.setLinkTarget(pageId, pageTitle)
+                    }
+                }
+            }
         }
     }
     
@@ -483,12 +528,34 @@ ApplicationWindow {
                 anchors.fill: parent
                 pageTitle: currentPage ? currentPage.title : ""
                 availablePages: pageTree.getAllPages()
-                
+
                 onTitleEdited: function(newTitle) {
                     if (currentPage) {
                         currentPage.title = newTitle
                         pageTree.updatePageTitle(currentPage.id, newTitle)
                     }
+                }
+
+                onShowPagePicker: function(blockIndex) {
+                    pagePickerDialog.pages = pageTree.getAllPages()
+                    pagePickerDialog.open()
+                    pagePickerDialog._targetEditor = blockEditor
+                }
+
+                onNavigateToPage: function(targetPageId) {
+                    if (!targetPageId || targetPageId === "") return
+                    var page = DataStore ? DataStore.getPage(targetPageId) : null
+                    var title = page && page.title ? page.title : "Untitled"
+                    root.currentPage = { id: targetPageId, title: title }
+                    blockEditor.loadPage(targetPageId)
+                }
+
+                onCreateChildPageRequested: function(title, blockIndex) {
+                    if (!title || title === "") return
+                    var newId = pageTree.createPage(blockEditor.pageId)
+                    if (!newId || newId === "") return
+                    pageTree.updatePageTitle(newId, title)
+                    blockEditor.setLinkAtIndex(blockIndex, newId, title)
                 }
             }
         }
@@ -516,7 +583,19 @@ ApplicationWindow {
         externalSyncController: appSyncController
     }
     
-    PagePickerDialog { id: pagePickerDialog; parent: Overlay.overlay; visible: false }
+    PagePickerDialog {
+        id: pagePickerDialog
+        parent: Overlay.overlay
+        visible: false
+
+        property var _targetEditor: null
+
+        onPageSelected: function(pageId, pageTitle) {
+            if (_targetEditor) {
+                _targetEditor.setLinkTarget(pageId, pageTitle)
+            }
+        }
+    }
     
     SettingsDialog {
         id: settingsDialog

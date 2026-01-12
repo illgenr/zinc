@@ -2,6 +2,7 @@
 #include "ui/Clipboard.hpp"
 #include "ui/DataStore.hpp"
 #include "ui/FeatureFlags.hpp"
+#include "ui/Cmark.hpp"
 #include "ui/MarkdownBlocks.hpp"
 #include "ui/models/BlockModel.hpp"
 #include "ui/models/PageTreeModel.hpp"
@@ -21,6 +22,7 @@ void registerQmlTypes() {
     qmlRegisterSingletonType<DataStore>("zinc", 1, 0, "DataStore", DataStore::create);
     qmlRegisterSingletonType<Clipboard>("zinc", 1, 0, "Clipboard", Clipboard::create);
     qmlRegisterSingletonType<MarkdownBlocks>("zinc", 1, 0, "MarkdownBlocks", MarkdownBlocks::create);
+    qmlRegisterSingletonType<Cmark>("zinc", 1, 0, "Cmark", Cmark::create);
     
     // Platform utilities
     qmlRegisterSingletonType<platform::AndroidUtils>("zinc", 1, 0, "AndroidUtils", platform::AndroidUtils::create);

@@ -15,7 +15,15 @@ Item {
     signal backspaceOnEmpty()
     signal blockFocused()
     
-    implicitHeight: Math.max(textEdit.contentHeight + ThemeManager.spacingSmall * 2, 32)
+    readonly property bool showRendered: root.editor && root.editor.renderBlocksWhenNotFocused && !textEdit.activeFocus
+
+    function markdownForRender() {
+        const raw = root.content || ""
+        if (raw === "") return ""
+        return raw.split("\n").map(line => "> " + line).join("\n")
+    }
+
+    implicitHeight: Math.max((showRendered ? rendered.implicitHeight : textEdit.contentHeight) + ThemeManager.spacingSmall * 2, 32)
     
     // Left border
     Rectangle {
@@ -23,6 +31,40 @@ Item {
         height: parent.height
         color: ThemeManager.textMuted
         radius: 1.5
+    }
+
+    TextEdit {
+        id: rendered
+
+        anchors.fill: parent
+        anchors.leftMargin: ThemeManager.spacingMedium
+        anchors.rightMargin: ThemeManager.spacingSmall
+        anchors.topMargin: ThemeManager.spacingSmall
+        anchors.bottomMargin: ThemeManager.spacingSmall
+
+        textFormat: Text.RichText
+        text: Cmark.toHtml(root.markdownForRender())
+        color: ThemeManager.textSecondary
+        wrapMode: TextEdit.Wrap
+        readOnly: true
+        selectByMouse: false
+        visible: root.showRendered
+
+        MouseArea {
+            anchors.fill: parent
+            cursorShape: Qt.IBeamCursor
+            onClicked: function(mouse) {
+                if (!root.editor) return
+                if (mouse.modifiers & Qt.ControlModifier) {
+                    const link = rendered.linkAt(mouse.x, mouse.y)
+                    if (link && link.indexOf("zinc://page/") === 0) {
+                        root.editor.navigateToPage(link.substring("zinc://page/".length))
+                        return
+                    }
+                }
+                textEdit.forceActiveFocus()
+            }
+        }
     }
     
     TextEdit {
@@ -41,6 +83,7 @@ Item {
         font.italic: true
         wrapMode: TextEdit.Wrap
         selectByMouse: true
+        visible: !root.showRendered
         
         // Placeholder
         Text {

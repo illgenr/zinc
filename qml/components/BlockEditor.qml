@@ -18,14 +18,17 @@ Item {
     property string pageId: ""
     property double lastLocalEditMs: 0
     property bool pendingRemoteRefresh: false
+    property bool renderBlocksWhenNotFocused: true
     
     signal blockFocused(int index)
     signal titleEdited(string newTitle)
     signal navigateToPage(string targetPageId)
     signal showPagePicker(int blockIndex)
+    signal createChildPageRequested(string title, int blockIndex)
     
     property var availablePages: []  // Set by parent to provide page list for linking
     property bool selectionDragging: false
+    property bool blockRangeSelecting: false
     property int selectionAnchorBlockIndex: -1
     property int selectionFocusBlockIndex: -1
     property int selectionAnchorPos: -1
@@ -167,6 +170,31 @@ Item {
     function endCrossBlockSelection() {
         selectionDragging = false
         if (debugSelection) console.log("BlockEditor: selection end")
+    }
+
+    function startBlockRangeSelection(startIndex) {
+        blockRangeSelecting = true
+        selectionAnchorBlockIndex = startIndex
+        selectionFocusBlockIndex = startIndex
+        selectionAnchorPos = 0
+        selectionFocusPos = 0
+        applyCrossBlockSelection()
+    }
+
+    function updateBlockRangeSelectionByEditorY(editorY) {
+        if (!blockRangeSelecting) return
+        lastSelectionPoint = Qt.point(0, editorY)
+        const idx = blockIndexAtEditorY(editorY)
+        if (idx < 0) return
+        selectionFocusBlockIndex = idx
+        selectionAnchorPos = 0
+        selectionFocusPos = 1e9
+        applyCrossBlockSelection()
+        autoscrollForEditorPoint(Qt.point(0, editorY))
+    }
+
+    function endBlockRangeSelection() {
+        blockRangeSelecting = false
     }
 
     function selectedBlocksForMarkdown() {
@@ -475,7 +503,7 @@ Item {
         id: blockRepeater
         model: blockModel
                 
-        delegate: Block {
+                delegate: Block {
             Layout.fillWidth: true
                     
             blockIndex: index
@@ -576,6 +604,9 @@ Item {
                     }
                     
                     onBlockFocused: {
+                        if (!root.selectionDragging && !root.blockRangeSelecting && root.selectionAnchorBlockIndex >= 0) {
+                            root.clearCrossBlockSelection()
+                        }
                         currentBlockIndex = index
                         root.blockFocused(index)
                     }
@@ -645,7 +676,7 @@ Item {
 
     Shortcut {
         enabled: root.hasCrossBlockSelection
-        sequence: StandardKey.Copy
+        sequences: [StandardKey.Copy]
         context: Qt.ApplicationShortcut
         onActivated: root.copyCrossBlockSelectionToClipboard()
     }
@@ -654,10 +685,12 @@ Item {
         id: autoscrollTimer
         interval: 16
         repeat: true
-        running: root.selectionDragging || root.reorderDragging
+        running: root.selectionDragging || root.blockRangeSelecting || root.reorderDragging
         onTriggered: {
             if (root.selectionDragging) {
                 root.updateCrossBlockSelection(root.lastSelectionPoint)
+            } else if (root.blockRangeSelecting) {
+                root.updateBlockRangeSelectionByEditorY(root.lastSelectionPoint.y)
             } else if (root.reorderDragging) {
                 root.updateReorderBlockByEditorY(root.lastReorderPoint.y)
             }
@@ -700,6 +733,13 @@ Item {
         }
         pendingLinkBlockIndex = -1
     }
+
+    function setLinkAtIndex(blockIndex, pageId, pageTitle) {
+        if (blockIndex < 0 || blockIndex >= blockModel.count) return
+        blockModel.setProperty(blockIndex, "blockType", "link")
+        blockModel.setProperty(blockIndex, "content", pageId + "|" + pageTitle)
+        scheduleAutosave()
+    }
     
     property int currentBlockIndex: -1
     
@@ -711,9 +751,7 @@ Item {
         onTriggered: {
             if (targetIndex >= 0 && targetIndex < blockRepeater.count) {
                 let item = blockRepeater.itemAt(targetIndex)
-                if (item) {
-                    item.forceActiveFocus()
-                }
+                root.focusBlock(targetIndex)
             }
         }
     }
@@ -722,8 +760,11 @@ Item {
     function focusBlock(idx) {
         if (idx >= 0 && idx < blockRepeater.count) {
             let item = blockRepeater.itemAt(idx)
-            if (item) {
-                item.forceActiveFocus()
+            if (!item) return
+            const target = item.textControl ? item.textControl : item
+            target.forceActiveFocus()
+            if ("cursorPosition" in target) {
+                target.cursorPosition = (target.text || "").length
             }
         }
     }

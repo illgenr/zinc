@@ -18,7 +18,14 @@ Item {
     signal checkedToggled()
     signal blockFocused()
     
-    implicitHeight: Math.max(rowLayout.height + ThemeManager.spacingSmall * 2, 32)
+    readonly property bool showRendered: root.editor && root.editor.renderBlocksWhenNotFocused && !textEdit.activeFocus
+
+    function markdownForRender() {
+        // Render just the content; the checkbox UI is already shown separately.
+        return root.content || ""
+    }
+
+    implicitHeight: Math.max((showRendered ? rendered.implicitHeight : rowLayout.height) + ThemeManager.spacingSmall * 2, 32)
     
     RowLayout {
         id: rowLayout
@@ -52,6 +59,37 @@ Item {
             }
         }
         
+        TextEdit {
+            id: rendered
+
+            Layout.fillWidth: true
+            Layout.alignment: Qt.AlignVCenter
+
+            textFormat: Text.RichText
+            text: Cmark.toHtml(root.markdownForRender())
+            color: isChecked ? ThemeManager.textSecondary : ThemeManager.text
+            wrapMode: TextEdit.Wrap
+            readOnly: true
+            selectByMouse: false
+            visible: root.showRendered
+
+            MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.IBeamCursor
+                onClicked: function(mouse) {
+                    if (!root.editor) return
+                    if (mouse.modifiers & Qt.ControlModifier) {
+                        const link = rendered.linkAt(mouse.x, mouse.y)
+                        if (link && link.indexOf("zinc://page/") === 0) {
+                            root.editor.navigateToPage(link.substring("zinc://page/".length))
+                            return
+                        }
+                    }
+                    textEdit.forceActiveFocus()
+                }
+            }
+        }
+
         // Text
         TextEdit {
             id: textEdit
@@ -66,6 +104,7 @@ Item {
             font.strikeout: isChecked
             wrapMode: TextEdit.Wrap
             selectByMouse: true
+            visible: !root.showRendered
             
             // Placeholder
             Text {

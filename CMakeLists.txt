@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(zinc VERSION 0.1 LANGUAGES CXX)
+project(zinc VERSION 0.1 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -234,6 +234,8 @@ add_library(zinc_ui STATIC
     src/ui/Clipboard.cpp
     src/ui/FeatureFlags.hpp
     src/ui/FeatureFlags.cpp
+    src/ui/Cmark.hpp
+    src/ui/Cmark.cpp
     src/ui/DataStore.hpp
     src/ui/DataStore.cpp
     src/ui/MarkdownBlocks.hpp
@@ -253,6 +255,13 @@ add_library(zinc_ui STATIC
     src/platform/android/android_utils.hpp
     src/platform/android/android_utils.cpp
 )
+
+# CommonMark renderer (vendored cmark)
+set(CMARK_LIB_FUZZER OFF CACHE BOOL "" FORCE)
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
+add_subdirectory(third_party/cmark EXCLUDE_FROM_ALL)
+target_link_libraries(zinc_ui PRIVATE cmark)
 
 if(ZINC_ENABLE_QR)
     target_sources(zinc_ui PRIVATE
@@ -323,6 +332,7 @@ set(ZINC_QML_FILES
     qml/dialogs/PairingDialog.qml
     qml/dialogs/SettingsDialog.qml
     qml/dialogs/PagePickerDialog.qml
+    qml/dialogs/ShortcutsDialog.qml
     qml/theme/Theme.qml
     qml/theme/ThemeManager.qml
 )
@@ -459,6 +469,7 @@ if(ZINC_BUILD_TESTS)
         tests/qml/test_feature_flags.cpp
         tests/qml/test_datastore_sync.cpp
         tests/qml/test_markdown_blocks.cpp
+        tests/qml/test_cmark.cpp
         tests/qml/test_sync_controller_settings.cpp
         tests/qml/test_pairing_dialog_qml.cpp
         tests/qml/test_markdown_editor_qml.cpp
