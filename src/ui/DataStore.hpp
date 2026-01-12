@@ -32,11 +32,18 @@ public:
     Q_INVOKABLE QVariantList getPagesForSync();
     Q_INVOKABLE QVariantList getPagesForSyncSince(const QString& updatedAtCursor,
                                                   const QString& pageIdCursor);
+    Q_INVOKABLE QVariantList getDeletedPagesForSync();
+    Q_INVOKABLE QVariantList getDeletedPagesForSyncSince(const QString& deletedAtCursor,
+                                                         const QString& pageIdCursor);
     Q_INVOKABLE QVariantMap getPage(const QString& pageId);
     Q_INVOKABLE void savePage(const QVariantMap& page);
     Q_INVOKABLE void deletePage(const QString& pageId);
     Q_INVOKABLE void saveAllPages(const QVariantList& pages);
     Q_INVOKABLE void applyPageUpdates(const QVariantList& pages);
+    Q_INVOKABLE void applyDeletedPageUpdates(const QVariantList& deletedPages);
+
+    Q_INVOKABLE int deletedPagesRetentionLimit() const;
+    Q_INVOKABLE void setDeletedPagesRetentionLimit(int limit);
     
     // Block operations  
     Q_INVOKABLE QVariantList getBlocksForPage(const QString& pageId);

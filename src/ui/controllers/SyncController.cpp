@@ -61,6 +61,11 @@ SyncController::SyncController(QObject* parent)
                 if (blocksValue.isArray()) {
                     emit blockSnapshotReceivedBlocks(blocksValue.toArray().toVariantList());
                 }
+
+                auto deletedPagesValue = obj.value("deletedPages");
+                if (deletedPagesValue.isArray()) {
+                    emit deletedPageSnapshotReceivedPages(deletedPagesValue.toArray().toVariantList());
+                }
             });
     connect(sync_manager_.get(), &network::SyncManager::error,
             this, &SyncController::error);

@@ -39,6 +39,8 @@ Dialog {
     property string pagesCursorId: ""
     property string blocksCursorAt: ""
     property string blocksCursorId: ""
+    property string deletedPagesCursorAt: ""
+    property string deletedPagesCursorId: ""
 
     PairingController {
         id: pairingController
@@ -111,6 +113,8 @@ Dialog {
             pagesCursorId = ""
             blocksCursorAt = ""
             blocksCursorId = ""
+            deletedPagesCursorAt = ""
+            deletedPagesCursorId = ""
             sendLocalPagesSnapshot(true)
         }
 
@@ -131,6 +135,16 @@ Dialog {
             console.log("PairingDialog: received snapshot blocks", blocks.length)
             suppressOutgoingSnapshots = true
             DataStore.applyBlockUpdates(blocks)
+            Qt.callLater(function() { suppressOutgoingSnapshots = false })
+        }
+
+        function onDeletedPageSnapshotReceivedPages(deletedPages) {
+            if (!deletedPages) {
+                return
+            }
+            console.log("PairingDialog: received deleted pages", deletedPages.length)
+            suppressOutgoingSnapshots = true
+            DataStore.applyDeletedPageUpdates(deletedPages)
             Qt.callLater(function() { suppressOutgoingSnapshots = false })
         }
     }
@@ -168,12 +182,12 @@ Dialog {
         outgoingSnapshotTimer.restart()
     }
 
-    function advanceCursorFrom(items, cursorAtKey, cursorIdKey, idField) {
+    function advanceCursorFrom(items, cursorAtKey, cursorIdKey, cursorAtField, idField) {
         var cursorAt = root[cursorAtKey]
         var cursorId = root[cursorIdKey]
         for (var i = 0; i < items.length; i++) {
             var entry = items[i]
-            var updatedAt = entry.updatedAt || ""
+            var updatedAt = entry[cursorAtField] || ""
             var entryId = entry[idField] || ""
             if (cursorAt === "" || updatedAt > cursorAt || (updatedAt === cursorAt && entryId > cursorId)) {
                 cursorAt = updatedAt
@@ -192,7 +206,10 @@ Dialog {
                          : DataStore.getPagesForSyncSince(pagesCursorAt, pagesCursorId)
         var blocks = full ? DataStore.getBlocksForSync()
                           : DataStore.getBlocksForSyncSince(blocksCursorAt, blocksCursorId)
-        if (!full && (!pages || pages.length === 0) && (!blocks || blocks.length === 0)) {
+        var deletedPages = full ? DataStore.getDeletedPagesForSync()
+                                : DataStore.getDeletedPagesForSyncSince(deletedPagesCursorAt, deletedPagesCursorId)
+        if (!full && (!pages || pages.length === 0) && (!blocks || blocks.length === 0) &&
+            (!deletedPages || deletedPages.length === 0)) {
             return
         }
         var payload = JSON.stringify({
@@ -200,13 +217,15 @@ Dialog {
             workspaceId: activeSyncController.workspaceId,
             full: full === true,
             pages: pages,
-            blocks: blocks
+            blocks: blocks,
+            deletedPages: deletedPages
         })
-        console.log("PairingDialog: sending snapshot full=", full === true, "pages", pages.length, "blocks", blocks.length)
+        console.log("PairingDialog: sending snapshot full=", full === true, "pages", pages.length, "blocks", blocks.length, "deleted", deletedPages.length)
         activeSyncController.sendPageSnapshot(payload)
 
-        advanceCursorFrom(pages, "pagesCursorAt", "pagesCursorId", "pageId")
-        advanceCursorFrom(blocks, "blocksCursorAt", "blocksCursorId", "blockId")
+        advanceCursorFrom(pages, "pagesCursorAt", "pagesCursorId", "updatedAt", "pageId")
+        advanceCursorFrom(blocks, "blocksCursorAt", "blocksCursorId", "updatedAt", "blockId")
+        advanceCursorFrom(deletedPages, "deletedPagesCursorAt", "deletedPagesCursorId", "deletedAt", "pageId")
     }
     
     background: Rectangle {

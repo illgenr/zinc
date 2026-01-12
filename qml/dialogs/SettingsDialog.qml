@@ -488,6 +488,24 @@ Dialog {
                 label: "Auto-connect"
                 Switch { checked: true }
             }
+
+            SettingsRow {
+                label: "Deleted pages history"
+
+                SpinBox {
+                    id: deletedPagesRetentionSpin
+                    from: 0
+                    to: 10000
+                    value: DataStore ? DataStore.deletedPagesRetentionLimit() : 100
+                    editable: true
+
+                    onValueModified: {
+                        if (DataStore) {
+                            DataStore.setDeletedPagesRetentionLimit(value)
+                        }
+                    }
+                }
+            }
         }
     }
     

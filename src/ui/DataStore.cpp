@@ -10,12 +10,72 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
+#include <QSettings>
 #include <QSet>
 #include <QDebug>
 
 namespace zinc::ui {
 
 namespace {
+
+constexpr const char* kSettingsDeletedPagesRetention = "sync/deleted_pages_retention";
+constexpr int kDefaultDeletedPagesRetention = 100;
+constexpr int kMaxDeletedPagesRetention = 10000;
+
+QString now_timestamp_utc() {
+    return QDateTime::currentDateTimeUtc().toString("yyyy-MM-dd HH:mm:ss.zzz");
+}
+
+int normalize_retention_limit(int limit) {
+    if (limit < 0) return 0;
+    if (limit > kMaxDeletedPagesRetention) return kMaxDeletedPagesRetention;
+    return limit;
+}
+
+int deleted_pages_retention_limit() {
+    QSettings settings;
+    return normalize_retention_limit(
+        settings.value(QString::fromLatin1(kSettingsDeletedPagesRetention),
+                       kDefaultDeletedPagesRetention).toInt());
+}
+
+void prune_deleted_pages(QSqlDatabase& db, int keepLimit) {
+    if (keepLimit <= 0) {
+        QSqlQuery clear(db);
+        clear.exec("DELETE FROM deleted_pages");
+        return;
+    }
+
+    QSqlQuery prune(db);
+    prune.prepare(R"SQL(
+        DELETE FROM deleted_pages
+        WHERE page_id NOT IN (
+            SELECT page_id
+            FROM deleted_pages
+            ORDER BY deleted_at DESC, page_id DESC
+            LIMIT ?
+        )
+    )SQL");
+    prune.addBindValue(keepLimit);
+    prune.exec();
+}
+
+void upsert_deleted_page(QSqlDatabase& db,
+                         const QString& pageId,
+                         const QString& deletedAt) {
+    if (pageId.isEmpty()) return;
+
+    QSqlQuery upsert(db);
+    upsert.prepare(R"SQL(
+        INSERT INTO deleted_pages (page_id, deleted_at)
+        VALUES (?, ?)
+        ON CONFLICT(page_id) DO UPDATE SET
+            deleted_at = excluded.deleted_at;
+    )SQL");
+    upsert.addBindValue(pageId);
+    upsert.addBindValue(deletedAt);
+    upsert.exec();
+}
 
 QString resolve_database_path() {
     const auto overridePath = qEnvironmentVariable("ZINC_DB_PATH");
@@ -69,7 +129,7 @@ QString normalize_timestamp(const QVariant& value) {
     if (!raw.isEmpty()) {
         return raw;
     }
-    return QDateTime::currentDateTimeUtc().toString("yyyy-MM-dd HH:mm:ss.zzz");
+    return now_timestamp_utc();
 }
 
 } // namespace
@@ -136,6 +196,13 @@ void DataStore::createTables() {
             updated_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
     )");
+
+    query.exec(R"(
+        CREATE TABLE IF NOT EXISTS deleted_pages (
+            page_id TEXT PRIMARY KEY,
+            deleted_at TEXT NOT NULL
+        )
+    )");
     
     // Blocks table
     query.exec(R"(
@@ -172,6 +239,7 @@ void DataStore::createTables() {
     // Create index for faster lookups
     query.exec("CREATE INDEX IF NOT EXISTS idx_blocks_page_id ON blocks(page_id)");
     query.exec("CREATE INDEX IF NOT EXISTS idx_pages_parent_id ON pages(parent_id)");
+    query.exec("CREATE INDEX IF NOT EXISTS idx_deleted_pages_deleted_at ON deleted_pages(deleted_at)");
     query.exec("CREATE INDEX IF NOT EXISTS idx_paired_devices_workspace_id ON paired_devices(workspace_id)");
 }
 
@@ -269,6 +337,65 @@ QVariantList DataStore::getPagesForSyncSince(const QString& updatedAtCursor,
     return pages;
 }
 
+QVariantList DataStore::getDeletedPagesForSync() {
+    QVariantList deletedPages;
+    if (!m_ready) {
+        return deletedPages;
+    }
+
+    QSqlQuery query(m_db);
+    query.exec(R"SQL(
+        SELECT page_id, deleted_at
+        FROM deleted_pages
+        ORDER BY deleted_at, page_id
+    )SQL");
+
+    while (query.next()) {
+        QVariantMap entry;
+        entry["pageId"] = query.value(0).toString();
+        entry["deletedAt"] = query.value(1).toString();
+        deletedPages.append(entry);
+    }
+    return deletedPages;
+}
+
+QVariantList DataStore::getDeletedPagesForSyncSince(const QString& deletedAtCursor,
+                                                    const QString& pageIdCursor) {
+    if (deletedAtCursor.isEmpty()) {
+        return getDeletedPagesForSync();
+    }
+
+    QVariantList deletedPages;
+    if (!m_ready) {
+        return deletedPages;
+    }
+
+    QSqlQuery query(m_db);
+    query.prepare(R"SQL(
+        SELECT page_id, deleted_at
+        FROM deleted_pages
+        WHERE deleted_at > ?
+           OR (deleted_at = ? AND page_id > ?)
+        ORDER BY deleted_at, page_id
+    )SQL");
+    query.addBindValue(deletedAtCursor);
+    query.addBindValue(deletedAtCursor);
+    query.addBindValue(pageIdCursor);
+
+    if (!query.exec()) {
+        qWarning() << "DataStore: getDeletedPagesForSyncSince query failed:" << query.lastError().text();
+        return deletedPages;
+    }
+
+    while (query.next()) {
+        QVariantMap entry;
+        entry["pageId"] = query.value(0).toString();
+        entry["deletedAt"] = query.value(1).toString();
+        deletedPages.append(entry);
+    }
+    return deletedPages;
+}
+
 QVariantMap DataStore::getPage(const QString& pageId) {
     QVariantMap page;
     
@@ -298,7 +425,7 @@ void DataStore::savePage(const QVariantMap& page) {
         VALUES (?, ?, ?, ?, ?, ?)
     )");
     
-    const QString updatedAt = QDateTime::currentDateTimeUtc().toString("yyyy-MM-dd HH:mm:ss.zzz");
+    const QString updatedAt = now_timestamp_utc();
     query.addBindValue(page["pageId"].toString());
     query.addBindValue(normalize_title(page.value("title")));
     query.addBindValue(normalize_parent_id(page.value("parentId")));
@@ -317,6 +444,8 @@ void DataStore::savePage(const QVariantMap& page) {
 void DataStore::deletePage(const QString& pageId) {
     if (!m_ready) return;
     
+    const QString deletedAt = now_timestamp_utc();
+
     // Delete blocks for this page first
     deleteBlocksForPage(pageId);
     
@@ -328,6 +457,9 @@ void DataStore::deletePage(const QString& pageId) {
         qWarning() << "DataStore: Failed to delete page:" << query.lastError().text();
         emit error("Failed to delete page: " + query.lastError().text());
     }
+
+    upsert_deleted_page(m_db, pageId, deletedAt);
+    prune_deleted_pages(m_db, deleted_pages_retention_limit());
     
     emit pagesChanged();
 }
@@ -336,7 +468,8 @@ void DataStore::saveAllPages(const QVariantList& pages) {
     if (!m_ready) return;
     
     m_db.transaction();
-    const QString updatedAt = QDateTime::currentDateTimeUtc().toString("yyyy-MM-dd HH:mm:ss.zzz");
+    const QString updatedAt = now_timestamp_utc();
+    const QString deletedAt = updatedAt;
     
     // Delete pages not present anymore (if any)
     QStringList ids;
@@ -348,8 +481,28 @@ void DataStore::saveAllPages(const QVariantList& pages) {
             ids.push_back(id);
         }
     }
+    QString placeholders;
     if (!ids.isEmpty()) {
-        QString placeholders;
+        // Track which pages are being deleted so peers can remove them on sync/reconnect.
+        placeholders.clear();
+        placeholders.reserve(ids.size() * 2);
+        for (int i = 0; i < ids.size(); ++i) {
+            placeholders += (i == 0) ? "?" : ",?";
+        }
+        QSqlQuery removedQuery(m_db);
+        removedQuery.prepare("SELECT id FROM pages WHERE id NOT IN (" + placeholders + ")");
+        for (int i = 0; i < ids.size(); ++i) {
+            removedQuery.addBindValue(ids[i]);
+        }
+        if (removedQuery.exec()) {
+            while (removedQuery.next()) {
+                const QString pageId = removedQuery.value(0).toString();
+                deleteBlocksForPage(pageId);
+                upsert_deleted_page(m_db, pageId, deletedAt);
+            }
+        }
+
+        placeholders.clear();
         placeholders.reserve(ids.size() * 2);
         for (int i = 0; i < ids.size(); ++i) {
             placeholders += (i == 0) ? "?" : ",?";
@@ -360,7 +513,20 @@ void DataStore::saveAllPages(const QVariantList& pages) {
             deleteQuery.addBindValue(ids[i]);
         }
         deleteQuery.exec();
+    } else {
+        // Incoming page list is empty: treat as delete-all.
+        QSqlQuery allIds(m_db);
+        allIds.exec("SELECT id FROM pages");
+        while (allIds.next()) {
+            const QString pageId = allIds.value(0).toString();
+            deleteBlocksForPage(pageId);
+            upsert_deleted_page(m_db, pageId, deletedAt);
+        }
+        QSqlQuery deleteAll(m_db);
+        deleteAll.exec("DELETE FROM pages");
     }
+
+    prune_deleted_pages(m_db, deleted_pages_retention_limit());
 
     QSqlQuery selectQuery(m_db);
     selectQuery.prepare("SELECT title, parent_id, depth, sort_order FROM pages WHERE id = ?");
@@ -464,6 +630,12 @@ void DataStore::applyPageUpdates(const QVariantList& pages) {
     bool changed = false;
     m_db.transaction();
 
+    QSqlQuery tombstoneSelect(m_db);
+    tombstoneSelect.prepare("SELECT deleted_at FROM deleted_pages WHERE page_id = ?");
+
+    QSqlQuery tombstoneDelete(m_db);
+    tombstoneDelete.prepare("DELETE FROM deleted_pages WHERE page_id = ?");
+
     QSqlQuery selectQuery(m_db);
     selectQuery.prepare("SELECT updated_at FROM pages WHERE id = ?");
 
@@ -486,8 +658,27 @@ void DataStore::applyPageUpdates(const QVariantList& pages) {
             continue;
         }
 
-        const QString remoteUpdated = page.value("updatedAt").toString();
+        const QString remoteUpdated = normalize_timestamp(page.value("updatedAt"));
         QDateTime remoteTime = parse_timestamp(remoteUpdated);
+
+        tombstoneSelect.bindValue(0, pageId);
+        QString deletedAt;
+        if (tombstoneSelect.exec() && tombstoneSelect.next()) {
+            deletedAt = tombstoneSelect.value(0).toString();
+        }
+        tombstoneSelect.finish();
+
+        if (!deletedAt.isEmpty()) {
+            QDateTime deletedTime = parse_timestamp(deletedAt);
+            if (deletedTime.isValid() && remoteTime.isValid() && deletedTime > remoteTime) {
+                continue;
+            }
+            if (deletedTime.isValid() && remoteTime.isValid() && deletedTime <= remoteTime) {
+                tombstoneDelete.bindValue(0, pageId);
+                tombstoneDelete.exec();
+                tombstoneDelete.finish();
+            }
+        }
 
         selectQuery.bindValue(0, pageId);
         QString localUpdated;
@@ -510,7 +701,7 @@ void DataStore::applyPageUpdates(const QVariantList& pages) {
         upsertQuery.bindValue(2, normalize_parent_id(page.value("parentId")));
         upsertQuery.bindValue(3, page.value("depth").toInt());
         upsertQuery.bindValue(4, page.value("sortOrder").toInt());
-        upsertQuery.bindValue(5, normalize_timestamp(page.value("updatedAt")));
+        upsertQuery.bindValue(5, remoteUpdated);
         if (!upsertQuery.exec()) {
             qWarning() << "DataStore: Failed to apply page update:" << upsertQuery.lastError().text();
         } else {
@@ -523,6 +714,97 @@ void DataStore::applyPageUpdates(const QVariantList& pages) {
     if (changed) {
         qDebug() << "DataStore: applyPageUpdates changed";
         emit pagesChanged();
+    }
+}
+
+void DataStore::applyDeletedPageUpdates(const QVariantList& deletedPages) {
+    if (!m_ready) return;
+
+    auto subtreePageIds = [&](const QString& rootId) {
+        QStringList ids;
+        if (rootId.isEmpty()) {
+            return ids;
+        }
+        ids.append(rootId);
+        for (int i = 0; i < ids.size(); ++i) {
+            QSqlQuery children(m_db);
+            children.prepare("SELECT id FROM pages WHERE parent_id = ?");
+            children.addBindValue(ids[i]);
+            if (!children.exec()) {
+                continue;
+            }
+            while (children.next()) {
+                const QString childId = children.value(0).toString();
+                if (!childId.isEmpty() && !ids.contains(childId)) {
+                    ids.append(childId);
+                }
+            }
+        }
+        return ids;
+    };
+
+    bool changed = false;
+    m_db.transaction();
+
+    QSqlQuery tombstoneSelect(m_db);
+    tombstoneSelect.prepare("SELECT deleted_at FROM deleted_pages WHERE page_id = ?");
+
+    QSqlQuery pageDelete(m_db);
+    pageDelete.prepare("DELETE FROM pages WHERE id = ?");
+
+    for (const auto& entry : deletedPages) {
+        const auto deleted = entry.toMap();
+        const QString pageId = deleted.value("pageId").toString();
+        if (pageId.isEmpty()) {
+            continue;
+        }
+
+        const QString remoteDeletedAt = normalize_timestamp(deleted.value("deletedAt"));
+        QDateTime remoteDeletedTime = parse_timestamp(remoteDeletedAt);
+
+        tombstoneSelect.bindValue(0, pageId);
+        QString localDeletedAt;
+        if (tombstoneSelect.exec() && tombstoneSelect.next()) {
+            localDeletedAt = tombstoneSelect.value(0).toString();
+        }
+        tombstoneSelect.finish();
+
+        if (!localDeletedAt.isEmpty()) {
+            QDateTime localDeletedTime = parse_timestamp(localDeletedAt);
+            if (localDeletedTime.isValid() && remoteDeletedTime.isValid() &&
+                localDeletedTime > remoteDeletedTime) {
+                continue;
+            }
+        }
+
+        const auto ids = subtreePageIds(pageId);
+        for (const auto& id : ids) {
+            deleteBlocksForPage(id);
+            pageDelete.bindValue(0, id);
+            pageDelete.exec();
+            pageDelete.finish();
+            upsert_deleted_page(m_db, id, remoteDeletedAt);
+            changed = true;
+        }
+    }
+
+    prune_deleted_pages(m_db, deleted_pages_retention_limit());
+    m_db.commit();
+    if (changed) {
+        emit pagesChanged();
+    }
+}
+
+int DataStore::deletedPagesRetentionLimit() const {
+    return deleted_pages_retention_limit();
+}
+
+void DataStore::setDeletedPagesRetentionLimit(int limit) {
+    QSettings settings;
+    settings.setValue(QString::fromLatin1(kSettingsDeletedPagesRetention),
+                      normalize_retention_limit(limit));
+    if (m_ready) {
+        prune_deleted_pages(m_db, deleted_pages_retention_limit());
     }
 }
 
@@ -720,7 +1002,7 @@ void DataStore::saveBlocksForPage(const QString& pageId, const QVariantList& blo
     if (!m_ready) return;
     
     m_db.transaction();
-    const QString updatedAt = QDateTime::currentDateTimeUtc().toString("yyyy-MM-dd HH:mm:ss.zzz");
+    const QString updatedAt = now_timestamp_utc();
     
     // Delete existing blocks for this page
     QSqlQuery deleteQuery(m_db);

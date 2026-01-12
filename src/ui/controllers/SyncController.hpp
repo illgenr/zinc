@@ -54,6 +54,7 @@ signals:
     void pageSnapshotReceived(const QString& jsonPayload);
     void pageSnapshotReceivedPages(const QVariantList& pages);
     void blockSnapshotReceivedBlocks(const QVariantList& blocks);
+    void deletedPageSnapshotReceivedPages(const QVariantList& deletedPages);
     void error(const QString& message);
 
 private:
