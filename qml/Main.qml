@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import zinc
+import Zinc 1.0
 import "components"
 import "dialogs"
 
@@ -19,6 +20,16 @@ ApplicationWindow {
     property var currentPage: null
     property bool sidebarCollapsed: false
     property var mobilePagesList: []  // Reactive list for mobile
+
+    SyncController {
+        id: appSyncController
+
+        onError: function(message) {
+            console.log("SYNC: error", message)
+        }
+
+        onSyncingChanged: console.log("SYNC: syncing=", appSyncController.syncing, "peerCount=", appSyncController.peerCount)
+    }
     
     // Detect mobile (Android) vs desktop
     readonly property bool isMobile: Qt.platform.os === "android" || Qt.platform.os === "ios" || width < 600
@@ -699,6 +710,7 @@ ApplicationWindow {
     
     PairingDialog {
         id: pairingDialog
+        externalSyncController: appSyncController
     }
     
     PagePickerDialog {
@@ -731,6 +743,7 @@ ApplicationWindow {
         if (DataStore) {
             DataStore.initialize()
         }
+        tryStartSync()
         if (isMobile && DataStore) {
             root.mobilePagesList = DataStore.getAllPages()
         }
@@ -750,6 +763,67 @@ ApplicationWindow {
                 Qt.callLater(function() {
                     root.mobilePagesList = DataStore.getAllPages()
                 })
+            }
+        }
+    }
+
+    Connections {
+        target: appSyncController
+
+        function onPeerDiscovered(deviceId, deviceName, workspaceId, host, port) {
+            if (!DataStore) return
+            if (!deviceId || !workspaceId) return
+            DataStore.savePairedDevice(deviceId, deviceName || "Paired device", workspaceId)
+            if (host && host !== "" && port && port > 0) {
+                DataStore.updatePairedDeviceEndpoint(deviceId, host, port)
+            }
+        }
+    }
+
+    function tryStartSync() {
+        if (!appSyncController) return
+        if (appSyncController.syncing) return
+
+        // Prefer persisted workspace id.
+        if (appSyncController.tryAutoStart("Zinc Device")) {
+            console.log("SYNC: auto-started from settings")
+            return
+        }
+
+        // Fallback: infer workspace id from previously paired devices.
+        if (DataStore) {
+            var devices = DataStore.getPairedDevices()
+            if (devices && devices.length > 0) {
+                var wsId = devices[0].workspaceId
+                if (wsId && wsId !== "") {
+                    if (appSyncController.configure(wsId, "Zinc Device")) {
+                        appSyncController.startSync()
+                        console.log("SYNC: started from paired devices workspaceId", wsId)
+                    }
+                }
+            }
+        }
+    }
+
+    // Opportunistic direct reconnect to paired endpoints (useful when discovery is slow/unavailable).
+    Timer {
+        id: syncReconnectTimer
+        interval: 5000
+        repeat: true
+        running: true
+        onTriggered: {
+            tryStartSync()
+            if (!DataStore || !appSyncController) return
+            if (!appSyncController.syncing) return
+            if (appSyncController.peerCount > 0) return
+
+            var devices = DataStore.getPairedDevices()
+            for (var i = 0; i < devices.length; i++) {
+                var d = devices[i]
+                if (!d) continue
+                if (!d.deviceId || !d.host || !d.port) continue
+                if (d.port <= 0) continue
+                appSyncController.connectToPeer(d.deviceId, d.host, d.port)
             }
         }
     }

@@ -453,6 +453,7 @@ if(ZINC_BUILD_TESTS)
         tests/qml/test_main.cpp
         tests/qml/test_feature_flags.cpp
         tests/qml/test_datastore_sync.cpp
+        tests/qml/test_sync_controller_settings.cpp
         tests/qml/test_pairing_dialog_qml.cpp
     )
 

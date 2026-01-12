@@ -30,6 +30,7 @@ public:
     [[nodiscard]] QString workspaceId() const;
     
     Q_INVOKABLE bool configure(const QString& workspaceId, const QString& deviceName);
+    Q_INVOKABLE bool tryAutoStart(const QString& defaultDeviceName);
     Q_INVOKABLE bool startSync();
     Q_INVOKABLE void stopSync();
     Q_INVOKABLE void connectToPeer(const QString& deviceId,
@@ -45,7 +46,9 @@ signals:
     void configuredChanged();
     void peerDiscovered(const QString& deviceId,
                         const QString& deviceName,
-                        const QString& workspaceId);
+                        const QString& workspaceId,
+                        const QString& host,
+                        int port);
     void peerConnected(const QString& deviceName);
     void peerDisconnected(const QString& deviceName);
     void pageSnapshotReceived(const QString& jsonPayload);

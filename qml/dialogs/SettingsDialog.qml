@@ -552,6 +552,30 @@ Dialog {
                                 maximumLineCount: 1
                                 Layout.fillWidth: true
                             }
+
+                            Text {
+                                Layout.fillWidth: true
+                                color: ThemeManager.textSecondary
+                                font.pixelSize: ThemeManager.fontSizeSmall
+                                elide: Text.ElideRight
+                                wrapMode: Text.NoWrap
+                                maximumLineCount: 1
+
+                function isOnline(lastSeen) {
+                    if (!lastSeen || lastSeen === "") return false
+                    // Stored as "yyyy-MM-dd HH:mm:ss" (UTC) or ISO; normalize for JS Date parsing.
+                    var iso = lastSeen.indexOf("T") >= 0 ? lastSeen : lastSeen.replace(" ", "T") + "Z"
+                    var t = Date.parse(iso)
+                    if (isNaN(t)) return false
+                    return (Date.now() - t) < 15000
+                }
+
+                                text: {
+                                    var online = isOnline(lastSeen)
+                                    var endpoint = (host && host !== "" && port && port > 0) ? (host + ":" + port) : "unknown"
+                                    return online ? ("Available (" + endpoint + ")") : ("Offline (" + endpoint + ")")
+                                }
+                            }
                         }
 
                         Button {

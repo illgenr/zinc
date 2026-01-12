@@ -30,6 +30,8 @@ public:
     // Page operations
     Q_INVOKABLE QVariantList getAllPages();
     Q_INVOKABLE QVariantList getPagesForSync();
+    Q_INVOKABLE QVariantList getPagesForSyncSince(const QString& updatedAtCursor,
+                                                  const QString& pageIdCursor);
     Q_INVOKABLE QVariantMap getPage(const QString& pageId);
     Q_INVOKABLE void savePage(const QVariantMap& page);
     Q_INVOKABLE void deletePage(const QString& pageId);
@@ -39,6 +41,8 @@ public:
     // Block operations  
     Q_INVOKABLE QVariantList getBlocksForPage(const QString& pageId);
     Q_INVOKABLE QVariantList getBlocksForSync();
+    Q_INVOKABLE QVariantList getBlocksForSyncSince(const QString& updatedAtCursor,
+                                                   const QString& blockIdCursor);
     Q_INVOKABLE void saveBlocksForPage(const QString& pageId, const QVariantList& blocks);
     Q_INVOKABLE void deleteBlocksForPage(const QString& pageId);
     Q_INVOKABLE void applyBlockUpdates(const QVariantList& blocks);
@@ -48,6 +52,9 @@ public:
     Q_INVOKABLE void savePairedDevice(const QString& deviceId,
                                       const QString& deviceName,
                                       const QString& workspaceId);
+    Q_INVOKABLE void updatePairedDeviceEndpoint(const QString& deviceId,
+                                                const QString& host,
+                                                int port);
     Q_INVOKABLE void removePairedDevice(const QString& deviceId);
     Q_INVOKABLE void clearPairedDevices();
     

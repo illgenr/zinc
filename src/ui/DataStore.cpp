@@ -50,7 +50,10 @@ QString normalize_title(const QVariant& value) {
 }
 
 QDateTime parse_timestamp(const QString& value) {
-    QDateTime dt = QDateTime::fromString(value, "yyyy-MM-dd HH:mm:ss");
+    QDateTime dt = QDateTime::fromString(value, "yyyy-MM-dd HH:mm:ss.zzz");
+    if (!dt.isValid()) {
+        dt = QDateTime::fromString(value, "yyyy-MM-dd HH:mm:ss");
+    }
     if (!dt.isValid()) {
         dt = QDateTime::fromString(value, Qt::ISODate);
     }
@@ -66,7 +69,7 @@ QString normalize_timestamp(const QVariant& value) {
     if (!raw.isEmpty()) {
         return raw;
     }
-    return QDateTime::currentDateTimeUtc().toString("yyyy-MM-dd HH:mm:ss");
+    return QDateTime::currentDateTimeUtc().toString("yyyy-MM-dd HH:mm:ss.zzz");
 }
 
 } // namespace
@@ -113,6 +116,7 @@ bool DataStore::initialize() {
     
     createTables();
     m_ready = true;
+    runMigrations();
     qDebug() << "DataStore: Database initialized successfully";
     return true;
 }
@@ -158,6 +162,9 @@ void DataStore::createTables() {
             device_id TEXT PRIMARY KEY,
             device_name TEXT NOT NULL,
             workspace_id TEXT NOT NULL,
+            host TEXT,
+            port INTEGER,
+            last_seen TEXT,
             paired_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
     )");
@@ -217,6 +224,51 @@ QVariantList DataStore::getPagesForSync() {
     return pages;
 }
 
+QVariantList DataStore::getPagesForSyncSince(const QString& updatedAtCursor,
+                                             const QString& pageIdCursor) {
+    if (updatedAtCursor.isEmpty()) {
+        return getPagesForSync();
+    }
+
+    QVariantList pages;
+    if (!m_ready) {
+        qWarning() << "DataStore: Not initialized";
+        return pages;
+    }
+
+    QSqlQuery query(m_db);
+    query.prepare(R"SQL(
+        SELECT id, title, parent_id, depth, sort_order, updated_at
+        FROM pages
+        WHERE updated_at > ?
+           OR (updated_at = ? AND id > ?)
+        ORDER BY updated_at, id
+    )SQL");
+    query.addBindValue(updatedAtCursor);
+    query.addBindValue(updatedAtCursor);
+    query.addBindValue(pageIdCursor);
+
+    if (!query.exec()) {
+        qWarning() << "DataStore: getPagesForSyncSince query failed:" << query.lastError().text();
+        return pages;
+    }
+
+    while (query.next()) {
+        QVariantMap page;
+        page["pageId"] = query.value(0).toString();
+        page["title"] = query.value(1).toString();
+        page["parentId"] = query.value(2).toString();
+        page["depth"] = query.value(3).toInt();
+        page["sortOrder"] = query.value(4).toInt();
+        page["updatedAt"] = query.value(5).toString();
+        pages.append(page);
+    }
+
+    qDebug() << "DataStore: getPagesForSyncSince count=" << pages.size()
+             << "cursorAt=" << updatedAtCursor << "cursorId=" << pageIdCursor;
+    return pages;
+}
+
 QVariantMap DataStore::getPage(const QString& pageId) {
     QVariantMap page;
     
@@ -243,14 +295,16 @@ void DataStore::savePage(const QVariantMap& page) {
     QSqlQuery query(m_db);
     query.prepare(R"(
         INSERT OR REPLACE INTO pages (id, title, parent_id, depth, sort_order, updated_at)
-        VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        VALUES (?, ?, ?, ?, ?, ?)
     )");
     
+    const QString updatedAt = QDateTime::currentDateTimeUtc().toString("yyyy-MM-dd HH:mm:ss.zzz");
     query.addBindValue(page["pageId"].toString());
     query.addBindValue(normalize_title(page.value("title")));
     query.addBindValue(normalize_parent_id(page.value("parentId")));
     query.addBindValue(page["depth"].toInt());
     query.addBindValue(page["sortOrder"].toInt());
+    query.addBindValue(updatedAt);
     
     if (!query.exec()) {
         qWarning() << "DataStore: Failed to save page:" << query.lastError().text();
@@ -282,6 +336,7 @@ void DataStore::saveAllPages(const QVariantList& pages) {
     if (!m_ready) return;
     
     m_db.transaction();
+    const QString updatedAt = QDateTime::currentDateTimeUtc().toString("yyyy-MM-dd HH:mm:ss.zzz");
     
     // Delete pages not present anymore (if any)
     QStringList ids;
@@ -313,20 +368,20 @@ void DataStore::saveAllPages(const QVariantList& pages) {
     QSqlQuery insertQuery(m_db);
     insertQuery.prepare(R"SQL(
         INSERT INTO pages (id, title, parent_id, depth, sort_order, updated_at)
-        VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        VALUES (?, ?, ?, ?, ?, ?)
     )SQL");
 
     QSqlQuery updateContentQuery(m_db);
     updateContentQuery.prepare(R"SQL(
         UPDATE pages
-        SET title = ?, parent_id = ?, depth = ?, sort_order = ?, updated_at = CURRENT_TIMESTAMP
+        SET title = ?, parent_id = ?, depth = ?, sort_order = ?, updated_at = ?
         WHERE id = ?
     )SQL");
 
     QSqlQuery updateOrderQuery(m_db);
     updateOrderQuery.prepare(R"SQL(
         UPDATE pages
-        SET parent_id = ?, depth = ?, sort_order = ?, updated_at = CURRENT_TIMESTAMP
+        SET parent_id = ?, depth = ?, sort_order = ?, updated_at = ?
         WHERE id = ?
     )SQL");
 
@@ -361,6 +416,7 @@ void DataStore::saveAllPages(const QVariantList& pages) {
             insertQuery.bindValue(2, parentId);
             insertQuery.bindValue(3, depth);
             insertQuery.bindValue(4, sortOrder);
+            insertQuery.bindValue(5, updatedAt);
             if (!insertQuery.exec()) {
                 qWarning() << "DataStore: Failed to insert page:" << insertQuery.lastError().text();
             }
@@ -378,7 +434,8 @@ void DataStore::saveAllPages(const QVariantList& pages) {
             updateContentQuery.bindValue(1, parentId);
             updateContentQuery.bindValue(2, depth);
             updateContentQuery.bindValue(3, sortOrder);
-            updateContentQuery.bindValue(4, pageId);
+            updateContentQuery.bindValue(4, updatedAt);
+            updateContentQuery.bindValue(5, pageId);
             if (!updateContentQuery.exec()) {
                 qWarning() << "DataStore: Failed to update page:" << updateContentQuery.lastError().text();
             }
@@ -387,7 +444,8 @@ void DataStore::saveAllPages(const QVariantList& pages) {
             updateOrderQuery.bindValue(0, parentId);
             updateOrderQuery.bindValue(1, depth);
             updateOrderQuery.bindValue(2, sortOrder);
-            updateOrderQuery.bindValue(3, pageId);
+            updateOrderQuery.bindValue(3, updatedAt);
+            updateOrderQuery.bindValue(4, pageId);
             if (!updateOrderQuery.exec()) {
                 qWarning() << "DataStore: Failed to update page order:" << updateOrderQuery.lastError().text();
             }
@@ -441,7 +499,7 @@ void DataStore::applyPageUpdates(const QVariantList& pages) {
         if (!localUpdated.isEmpty()) {
             QDateTime localTime = parse_timestamp(localUpdated);
             if (localTime.isValid() && remoteTime.isValid() &&
-                localTime >= remoteTime) {
+                localTime > remoteTime) {
                 qDebug() << "DataStore: skip page" << pageId << "local>remote";
                 continue;
             }
@@ -480,6 +538,53 @@ QVariantList DataStore::getBlocksForSync() {
         FROM blocks
         ORDER BY page_id, sort_order, created_at
     )SQL");
+
+    while (query.next()) {
+        QVariantMap block;
+        block["blockId"] = query.value(0).toString();
+        block["pageId"] = query.value(1).toString();
+        block["blockType"] = query.value(2).toString();
+        block["content"] = query.value(3).toString();
+        block["depth"] = query.value(4).toInt();
+        block["checked"] = query.value(5).toBool();
+        block["collapsed"] = query.value(6).toBool();
+        block["language"] = query.value(7).toString();
+        block["headingLevel"] = query.value(8).toInt();
+        block["sortOrder"] = query.value(9).toInt();
+        block["updatedAt"] = query.value(10).toString();
+        blocks.append(block);
+    }
+
+    return blocks;
+}
+
+QVariantList DataStore::getBlocksForSyncSince(const QString& updatedAtCursor,
+                                              const QString& blockIdCursor) {
+    if (updatedAtCursor.isEmpty()) {
+        return getBlocksForSync();
+    }
+
+    QVariantList blocks;
+    if (!m_ready) {
+        return blocks;
+    }
+
+    QSqlQuery query(m_db);
+    query.prepare(R"SQL(
+        SELECT id, page_id, block_type, content, depth, checked, collapsed, language, heading_level, sort_order, updated_at
+        FROM blocks
+        WHERE updated_at > ?
+           OR (updated_at = ? AND id > ?)
+        ORDER BY updated_at, id
+    )SQL");
+    query.addBindValue(updatedAtCursor);
+    query.addBindValue(updatedAtCursor);
+    query.addBindValue(blockIdCursor);
+
+    if (!query.exec()) {
+        qWarning() << "DataStore: getBlocksForSyncSince query failed:" << query.lastError().text();
+        return blocks;
+    }
 
     while (query.next()) {
         QVariantMap block;
@@ -548,7 +653,7 @@ void DataStore::applyBlockUpdates(const QVariantList& blocks) {
 
         if (!localUpdated.isEmpty()) {
             QDateTime localTime = parse_timestamp(localUpdated);
-            if (localTime.isValid() && remoteTime.isValid() && localTime >= remoteTime) {
+            if (localTime.isValid() && remoteTime.isValid() && localTime > remoteTime) {
                 continue;
             }
         }
@@ -615,6 +720,7 @@ void DataStore::saveBlocksForPage(const QString& pageId, const QVariantList& blo
     if (!m_ready) return;
     
     m_db.transaction();
+    const QString updatedAt = QDateTime::currentDateTimeUtc().toString("yyyy-MM-dd HH:mm:ss.zzz");
     
     // Delete existing blocks for this page
     QSqlQuery deleteQuery(m_db);
@@ -626,7 +732,7 @@ void DataStore::saveBlocksForPage(const QString& pageId, const QVariantList& blo
     QSqlQuery query(m_db);
     query.prepare(R"(
         INSERT INTO blocks (id, page_id, block_type, content, depth, checked, collapsed, language, heading_level, sort_order, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     )");
     
     for (int i = 0; i < blocks.size(); ++i) {
@@ -641,6 +747,7 @@ void DataStore::saveBlocksForPage(const QString& pageId, const QVariantList& blo
         query.addBindValue(block["language"].toString());
         query.addBindValue(block["headingLevel"].toInt());
         query.addBindValue(i);
+        query.addBindValue(updatedAt);
         
         if (!query.exec()) {
             qWarning() << "DataStore: Failed to save block:" << query.lastError().text();
@@ -668,14 +775,17 @@ QVariantList DataStore::getPairedDevices() {
     if (!m_ready) return devices;
 
     QSqlQuery query(m_db);
-    query.exec("SELECT device_id, device_name, workspace_id, paired_at FROM paired_devices ORDER BY paired_at DESC");
+    query.exec("SELECT device_id, device_name, workspace_id, host, port, last_seen, paired_at FROM paired_devices ORDER BY paired_at DESC");
 
     while (query.next()) {
         QVariantMap device;
         device["deviceId"] = query.value(0).toString();
         device["deviceName"] = query.value(1).toString();
         device["workspaceId"] = query.value(2).toString();
-        device["pairedAt"] = query.value(3).toString();
+        device["host"] = query.value(3).toString();
+        device["port"] = query.value(4).toInt();
+        device["lastSeen"] = query.value(5).toString();
+        device["pairedAt"] = query.value(6).toString();
         devices.append(device);
     }
 
@@ -698,11 +808,12 @@ void DataStore::savePairedDevice(const QString& deviceId,
     cleanup.exec();
 
     query.prepare(R"SQL(
-        INSERT INTO paired_devices (device_id, device_name, workspace_id)
-        VALUES (?, ?, ?)
+        INSERT INTO paired_devices (device_id, device_name, workspace_id, last_seen)
+        VALUES (?, ?, ?, CURRENT_TIMESTAMP)
         ON CONFLICT(device_id) DO UPDATE SET
             device_name = excluded.device_name,
-            workspace_id = excluded.workspace_id;
+            workspace_id = excluded.workspace_id,
+            last_seen = excluded.last_seen;
     )SQL");
     query.addBindValue(deviceId);
     query.addBindValue(deviceName);
@@ -710,6 +821,30 @@ void DataStore::savePairedDevice(const QString& deviceId,
 
     if (!query.exec()) {
         qWarning() << "DataStore: Failed to save paired device:" << query.lastError().text();
+        return;
+    }
+
+    emit pairedDevicesChanged();
+}
+
+void DataStore::updatePairedDeviceEndpoint(const QString& deviceId,
+                                          const QString& host,
+                                          int port) {
+    if (!m_ready) return;
+    if (deviceId.isEmpty()) return;
+
+    QSqlQuery query(m_db);
+    query.prepare(R"SQL(
+        UPDATE paired_devices
+        SET host = ?, port = ?, last_seen = CURRENT_TIMESTAMP
+        WHERE device_id = ?;
+    )SQL");
+    query.addBindValue(host);
+    query.addBindValue(port);
+    query.addBindValue(deviceId);
+
+    if (!query.exec()) {
+        qWarning() << "DataStore: Failed to update paired device endpoint:" << query.lastError().text();
         return;
     }
 
@@ -826,6 +961,9 @@ bool DataStore::runMigrations() {
                 device_id TEXT PRIMARY KEY,
                 device_name TEXT NOT NULL,
                 workspace_id TEXT NOT NULL,
+                host TEXT,
+                port INTEGER,
+                last_seen TEXT,
                 paired_at TEXT DEFAULT CURRENT_TIMESTAMP
             )
         )");
@@ -833,6 +971,32 @@ bool DataStore::runMigrations() {
         migration.exec("PRAGMA user_version = 2");
         m_db.commit();
         currentVersion = 2;
+    }
+
+    // Migration 3: Endpoint fields on paired devices.
+    if (currentVersion < 3) {
+        qDebug() << "DataStore: Running migration to version 3";
+        m_db.transaction();
+        QSqlQuery migration(m_db);
+        QSet<QString> columns;
+        QSqlQuery info(m_db);
+        if (info.exec("PRAGMA table_info(paired_devices)")) {
+            while (info.next()) {
+                columns.insert(info.value(1).toString());
+            }
+        }
+        if (!columns.contains("host")) {
+            migration.exec("ALTER TABLE paired_devices ADD COLUMN host TEXT");
+        }
+        if (!columns.contains("port")) {
+            migration.exec("ALTER TABLE paired_devices ADD COLUMN port INTEGER");
+        }
+        if (!columns.contains("last_seen")) {
+            migration.exec("ALTER TABLE paired_devices ADD COLUMN last_seen TEXT");
+        }
+        migration.exec("PRAGMA user_version = 3");
+        m_db.commit();
+        currentVersion = 3;
     }
     
     qDebug() << "DataStore: Migrations complete. Schema version:" << currentVersion;

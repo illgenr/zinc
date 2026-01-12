@@ -33,6 +33,12 @@ Dialog {
     property string workspaceId: ""
     property string deviceName: "Zinc Device"
     property bool suppressOutgoingSnapshots: false
+    property SyncController externalSyncController: null
+    readonly property SyncController activeSyncController: externalSyncController ? externalSyncController : internalSyncController
+    property string pagesCursorAt: ""
+    property string pagesCursorId: ""
+    property string blocksCursorAt: ""
+    property string blocksCursorId: ""
 
     PairingController {
         id: pairingController
@@ -52,6 +58,7 @@ Dialog {
                 }
                 if (wsId !== "") {
                     DataStore.savePairedDevice(deviceId, name, wsId)
+                    DataStore.updatePairedDeviceEndpoint(deviceId, pairingController.peerHost, pairingController.peerPort)
                 }
             }
             Qt.callLater(function() { root.close() })
@@ -65,7 +72,7 @@ Dialog {
     }
 
     SyncController {
-        id: syncController
+        id: internalSyncController
 
         onError: function(message) {
             statusOverride = message
@@ -75,16 +82,16 @@ Dialog {
     }
 
     Connections {
-        target: syncController
+        target: activeSyncController
 
         function onPeerCountChanged() {
-            if (syncController.peerCount > 0 &&
+            if (activeSyncController.peerCount > 0 &&
                 (mode === "code_show" || mode === "qr_show")) {
                 statusOverride = "Pairing complete!"
             }
         }
 
-        function onPeerDiscovered(deviceId, deviceName, workspaceId) {
+        function onPeerDiscovered(deviceId, deviceName, workspaceId, host, port) {
             if (deviceId === "" || workspaceId === "") {
                 return
             }
@@ -93,11 +100,18 @@ Dialog {
                 name = "Paired device"
             }
             DataStore.savePairedDevice(deviceId, name, workspaceId)
+            if (host && host !== "" && port && port > 0) {
+                DataStore.updatePairedDeviceEndpoint(deviceId, host, port)
+            }
         }
 
         function onPeerConnected(deviceName) {
             console.log("PairingDialog: peer connected", deviceName)
-            sendLocalPagesSnapshot()
+            pagesCursorAt = ""
+            pagesCursorId = ""
+            blocksCursorAt = ""
+            blocksCursorId = ""
+            sendLocalPagesSnapshot(true)
         }
 
         function onPageSnapshotReceivedPages(pages) {
@@ -131,34 +145,68 @@ Dialog {
         target: DataStore
 
         function onPagesChanged() {
-            if (syncController.syncing && !suppressOutgoingSnapshots) {
-                console.log("PairingDialog: pages changed, send snapshot")
-                sendLocalPagesSnapshot()
+            if (activeSyncController.syncing && !suppressOutgoingSnapshots) {
+                scheduleOutgoingSnapshot()
             }
         }
 
         function onBlocksChanged(pageId) {
-            if (syncController.syncing && !suppressOutgoingSnapshots) {
-                console.log("PairingDialog: blocks changed, send snapshot", pageId)
-                sendLocalPagesSnapshot()
+            if (activeSyncController.syncing && !suppressOutgoingSnapshots) {
+                scheduleOutgoingSnapshot()
             }
         }
     }
 
-    function sendLocalPagesSnapshot() {
-        if (!syncController.syncing) {
+    Timer {
+        id: outgoingSnapshotTimer
+        interval: 150
+        repeat: false
+        onTriggered: sendLocalPagesSnapshot(false)
+    }
+
+    function scheduleOutgoingSnapshot() {
+        outgoingSnapshotTimer.restart()
+    }
+
+    function advanceCursorFrom(items, cursorAtKey, cursorIdKey, idField) {
+        var cursorAt = root[cursorAtKey]
+        var cursorId = root[cursorIdKey]
+        for (var i = 0; i < items.length; i++) {
+            var entry = items[i]
+            var updatedAt = entry.updatedAt || ""
+            var entryId = entry[idField] || ""
+            if (cursorAt === "" || updatedAt > cursorAt || (updatedAt === cursorAt && entryId > cursorId)) {
+                cursorAt = updatedAt
+                cursorId = entryId
+            }
+        }
+        root[cursorAtKey] = cursorAt
+        root[cursorIdKey] = cursorId
+    }
+
+    function sendLocalPagesSnapshot(full) {
+        if (!activeSyncController.syncing) {
             return
         }
-        var pages = DataStore.getPagesForSync()
-        var blocks = DataStore.getBlocksForSync()
+        var pages = full ? DataStore.getPagesForSync()
+                         : DataStore.getPagesForSyncSince(pagesCursorAt, pagesCursorId)
+        var blocks = full ? DataStore.getBlocksForSync()
+                          : DataStore.getBlocksForSyncSince(blocksCursorAt, blocksCursorId)
+        if (!full && (!pages || pages.length === 0) && (!blocks || blocks.length === 0)) {
+            return
+        }
         var payload = JSON.stringify({
             v: 1,
-            workspaceId: syncController.workspaceId,
+            workspaceId: activeSyncController.workspaceId,
+            full: full === true,
             pages: pages,
             blocks: blocks
         })
-        console.log("PairingDialog: sending snapshot pages", pages.length, "blocks", blocks.length)
-        syncController.sendPageSnapshot(payload)
+        console.log("PairingDialog: sending snapshot full=", full === true, "pages", pages.length, "blocks", blocks.length)
+        activeSyncController.sendPageSnapshot(payload)
+
+        advanceCursorFrom(pages, "pagesCursorAt", "pagesCursorId", "pageId")
+        advanceCursorFrom(blocks, "blocksCursorAt", "blocksCursorId", "blockId")
     }
     
     background: Rectangle {
@@ -267,7 +315,7 @@ Dialog {
                             return
                         }
                         pairingController.configureLocalDevice(deviceName, wsId,
-                            syncController.listeningPort())
+                            activeSyncController.listeningPort())
                         pairingController.startPairingAsInitiator("qr")
                         mode = "qr_show"
                     }
@@ -356,7 +404,7 @@ Dialog {
                     if (status === Loader.Ready && item) {
                         item.dialog = root
                         item.pairingController = pairingController
-                        item.syncController = syncController
+                        item.syncController = activeSyncController
                     }
                 }
             }
@@ -655,15 +703,15 @@ Dialog {
     }
 
     function startSyncForWorkspace(wsId) {
-        if (!syncController.configured || syncController.workspaceId !== wsId) {
-            if (syncController.syncing) {
-                syncController.stopSync()
+        if (!activeSyncController.configured || activeSyncController.workspaceId !== wsId) {
+            if (activeSyncController.syncing) {
+                activeSyncController.stopSync()
             }
-            if (!syncController.configure(wsId, deviceName)) {
+            if (!activeSyncController.configure(wsId, deviceName)) {
                 return false
             }
         }
-        return syncController.startSync()
+        return activeSyncController.startSync()
     }
 
     onOpened: {

@@ -114,3 +114,63 @@ TEST_CASE("DataStore: applyBlockUpdates updates content", "[qml][datastore]") {
     store.applyBlockUpdates(blocks2);
     REQUIRE(contentForBlock(store, "p3", "b1") == QStringLiteral("World"));
 }
+
+TEST_CASE("DataStore: applyPageUpdates allows equal updatedAt to overwrite", "[qml][datastore]") {
+    zinc::ui::DataStore store;
+    REQUIRE(store.initialize());
+    REQUIRE(store.resetDatabase());
+
+    const QString timestamp = QStringLiteral("2026-01-11 00:00:00");
+
+    QVariantMap first = makePage("p4", QStringLiteral("H"));
+    first.insert("updatedAt", timestamp);
+    QVariantList pages1;
+    pages1.append(first);
+    store.applyPageUpdates(pages1);
+    REQUIRE(titleForPage(store, "p4") == QStringLiteral("H"));
+
+    QVariantMap second = makePage("p4", QStringLiteral("He"));
+    second.insert("updatedAt", timestamp);
+    QVariantList pages2;
+    pages2.append(second);
+    store.applyPageUpdates(pages2);
+    REQUIRE(titleForPage(store, "p4") == QStringLiteral("He"));
+}
+
+TEST_CASE("DataStore: applyBlockUpdates allows equal updatedAt to overwrite", "[qml][datastore]") {
+    zinc::ui::DataStore store;
+    REQUIRE(store.initialize());
+    REQUIRE(store.resetDatabase());
+
+    QVariantList pages;
+    pages.append(makePage("p5", QStringLiteral("Page")));
+    store.saveAllPages(pages);
+
+    const QString timestamp = QStringLiteral("2026-01-11 00:00:00");
+
+    QVariantList blocks1;
+    blocks1.append(makeBlock("p5", "b2", "Hello", timestamp));
+    store.applyBlockUpdates(blocks1);
+    REQUIRE(contentForBlock(store, "p5", "b2") == QStringLiteral("Hello"));
+
+    QVariantList blocks2;
+    blocks2.append(makeBlock("p5", "b2", "World", timestamp));
+    store.applyBlockUpdates(blocks2);
+    REQUIRE(contentForBlock(store, "p5", "b2") == QStringLiteral("World"));
+}
+
+TEST_CASE("DataStore: paired device endpoint round-trip", "[qml][datastore]") {
+    zinc::ui::DataStore store;
+    REQUIRE(store.initialize());
+    REQUIRE(store.resetDatabase());
+
+    store.savePairedDevice("dev1", "Device 1", "ws1");
+    store.updatePairedDeviceEndpoint("dev1", "192.168.1.2", 4242);
+
+    const auto devices = store.getPairedDevices();
+    REQUIRE(devices.size() == 1);
+    const auto device = devices[0].toMap();
+    REQUIRE(device.value("deviceId").toString() == QStringLiteral("dev1"));
+    REQUIRE(device.value("host").toString() == QStringLiteral("192.168.1.2"));
+    REQUIRE(device.value("port").toInt() == 4242);
+}
