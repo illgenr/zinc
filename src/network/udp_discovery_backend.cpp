@@ -207,7 +207,11 @@ void UdpDiscoveryBackend::onReadyRead() {
                            (it->second.info.workspace_id != info.workspace_id) ||
                            (it->second.info.device_name != info.device_name);
             it->second.info = info;
-            if (changed && on_peer_updated) on_peer_updated(info);
+            // Emit updates even when the endpoint hasn't changed, so consumers can
+            // treat it as a presence heartbeat.
+            if (on_peer_updated) {
+                on_peer_updated(info);
+            }
         }
     }
 }
@@ -249,4 +253,3 @@ void UdpDiscoveryBackend::onPruneTick() {
 }
 
 } // namespace zinc::network
-

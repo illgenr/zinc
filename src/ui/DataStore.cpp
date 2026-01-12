@@ -1,4 +1,5 @@
 #include "ui/DataStore.hpp"
+#include "ui/MarkdownBlocks.hpp"
 #include <QDateTime>
 #include <QTimeZone>
 #include <QSqlQuery>
@@ -190,6 +191,7 @@ void DataStore::createTables() {
             id TEXT PRIMARY KEY,
             title TEXT NOT NULL DEFAULT 'Untitled',
             parent_id TEXT,
+            content_markdown TEXT NOT NULL DEFAULT '',
             depth INTEGER DEFAULT 0,
             sort_order INTEGER DEFAULT 0,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
@@ -275,16 +277,17 @@ QVariantList DataStore::getPagesForSync() {
     }
 
     QSqlQuery query(m_db);
-    query.exec("SELECT id, title, parent_id, depth, sort_order, updated_at FROM pages ORDER BY sort_order, created_at");
+    query.exec("SELECT id, title, parent_id, content_markdown, depth, sort_order, updated_at FROM pages ORDER BY sort_order, created_at");
 
     while (query.next()) {
         QVariantMap page;
         page["pageId"] = query.value(0).toString();
         page["title"] = query.value(1).toString();
         page["parentId"] = query.value(2).toString();
-        page["depth"] = query.value(3).toInt();
-        page["sortOrder"] = query.value(4).toInt();
-        page["updatedAt"] = query.value(5).toString();
+        page["contentMarkdown"] = query.value(3).toString();
+        page["depth"] = query.value(4).toInt();
+        page["sortOrder"] = query.value(5).toInt();
+        page["updatedAt"] = query.value(6).toString();
         pages.append(page);
     }
 
@@ -306,7 +309,7 @@ QVariantList DataStore::getPagesForSyncSince(const QString& updatedAtCursor,
 
     QSqlQuery query(m_db);
     query.prepare(R"SQL(
-        SELECT id, title, parent_id, depth, sort_order, updated_at
+        SELECT id, title, parent_id, content_markdown, depth, sort_order, updated_at
         FROM pages
         WHERE updated_at > ?
            OR (updated_at = ? AND id > ?)
@@ -326,9 +329,10 @@ QVariantList DataStore::getPagesForSyncSince(const QString& updatedAtCursor,
         page["pageId"] = query.value(0).toString();
         page["title"] = query.value(1).toString();
         page["parentId"] = query.value(2).toString();
-        page["depth"] = query.value(3).toInt();
-        page["sortOrder"] = query.value(4).toInt();
-        page["updatedAt"] = query.value(5).toString();
+        page["contentMarkdown"] = query.value(3).toString();
+        page["depth"] = query.value(4).toInt();
+        page["sortOrder"] = query.value(5).toInt();
+        page["updatedAt"] = query.value(6).toString();
         pages.append(page);
     }
 
@@ -402,15 +406,16 @@ QVariantMap DataStore::getPage(const QString& pageId) {
     if (!m_ready) return page;
     
     QSqlQuery query(m_db);
-    query.prepare("SELECT id, title, parent_id, depth, sort_order FROM pages WHERE id = ?");
+    query.prepare("SELECT id, title, parent_id, content_markdown, depth, sort_order FROM pages WHERE id = ?");
     query.addBindValue(pageId);
     
     if (query.exec() && query.next()) {
         page["pageId"] = query.value(0).toString();
         page["title"] = query.value(1).toString();
         page["parentId"] = query.value(2).toString();
-        page["depth"] = query.value(3).toInt();
-        page["sortOrder"] = query.value(4).toInt();
+        page["contentMarkdown"] = query.value(3).toString();
+        page["depth"] = query.value(4).toInt();
+        page["sortOrder"] = query.value(5).toInt();
     }
     
     return page;
@@ -421,14 +426,15 @@ void DataStore::savePage(const QVariantMap& page) {
     
     QSqlQuery query(m_db);
     query.prepare(R"(
-        INSERT OR REPLACE INTO pages (id, title, parent_id, depth, sort_order, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT OR REPLACE INTO pages (id, title, parent_id, content_markdown, depth, sort_order, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
     )");
     
     const QString updatedAt = now_timestamp_utc();
     query.addBindValue(page["pageId"].toString());
     query.addBindValue(normalize_title(page.value("title")));
     query.addBindValue(normalize_parent_id(page.value("parentId")));
+    query.addBindValue(page.value("contentMarkdown").toString());
     query.addBindValue(page["depth"].toInt());
     query.addBindValue(page["sortOrder"].toInt());
     query.addBindValue(updatedAt);
@@ -533,8 +539,8 @@ void DataStore::saveAllPages(const QVariantList& pages) {
 
     QSqlQuery insertQuery(m_db);
     insertQuery.prepare(R"SQL(
-        INSERT INTO pages (id, title, parent_id, depth, sort_order, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO pages (id, title, parent_id, content_markdown, depth, sort_order, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
     )SQL");
 
     QSqlQuery updateContentQuery(m_db);
@@ -580,9 +586,10 @@ void DataStore::saveAllPages(const QVariantList& pages) {
             insertQuery.bindValue(0, pageId);
             insertQuery.bindValue(1, title);
             insertQuery.bindValue(2, parentId);
-            insertQuery.bindValue(3, depth);
-            insertQuery.bindValue(4, sortOrder);
-            insertQuery.bindValue(5, updatedAt);
+            insertQuery.bindValue(3, QStringLiteral(""));
+            insertQuery.bindValue(4, depth);
+            insertQuery.bindValue(5, sortOrder);
+            insertQuery.bindValue(6, updatedAt);
             if (!insertQuery.exec()) {
                 qWarning() << "DataStore: Failed to insert page:" << insertQuery.lastError().text();
             }
@@ -641,15 +648,18 @@ void DataStore::applyPageUpdates(const QVariantList& pages) {
 
     QSqlQuery upsertQuery(m_db);
     upsertQuery.prepare(R"SQL(
-        INSERT INTO pages (id, title, parent_id, depth, sort_order, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO pages (id, title, parent_id, content_markdown, depth, sort_order, updated_at)
+        VALUES (?, ?, ?, COALESCE(?, ''), ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
             title = excluded.title,
             parent_id = excluded.parent_id,
+            content_markdown = COALESCE(excluded.content_markdown, pages.content_markdown),
             depth = excluded.depth,
             sort_order = excluded.sort_order,
             updated_at = excluded.updated_at;
     )SQL");
+
+    QSet<QString> contentChangedPages;
 
     for (const auto& entry : pages) {
         auto page = entry.toMap();
@@ -699,9 +709,15 @@ void DataStore::applyPageUpdates(const QVariantList& pages) {
         upsertQuery.bindValue(0, pageId);
         upsertQuery.bindValue(1, normalize_title(page.value("title")));
         upsertQuery.bindValue(2, normalize_parent_id(page.value("parentId")));
-        upsertQuery.bindValue(3, page.value("depth").toInt());
-        upsertQuery.bindValue(4, page.value("sortOrder").toInt());
-        upsertQuery.bindValue(5, remoteUpdated);
+        if (page.contains("contentMarkdown")) {
+            upsertQuery.bindValue(3, page.value("contentMarkdown").toString());
+            contentChangedPages.insert(pageId);
+        } else {
+            upsertQuery.bindValue(3, QVariant());
+        }
+        upsertQuery.bindValue(4, page.value("depth").toInt());
+        upsertQuery.bindValue(5, page.value("sortOrder").toInt());
+        upsertQuery.bindValue(6, remoteUpdated);
         if (!upsertQuery.exec()) {
             qWarning() << "DataStore: Failed to apply page update:" << upsertQuery.lastError().text();
         } else {
@@ -714,7 +730,59 @@ void DataStore::applyPageUpdates(const QVariantList& pages) {
     if (changed) {
         qDebug() << "DataStore: applyPageUpdates changed";
         emit pagesChanged();
+        for (const auto& pageId : contentChangedPages) {
+            emit pageContentChanged(pageId);
+        }
     }
+}
+
+QString DataStore::getPageContentMarkdown(const QString& pageId) {
+    if (!m_ready || pageId.isEmpty()) {
+        return {};
+    }
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral("SELECT content_markdown FROM pages WHERE id = ?"));
+    query.addBindValue(pageId);
+    if (!query.exec() || !query.next()) {
+        return {};
+    }
+    return query.value(0).toString();
+}
+
+void DataStore::savePageContentMarkdown(const QString& pageId, const QString& markdown) {
+    if (!m_ready || pageId.isEmpty()) {
+        return;
+    }
+
+    const QString updatedAt = now_timestamp_utc();
+
+    QSqlQuery query(m_db);
+    query.prepare(R"SQL(
+        INSERT INTO pages (id, title, parent_id, content_markdown, depth, sort_order, updated_at)
+        VALUES (?, COALESCE((SELECT title FROM pages WHERE id = ?), 'Untitled'),
+                COALESCE((SELECT parent_id FROM pages WHERE id = ?), ''),
+                ?, COALESCE((SELECT depth FROM pages WHERE id = ?), 0),
+                COALESCE((SELECT sort_order FROM pages WHERE id = ?), 0),
+                ?)
+        ON CONFLICT(id) DO UPDATE SET
+            content_markdown = excluded.content_markdown,
+            updated_at = excluded.updated_at;
+    )SQL");
+    query.addBindValue(pageId);
+    query.addBindValue(pageId);
+    query.addBindValue(pageId);
+    query.addBindValue(markdown);
+    query.addBindValue(pageId);
+    query.addBindValue(pageId);
+    query.addBindValue(updatedAt);
+
+    if (!query.exec()) {
+        qWarning() << "DataStore: Failed to save page content:" << query.lastError().text();
+        emit error("Failed to save page content: " + query.lastError().text());
+        return;
+    }
+
+    emit pageContentChanged(pageId);
 }
 
 void DataStore::applyDeletedPageUpdates(const QVariantList& deletedPages) {
@@ -962,7 +1030,7 @@ void DataStore::applyBlockUpdates(const QVariantList& blocks) {
 
     m_db.commit();
     for (const auto& pageId : changedPages) {
-        emit blocksChanged(pageId);
+        emit pageContentChanged(pageId);
     }
 }
 
@@ -1037,7 +1105,7 @@ void DataStore::saveBlocksForPage(const QString& pageId, const QVariantList& blo
     }
     
     m_db.commit();
-    emit blocksChanged(pageId);
+    emit pageContentChanged(pageId);
 }
 
 void DataStore::deleteBlocksForPage(const QString& pageId) {
@@ -1279,6 +1347,92 @@ bool DataStore::runMigrations() {
         migration.exec("PRAGMA user_version = 3");
         m_db.commit();
         currentVersion = 3;
+    }
+
+    // Migration 4: Plume-style markdown storage per page.
+    // - Add pages.content_markdown
+    // - Backfill pages.content_markdown from legacy blocks table when empty
+    if (currentVersion < 4) {
+        qDebug() << "DataStore: Running migration to version 4";
+        m_db.transaction();
+
+        QSet<QString> pageColumns;
+        QSqlQuery pageInfo(m_db);
+        if (pageInfo.exec("PRAGMA table_info(pages)")) {
+            while (pageInfo.next()) {
+                pageColumns.insert(pageInfo.value(1).toString());
+            }
+        }
+
+        QSqlQuery migration(m_db);
+        if (!pageColumns.contains(QStringLiteral("content_markdown"))) {
+            migration.exec("ALTER TABLE pages ADD COLUMN content_markdown TEXT NOT NULL DEFAULT ''");
+        }
+
+        QSet<QString> tables;
+        QSqlQuery tableQuery(m_db);
+        if (tableQuery.exec("SELECT name FROM sqlite_master WHERE type='table'")) {
+            while (tableQuery.next()) {
+                tables.insert(tableQuery.value(0).toString());
+            }
+        }
+
+        if (tables.contains(QStringLiteral("blocks"))) {
+            MarkdownBlocks codec;
+
+            QSqlQuery pagesQuery(m_db);
+            pagesQuery.exec("SELECT id FROM pages");
+
+            QSqlQuery blocksQuery(m_db);
+            blocksQuery.prepare(R"SQL(
+                SELECT block_type, content, depth, checked, collapsed, language, heading_level
+                FROM blocks
+                WHERE page_id = ?
+                ORDER BY sort_order
+            )SQL");
+
+            QSqlQuery update(m_db);
+            update.prepare("UPDATE pages SET content_markdown = ? WHERE id = ? AND content_markdown = ''");
+
+            while (pagesQuery.next()) {
+                const QString pageId = pagesQuery.value(0).toString();
+                if (pageId.isEmpty()) continue;
+
+                blocksQuery.bindValue(0, pageId);
+                if (!blocksQuery.exec()) {
+                    blocksQuery.finish();
+                    continue;
+                }
+
+                QVariantList blocks;
+                while (blocksQuery.next()) {
+                    QVariantMap block;
+                    block["blockType"] = blocksQuery.value(0).toString();
+                    block["content"] = blocksQuery.value(1).toString();
+                    block["depth"] = blocksQuery.value(2).toInt();
+                    block["checked"] = blocksQuery.value(3).toBool();
+                    block["collapsed"] = blocksQuery.value(4).toBool();
+                    block["language"] = blocksQuery.value(5).toString();
+                    block["headingLevel"] = blocksQuery.value(6).toInt();
+                    blocks.append(block);
+                }
+                blocksQuery.finish();
+
+                if (blocks.isEmpty()) {
+                    continue;
+                }
+
+                const auto markdown = codec.serializeContent(blocks);
+                update.bindValue(0, markdown);
+                update.bindValue(1, pageId);
+                update.exec();
+                update.finish();
+            }
+        }
+
+        migration.exec("PRAGMA user_version = 4");
+        m_db.commit();
+        currentVersion = 4;
     }
     
     qDebug() << "DataStore: Migrations complete. Schema version:" << currentVersion;

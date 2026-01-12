@@ -8,6 +8,9 @@ Item {
     
     property string content: ""
     property bool isChecked: false
+    property var editor: null
+    property int blockIndex: -1
+    property bool multiBlockSelectionActive: false
     
     signal contentEdited(string newContent)
     signal enterPressed()
@@ -91,11 +94,42 @@ Item {
             }
             
             Keys.onPressed: function(event) {
-                if (event.key === Qt.Key_Backspace && text.length === 0) {
+                if ((event.modifiers & Qt.ControlModifier) && event.key === Qt.Key_C && root.multiBlockSelectionActive && root.editor) {
+                    event.accepted = true
+                    root.editor.copyCrossBlockSelectionToClipboard()
+                } else if ((event.modifiers & Qt.ControlModifier) && event.key === Qt.Key_V && root.editor) {
+                    if (root.editor.pasteBlocksFromClipboard(root.blockIndex)) {
+                        event.accepted = true
+                    }
+                } else if (event.key === Qt.Key_Backspace && text.length === 0) {
                     event.accepted = true
                     root.backspaceOnEmpty()
                 }
             }
         }
     }
+
+    DragHandler {
+        target: null
+        acceptedButtons: Qt.LeftButton
+        grabPermissions: PointerHandler.CanTakeOverFromAnything
+
+        onActiveChanged: {
+            if (!root.editor) return
+            if (active) {
+                const p = root.mapToItem(root.editor, centroid.pressPosition.x, centroid.pressPosition.y)
+                root.editor.startCrossBlockSelection(p)
+            } else {
+                root.editor.endCrossBlockSelection()
+            }
+        }
+
+        onTranslationChanged: {
+            if (!active || !root.editor) return
+            const p = root.mapToItem(root.editor, centroid.position.x, centroid.position.y)
+            root.editor.updateCrossBlockSelection(p)
+        }
+    }
+
+    property alias textControl: textEdit
 }

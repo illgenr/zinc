@@ -37,8 +37,6 @@ Dialog {
     readonly property SyncController activeSyncController: externalSyncController ? externalSyncController : internalSyncController
     property string pagesCursorAt: ""
     property string pagesCursorId: ""
-    property string blocksCursorAt: ""
-    property string blocksCursorId: ""
     property string deletedPagesCursorAt: ""
     property string deletedPagesCursorId: ""
 
@@ -111,8 +109,6 @@ Dialog {
             console.log("PairingDialog: peer connected", deviceName)
             pagesCursorAt = ""
             pagesCursorId = ""
-            blocksCursorAt = ""
-            blocksCursorId = ""
             deletedPagesCursorAt = ""
             deletedPagesCursorId = ""
             sendLocalPagesSnapshot(true)
@@ -125,16 +121,6 @@ Dialog {
             console.log("PairingDialog: received snapshot pages", pages.length)
             suppressOutgoingSnapshots = true
             DataStore.applyPageUpdates(pages)
-            Qt.callLater(function() { suppressOutgoingSnapshots = false })
-        }
-
-        function onBlockSnapshotReceivedBlocks(blocks) {
-            if (!blocks) {
-                return
-            }
-            console.log("PairingDialog: received snapshot blocks", blocks.length)
-            suppressOutgoingSnapshots = true
-            DataStore.applyBlockUpdates(blocks)
             Qt.callLater(function() { suppressOutgoingSnapshots = false })
         }
 
@@ -164,7 +150,7 @@ Dialog {
             }
         }
 
-        function onBlocksChanged(pageId) {
+        function onPageContentChanged(pageId) {
             if (activeSyncController.syncing && !suppressOutgoingSnapshots) {
                 scheduleOutgoingSnapshot()
             }
@@ -204,27 +190,23 @@ Dialog {
         }
         var pages = full ? DataStore.getPagesForSync()
                          : DataStore.getPagesForSyncSince(pagesCursorAt, pagesCursorId)
-        var blocks = full ? DataStore.getBlocksForSync()
-                          : DataStore.getBlocksForSyncSince(blocksCursorAt, blocksCursorId)
         var deletedPages = full ? DataStore.getDeletedPagesForSync()
                                 : DataStore.getDeletedPagesForSyncSince(deletedPagesCursorAt, deletedPagesCursorId)
-        if (!full && (!pages || pages.length === 0) && (!blocks || blocks.length === 0) &&
+        if (!full && (!pages || pages.length === 0) &&
             (!deletedPages || deletedPages.length === 0)) {
             return
         }
         var payload = JSON.stringify({
-            v: 1,
+            v: 2,
             workspaceId: activeSyncController.workspaceId,
             full: full === true,
             pages: pages,
-            blocks: blocks,
             deletedPages: deletedPages
         })
-        console.log("PairingDialog: sending snapshot full=", full === true, "pages", pages.length, "blocks", blocks.length, "deleted", deletedPages.length)
+        console.log("PairingDialog: sending snapshot full=", full === true, "pages", pages.length, "deleted", deletedPages.length)
         activeSyncController.sendPageSnapshot(payload)
 
         advanceCursorFrom(pages, "pagesCursorAt", "pagesCursorId", "updatedAt", "pageId")
-        advanceCursorFrom(blocks, "blocksCursorAt", "blocksCursorId", "updatedAt", "blockId")
         advanceCursorFrom(deletedPages, "deletedPagesCursorAt", "deletedPagesCursorId", "deletedAt", "pageId")
     }
     

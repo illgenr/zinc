@@ -15,6 +15,12 @@ Item {
     property bool collapsed: false
     property string language: ""
     property int headingLevel: 1
+    property var editor: null
+    property var textControl: (blockLoader.item && blockLoader.item.textControl) ? blockLoader.item.textControl : null
+    readonly property bool rangeSelected: editor &&
+        editor.selectionStartBlockIndex >= 0 &&
+        blockIndex >= editor.selectionStartBlockIndex &&
+        blockIndex <= editor.selectionEndBlockIndex
 
     signal contentEdited(string newContent)
     signal blockEnterPressed()
@@ -29,6 +35,12 @@ Item {
     signal linkClicked(string pageId)
 
     implicitHeight: blockLoader.height
+
+    Rectangle {
+        anchors.fill: parent
+        color: root.rangeSelected && !root.textControl ? ThemeManager.accentLight : "transparent"
+        radius: ThemeManager.radiusSmall
+    }
 
     RowLayout {
         anchors.fill: parent
@@ -64,8 +76,24 @@ Item {
                     anchors.fill: parent
                     hoverEnabled: true
                     cursorShape: Qt.SizeAllCursor
+                    preventStealing: true
 
-                    // TODO: Implement drag and drop
+                    onPressed: function(mouse) {
+                        if (!root.editor) return
+                        root.editor.startReorderBlock(root.blockIndex)
+                        var p = dragHandle.mapToItem(root.editor, mouse.x, mouse.y)
+                        root.editor.updateReorderBlockByEditorY(p.y)
+                    }
+
+                    onPositionChanged: function(mouse) {
+                        if (!pressed || !root.editor) return
+                        var p = dragHandle.mapToItem(root.editor, mouse.x, mouse.y)
+                        root.editor.updateReorderBlockByEditorY(p.y)
+                    }
+
+                    onReleased: {
+                        if (root.editor) root.editor.endReorderBlock()
+                    }
                 }
             }
         }
@@ -103,6 +131,9 @@ Item {
         id: paragraphComponent
         ParagraphBlock {
             content: root.content
+            editor: root.editor
+            blockIndex: root.blockIndex
+            multiBlockSelectionActive: root.editor ? root.editor.hasCrossBlockSelection : false
             onContentEdited: (newContent) => root.contentEdited(newContent)
             onEnterPressed: root.blockEnterPressed()
             onBackspaceOnEmpty: root.blockBackspaceOnEmpty()
@@ -119,6 +150,9 @@ Item {
         HeadingBlock {
             level: root.headingLevel
             content: root.content
+            editor: root.editor
+            blockIndex: root.blockIndex
+            multiBlockSelectionActive: root.editor ? root.editor.hasCrossBlockSelection : false
             onContentEdited: (newContent) => root.contentEdited(newContent)
             onEnterPressed: root.blockEnterPressed()
             onBackspaceOnEmpty: root.blockBackspaceOnEmpty()
@@ -131,6 +165,9 @@ Item {
         TodoBlock {
             content: root.content
             isChecked: root.checked
+            editor: root.editor
+            blockIndex: root.blockIndex
+            multiBlockSelectionActive: root.editor ? root.editor.hasCrossBlockSelection : false
             onContentEdited: (newContent) => root.contentEdited(newContent)
             onEnterPressed: root.blockEnterPressed()
             onBackspaceOnEmpty: root.blockBackspaceOnEmpty()
@@ -144,6 +181,9 @@ Item {
         CodeBlock {
             content: root.content
             codeLanguage: root.language
+            editor: root.editor
+            blockIndex: root.blockIndex
+            multiBlockSelectionActive: root.editor ? root.editor.hasCrossBlockSelection : false
             onContentEdited: (newContent) => root.contentEdited(newContent)
             onBlockFocused: root.blockFocused()
         }
@@ -153,6 +193,9 @@ Item {
         id: quoteComponent
         QuoteBlock {
             content: root.content
+            editor: root.editor
+            blockIndex: root.blockIndex
+            multiBlockSelectionActive: root.editor ? root.editor.hasCrossBlockSelection : false
             onContentEdited: (newContent) => root.contentEdited(newContent)
             onEnterPressed: root.blockEnterPressed()
             onBackspaceOnEmpty: root.blockBackspaceOnEmpty()
@@ -162,7 +205,7 @@ Item {
 
     Component {
         id: dividerComponent
-        DividerBlock {}
+        DividerBlock { editor: root.editor }
     }
 
     Component {
@@ -170,6 +213,9 @@ Item {
         ToggleBlock {
             content: root.content
             isCollapsed: root.collapsed
+            editor: root.editor
+            blockIndex: root.blockIndex
+            multiBlockSelectionActive: root.editor ? root.editor.hasCrossBlockSelection : false
             onContentEdited: (newContent) => root.contentEdited(newContent)
             onEnterPressed: root.blockEnterPressed()
             onCollapseToggled: root.blockCollapseToggled()
@@ -181,6 +227,9 @@ Item {
         id: linkComponent
         LinkBlock {
             content: root.content
+            editor: root.editor
+            blockIndex: root.blockIndex
+            multiBlockSelectionActive: root.editor ? root.editor.hasCrossBlockSelection : false
             onContentEdited: (newContent) => root.contentEdited(newContent)
             onEnterPressed: root.blockEnterPressed()
             onBackspaceOnEmpty: root.blockBackspaceOnEmpty()

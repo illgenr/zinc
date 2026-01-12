@@ -10,6 +10,10 @@ SyncManager::SyncManager(QObject* parent)
 {
     connect(discovery_.get(), &DiscoveryService::peerDiscovered,
             this, &SyncManager::onPeerDiscovered);
+    // Treat periodic "peer updated" events as presence refresh so that
+    // higher layers can update "last seen" and endpoints.
+    connect(discovery_.get(), &DiscoveryService::peerUpdated,
+            this, &SyncManager::onPeerDiscovered);
     connect(discovery_.get(), &DiscoveryService::peerLost,
             this, &SyncManager::onPeerLost);
     
@@ -83,6 +87,7 @@ void SyncManager::stop() {
         }
     }
     peers_.clear();
+    autoconnect_attempted_.clear();
     
     discovery_->stopBrowsing();
     discovery_->stopAdvertising();
@@ -104,9 +109,13 @@ void SyncManager::connectToPeer(const Uuid& device_id) {
     
     // Check if already connected
     auto it = peers_.find(device_id);
-    if (it != peers_.end() && it->second->connection && 
-        it->second->connection->isConnected()) {
-        return;
+    if (it != peers_.end() && it->second->connection) {
+        const auto state = it->second->connection->state();
+        if (state == Connection::State::Connected ||
+            state == Connection::State::Connecting ||
+            state == Connection::State::Handshaking) {
+            return;
+        }
     }
     
     // Create new connection
@@ -160,6 +169,7 @@ void SyncManager::disconnectFromPeer(const Uuid& device_id) {
         emit peerDisconnected(device_id);
         emit peersChanged();
     }
+    autoconnect_attempted_.erase(device_id);
 }
 
 void SyncManager::broadcastChange(const std::string& doc_id,
@@ -221,13 +231,20 @@ void SyncManager::setupConnection(PeerConnection& peer) {
 void SyncManager::onPeerDiscovered(const PeerInfo& peer) {
     // Auto-connect to peers in same workspace
     if (peer.workspace_id == workspace_id_ && peer.device_id != device_id_) {
-        connectToPeer(peer.device_id);
+        // Deterministic tie-breaker: only one side initiates the connection to
+        // avoid simultaneous connects and rapid churn.
+        if (device_id_ < peer.device_id) {
+            if (autoconnect_attempted_.insert(peer.device_id).second) {
+                connectToPeer(peer.device_id);
+            }
+        }
     }
     emit peerDiscovered(peer);
 }
 
 void SyncManager::onPeerLost(const Uuid& device_id) {
     disconnectFromPeer(device_id);
+    autoconnect_attempted_.erase(device_id);
 }
 
 void SyncManager::onNewConnection(QTcpSocket* socket) {

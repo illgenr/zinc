@@ -7,6 +7,8 @@ Item {
     id: root
     
     property bool collapsed: false
+    property bool showNewPageButton: true
+    property bool showExpandArrowsAlways: false
     
     signal pageSelected(string pageId, string title)
     signal pagesChanged()
@@ -192,6 +194,25 @@ Item {
         }
         return false
     }
+
+    // Determine if a row should be visible based on ancestor expanded state.
+    function rowVisible(rowIndex) {
+        if (rowIndex < 0 || rowIndex >= pageModel.count) return false
+        const row = pageModel.get(rowIndex)
+        if (!row) return false
+        if (row.depth <= 0) return true
+
+        let neededDepth = row.depth - 1
+        for (let i = rowIndex - 1; i >= 0 && neededDepth >= 0; i--) {
+            const candidate = pageModel.get(i)
+            if (!candidate) continue
+            if (candidate.depth === neededDepth) {
+                if (!candidate.expanded) return false
+                neededDepth--
+            }
+        }
+        return neededDepth < 0
+    }
     
     function ensureInitialPage() {
         // Select first page (pages are already loaded by Component.onCompleted)
@@ -222,6 +243,7 @@ Item {
         Rectangle {
             Layout.fillWidth: true
             Layout.preferredHeight: 36
+            visible: root.showNewPageButton
             radius: ThemeManager.radiusSmall
             color: newPageMouse.containsMouse || newPageMouse.pressed ? ThemeManager.surfaceHover : ThemeManager.surface
             border.width: 1
@@ -268,7 +290,8 @@ Item {
         delegate: Rectangle {
             id: delegateItem
             width: pageList.width
-            height: collapsed ? 32 : 28
+            height: rowVisible(index) ? (collapsed ? 32 : 28) : 0
+            visible: rowVisible(index)
             radius: ThemeManager.radiusSmall
             color: delegateMouseArea.containsMouse ? ThemeManager.surfaceHover : "transparent"
             
@@ -294,40 +317,44 @@ Item {
                 spacing: ThemeManager.spacingSmall
                 z: 1
                 
-                // Expand/collapse arrow area (always takes space for consistent alignment)
+                // Left affordance: small icon, becomes expand/collapse arrow on hover.
                 Item {
-                    width: 16
-                    height: 16
-                    visible: !collapsed
-                    
+                    width: 18
+                    height: 18
+
+                    readonly property bool hasKids: root.hasChildren(model.pageId)
+                    readonly property bool showArrow: !collapsed && hasKids &&
+                                                     (root.showExpandArrowsAlways || delegateMouseArea.containsMouse)
+
                     Text {
                         anchors.centerIn: parent
                         text: "▶"
                         color: ThemeManager.textMuted
-                        font.pixelSize: 8
+                        font.pixelSize: 9
                         rotation: model.expanded ? 90 : 0
-                        visible: root.hasChildren(model.pageId)
-                        
+                        visible: parent.showArrow
+
                         Behavior on rotation {
                             NumberAnimation { duration: ThemeManager.animationFast }
                         }
                     }
-                    
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: "📄"
+                        font.pixelSize: collapsed ? 14 : 12
+                        visible: !parent.showArrow
+                    }
+
                     MouseArea {
                         anchors.fill: parent
-                        enabled: root.hasChildren(model.pageId)
+                        enabled: parent.showArrow
                         cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
                         onClicked: function(mouse) {
                             model.expanded = !model.expanded
                             mouse.accepted = true
                         }
                     }
-                }
-                
-                // Page icon
-                Text {
-                    text: "📄"
-                    font.pixelSize: collapsed ? 16 : 14
                 }
                 
                 // Page title
@@ -447,4 +474,3 @@ Item {
         }
     }
 }
-

@@ -9,6 +9,7 @@
 #include <QByteArray>
 #include <map>
 #include <memory>
+#include <set>
 
 namespace zinc::network {
 
@@ -136,6 +137,9 @@ private:
     bool syncing_ = false;
     bool started_ = false;
     bool stopping_ = false;
+
+    // Prevent repeated auto-connect attempts on every discovery heartbeat.
+    std::set<Uuid> autoconnect_attempted_;
     
     void setupConnection(PeerConnection& peer);
     void handleSyncRequest(const Uuid& peer_id, const std::vector<uint8_t>& payload);

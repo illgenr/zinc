@@ -1,6 +1,8 @@
 #include "ui/qml_types.hpp"
+#include "ui/Clipboard.hpp"
 #include "ui/DataStore.hpp"
 #include "ui/FeatureFlags.hpp"
+#include "ui/MarkdownBlocks.hpp"
 #include "ui/models/BlockModel.hpp"
 #include "ui/models/PageTreeModel.hpp"
 #include "ui/models/SearchResultModel.hpp"
@@ -17,6 +19,8 @@ namespace zinc::ui {
 void registerQmlTypes() {
     // Data Store singleton (registered under "zinc" module to match QML imports)
     qmlRegisterSingletonType<DataStore>("zinc", 1, 0, "DataStore", DataStore::create);
+    qmlRegisterSingletonType<Clipboard>("zinc", 1, 0, "Clipboard", Clipboard::create);
+    qmlRegisterSingletonType<MarkdownBlocks>("zinc", 1, 0, "MarkdownBlocks", MarkdownBlocks::create);
     
     // Platform utilities
     qmlRegisterSingletonType<platform::AndroidUtils>("zinc", 1, 0, "AndroidUtils", platform::AndroidUtils::create);

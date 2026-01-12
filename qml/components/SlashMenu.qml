@@ -30,6 +30,7 @@ Popup {
         { type: "heading", level: 1, label: "Heading 1", description: "Large heading", icon: "H1" },
         { type: "heading", level: 2, label: "Heading 2", description: "Medium heading", icon: "H2" },
         { type: "heading", level: 3, label: "Heading 3", description: "Small heading", icon: "H3" },
+        { type: "bulleted", label: "Bulleted list", description: "Multi-line list block", icon: "•" },
         { type: "todo", label: "To-do", description: "Checkbox item", icon: "☑️" },
         { type: "code", label: "Code", description: "Code block", icon: "💻" },
         { type: "quote", label: "Quote", description: "Block quote", icon: "❝" },

@@ -188,172 +188,21 @@ ApplicationWindow {
                     }
 
                     onClicked: {
-                        pageTree.createPage("")
+                        mobilePageTree.createPage("")
                     }
                 }
                 
                 // Notes list
-                ListView {
-                    id: mobileNotesList
+                PageTree {
+                    id: mobilePageTree
                     Layout.fillWidth: true
                     Layout.fillHeight: true
-                    clip: true
-                    model: mobilePagesList
-                    
-                    delegate: Rectangle {
-                        id: mobilePageDelegate
-                        width: mobileNotesList.width
-                        height: 64
-                        color: noteMouse.pressed ? ThemeManager.surfaceHover : "transparent"
-                        
-                        RowLayout {
-                            anchors.fill: parent
-                            anchors.leftMargin: ThemeManager.spacingMedium + (modelData.depth * 24)
-                            anchors.rightMargin: ThemeManager.spacingSmall
-                            anchors.topMargin: ThemeManager.spacingSmall
-                            anchors.bottomMargin: ThemeManager.spacingSmall
-                            spacing: ThemeManager.spacingSmall
-                            
-                            // Indent indicator for child pages
-                            Rectangle {
-                                visible: modelData.depth > 0
-                                width: 2
-                                Layout.fillHeight: true
-                                color: ThemeManager.border
-                            }
-                            
-                            Rectangle {
-                                width: 40
-                                height: 40
-                                radius: ThemeManager.radiusSmall
-                                color: ThemeManager.surfaceHover
-                                
-                                Text {
-                                    anchors.centerIn: parent
-                                    text: modelData.depth > 0 ? "📑" : "📄"
-                                    font.pixelSize: 18
-                                }
-                            }
-                            
-                            ColumnLayout {
-                                Layout.fillWidth: true
-                                spacing: 2
-                                
-                                Text {
-                                    Layout.fillWidth: true
-                                    text: modelData.title
-                                    color: ThemeManager.text
-                                    font.pixelSize: ThemeManager.fontSizeNormal
-                                    font.weight: Font.Medium
-                                    elide: Text.ElideRight
-                                }
-                                
-                                Text {
-                                    Layout.fillWidth: true
-                                    text: modelData.depth > 0 ? "Sub-page" : "Page"
-                                    color: ThemeManager.textSecondary
-                                    font.pixelSize: ThemeManager.fontSizeSmall
-                                }
-                            }
-                            
-                            // Add sub-page button
-                            Rectangle {
-                                width: 36
-                                height: 36
-                                radius: ThemeManager.radiusMedium
-                                color: addSubMouse.pressed ? ThemeManager.surfaceActive : ThemeManager.surfaceHover
-                                
-                                Text {
-                                    anchors.centerIn: parent
-                                    text: "+"
-                                    color: ThemeManager.accent
-                                    font.pixelSize: 20
-                                    font.bold: true
-                                }
-                                
-                                MouseArea {
-                                    id: addSubMouse
-                                    anchors.fill: parent
-                                    onClicked: {
-                                        pageTree.createPage(modelData.pageId)
-                                    }
-                                }
-                            }
-                            
-                            // More options button
-                            Rectangle {
-                                width: 36
-                                height: 36
-                                radius: ThemeManager.radiusMedium
-                                color: moreMouse.pressed ? ThemeManager.surfaceActive : ThemeManager.surfaceHover
-                                
-                                Text {
-                                    anchors.centerIn: parent
-                                    text: "⋯"
-                                    color: ThemeManager.textSecondary
-                                    font.pixelSize: 18
-                                }
-                                
-                                MouseArea {
-                                    id: moreMouse
-                                    anchors.fill: parent
-                                    onClicked: {
-                                        mobilePageMenu.targetPageId = modelData.pageId
-                                        mobilePageMenu.targetPageTitle = modelData.title
-                                        mobilePageMenu.popup()
-                                    }
-                                }
-                            }
-                            
-                            // Navigate arrow
-                            Text {
-                                text: "›"
-                                color: ThemeManager.textMuted
-                                font.pixelSize: 20
-                            }
-                        }
-                        
-                        Rectangle {
-                            anchors.bottom: parent.bottom
-                            anchors.left: parent.left
-                            anchors.right: parent.right
-                            anchors.leftMargin: ThemeManager.spacingMedium + (modelData.depth * 24) + 56
-                            height: 1
-                            color: ThemeManager.borderLight
-                        }
-                        
-                        MouseArea {
-                            id: noteMouse
-                            anchors.fill: parent
-                            z: -1  // Behind the buttons
-                            onClicked: {
-                                root.currentPage = { id: modelData.pageId, title: modelData.title }
-                                mobileStack.push(mobileEditorComponent)
-                            }
-                        }
-                    }
-                }
-                
-                // Mobile page context menu
-                Menu {
-                    id: mobilePageMenu
-                    property string targetPageId: ""
-                    property string targetPageTitle: ""
-                    
-                    MenuItem {
-                        text: "Add sub-page"
-                        onTriggered: pageTree.createPage(mobilePageMenu.targetPageId)
-                    }
-                    
-                    MenuSeparator {}
-                    
-                    MenuItem {
-                        text: "Delete"
-                        onTriggered: {
-                            if (mobilePagesList.length > 1) {
-                                pageTree.deletePage(mobilePageMenu.targetPageId)
-                            }
-                        }
+                    showNewPageButton: false
+                    showExpandArrowsAlways: true
+
+                    onPageSelected: function(pageId, title) {
+                        root.currentPage = { id: pageId, title: title }
+                        mobileStack.push(mobileEditorComponent)
                     }
                 }
             }
@@ -381,7 +230,7 @@ ApplicationWindow {
                     anchors.fill: parent
                     onClicked: {
                         // Create new page using pageTree and navigate to it
-                        pageTree.createPage("")
+                        mobilePageTree.createPage("")
                         // pageTree will emit pageSelected which we handle
                     }
                 }
@@ -472,36 +321,9 @@ ApplicationWindow {
                         pageTree.updatePageTitle(root.currentPage.id, newTitle)
                     }
                 }
-                
-                onShowPagePicker: function(blockIndex) {
-                    mobilePagePickerDialog.pages = pageTree.getAllPages()
-                    mobilePagePickerDialog.open()
-                }
-                
-                onNavigateToPage: function(targetPageId) {
-                    // Find the page title
-                    let pages = pageTree.getAllPages()
-                    let title = "Note"
-                    for (let p of pages) {
-                        if (p.pageId === targetPageId) {
-                            title = p.title
-                            break
-                        }
-                    }
-                    root.currentPage = { id: targetPageId, title: title }
-                    // Push a new editor or reload
-                    mobileBlockEditor.loadPage(targetPageId)
-                }
             }
             
-            PagePickerDialog {
-                id: mobilePagePickerDialog
-                parent: Overlay.overlay
-                
-                onPageSelected: function(pageId, pageTitle) {
-                    mobileBlockEditor.setLinkTarget(pageId, pageTitle)
-                }
-            }
+            PagePickerDialog { id: mobilePagePickerDialog; parent: Overlay.overlay; visible: false }
         }
     }
     
@@ -668,25 +490,6 @@ ApplicationWindow {
                         pageTree.updatePageTitle(currentPage.id, newTitle)
                     }
                 }
-                
-                onShowPagePicker: function(blockIndex) {
-                    pagePickerDialog.pages = pageTree.getAllPages()
-                    pagePickerDialog.open()
-                }
-                
-                onNavigateToPage: function(targetPageId) {
-                    // Find the page title
-                    let pages = pageTree.getAllPages()
-                    let title = "Note"
-                    for (let p of pages) {
-                        if (p.pageId === targetPageId) {
-                            title = p.title
-                            break
-                        }
-                    }
-                    currentPage = { id: targetPageId, title: title }
-                    blockEditor.loadPage(targetPageId)
-                }
             }
         }
     }
@@ -713,14 +516,7 @@ ApplicationWindow {
         externalSyncController: appSyncController
     }
     
-    PagePickerDialog {
-        id: pagePickerDialog
-        parent: Overlay.overlay
-        
-        onPageSelected: function(pageId, pageTitle) {
-            blockEditor.setLinkTarget(pageId, pageTitle)
-        }
-    }
+    PagePickerDialog { id: pagePickerDialog; parent: Overlay.overlay; visible: false }
     
     SettingsDialog {
         id: settingsDialog

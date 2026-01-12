@@ -25,6 +25,255 @@ Item {
     signal showPagePicker(int blockIndex)
     
     property var availablePages: []  // Set by parent to provide page list for linking
+    property bool selectionDragging: false
+    property int selectionAnchorBlockIndex: -1
+    property int selectionFocusBlockIndex: -1
+    property int selectionAnchorPos: -1
+    property int selectionFocusPos: -1
+    property point lastSelectionPoint: Qt.point(0, 0)
+
+    property bool reorderDragging: false
+    property int reorderBlockIndex: -1
+    property point lastReorderPoint: Qt.point(0, 0)
+
+    property bool debugSelection: Qt.application.arguments.indexOf("--debug-selection") !== -1
+
+    readonly property bool hasCrossBlockSelection: selectionAnchorBlockIndex >= 0 &&
+                                                  selectionFocusBlockIndex >= 0 &&
+                                                  selectionAnchorBlockIndex !== selectionFocusBlockIndex
+    readonly property int selectionStartBlockIndex: selectionAnchorBlockIndex >= 0 && selectionFocusBlockIndex >= 0
+        ? Math.min(selectionAnchorBlockIndex, selectionFocusBlockIndex) : -1
+    readonly property int selectionEndBlockIndex: selectionAnchorBlockIndex >= 0 && selectionFocusBlockIndex >= 0
+        ? Math.max(selectionAnchorBlockIndex, selectionFocusBlockIndex) : -1
+
+    function blockIndexAtEditorY(editorY) {
+        if (blockRepeater.count <= 0) {
+            return -1
+        }
+        for (let i = 0; i < blockRepeater.count; i++) {
+            const item = blockRepeater.itemAt(i)
+            if (!item) continue
+            const top = item.mapToItem(root, 0, 0).y
+            const bottom = top + item.height
+            if (editorY >= top && editorY <= bottom) {
+                return i
+            }
+        }
+
+        const first = blockRepeater.itemAt(0)
+        const last = blockRepeater.itemAt(blockRepeater.count - 1)
+        if (first && editorY < first.mapToItem(root, 0, 0).y) return 0
+        if (last && editorY > (last.mapToItem(root, 0, 0).y + last.height)) return blockRepeater.count - 1
+        return selectionFocusBlockIndex
+    }
+
+    function clearCrossBlockSelection() {
+        selectionAnchorBlockIndex = -1
+        selectionFocusBlockIndex = -1
+        selectionAnchorPos = -1
+        selectionFocusPos = -1
+        for (let i = 0; i < blockRepeater.count; i++) {
+            const item = blockRepeater.itemAt(i)
+            if (!item || !item.textControl) continue
+            item.textControl.select(0, 0)
+        }
+    }
+
+    function autoscrollForEditorPoint(editorPoint) {
+        const margin = 24
+        const speed = 18
+        const y = editorPoint.y
+        const top = flickable.contentY
+        const bottom = flickable.contentY + flickable.height
+        if (flickable.contentHeight <= flickable.height) return
+        if (y < top + margin) {
+            flickable.contentY = Math.max(0, flickable.contentY - speed)
+        } else if (y > bottom - margin) {
+            flickable.contentY = Math.min(flickable.contentHeight - flickable.height, flickable.contentY + speed)
+        }
+    }
+
+    function blockTextControlAtEditorPoint(editorPoint) {
+        const idx = blockIndexAtEditorY(editorPoint.y)
+        if (idx < 0) return { index: -1, pos: -1 }
+        const item = blockRepeater.itemAt(idx)
+        if (!item || !item.textControl) return { index: idx, pos: 0 }
+        const local = item.textControl.mapFromItem(root, editorPoint.x, editorPoint.y)
+        const pos = item.textControl.positionAt(local.x, local.y)
+        return { index: idx, pos: pos }
+    }
+
+    function applyCrossBlockSelection() {
+        if (selectionAnchorBlockIndex < 0 || selectionFocusBlockIndex < 0) return
+        const startBlock = selectionAnchorBlockIndex
+        const endBlock = selectionFocusBlockIndex
+        const forward = endBlock >= startBlock
+
+        const firstBlock = forward ? startBlock : endBlock
+        const lastBlock = forward ? endBlock : startBlock
+        const firstPos = forward ? selectionAnchorPos : selectionFocusPos
+        const lastPos = forward ? selectionFocusPos : selectionAnchorPos
+
+        for (let i = 0; i < blockRepeater.count; i++) {
+            const item = blockRepeater.itemAt(i)
+            if (!item || !item.textControl) continue
+            const textLen = (item.textControl.text || "").length
+            if (i < firstBlock || i > lastBlock) {
+                item.textControl.select(0, 0)
+                continue
+            }
+            if (i === firstBlock && i === lastBlock) {
+                const a = Math.max(0, Math.min(firstPos, lastPos))
+                const b = Math.max(0, Math.max(firstPos, lastPos))
+                item.textControl.select(a, b)
+                continue
+            }
+            if (i === firstBlock) {
+                const a = Math.max(0, firstPos)
+                item.textControl.select(a, textLen)
+            } else if (i === lastBlock) {
+                const b = Math.max(0, lastPos)
+                item.textControl.select(0, b)
+            } else {
+                item.textControl.select(0, textLen)
+            }
+        }
+    }
+
+    function startCrossBlockSelection(editorPoint) {
+        selectionDragging = true
+        lastSelectionPoint = editorPoint
+        const hit = blockTextControlAtEditorPoint(editorPoint)
+        selectionAnchorBlockIndex = hit.index
+        selectionFocusBlockIndex = hit.index
+        selectionAnchorPos = hit.pos
+        selectionFocusPos = hit.pos
+        if (debugSelection) console.log("BlockEditor: selection start", hit.index, hit.pos)
+        applyCrossBlockSelection()
+    }
+
+    function updateCrossBlockSelection(editorPoint) {
+        if (!selectionDragging) return
+        lastSelectionPoint = editorPoint
+        autoscrollForEditorPoint(editorPoint)
+        const hit = blockTextControlAtEditorPoint(editorPoint)
+        if (hit.index < 0) return
+        selectionFocusBlockIndex = hit.index
+        selectionFocusPos = hit.pos
+        if (debugSelection) console.log("BlockEditor: selection update", hit.index, hit.pos)
+        applyCrossBlockSelection()
+    }
+
+    function endCrossBlockSelection() {
+        selectionDragging = false
+        if (debugSelection) console.log("BlockEditor: selection end")
+    }
+
+    function selectedBlocksForMarkdown() {
+        if (selectionAnchorBlockIndex < 0 || selectionFocusBlockIndex < 0) return []
+
+        const firstBlock = selectionStartBlockIndex
+        const lastBlock = selectionEndBlockIndex
+
+        let blocks = []
+        for (let i = firstBlock; i <= lastBlock; i++) {
+            const model = blockModel.get(i)
+            const item = blockRepeater.itemAt(i)
+            let text = model.content || ""
+            if (item && item.textControl) {
+                const a = Math.min(item.textControl.selectionStart, item.textControl.selectionEnd)
+                const b = Math.max(item.textControl.selectionStart, item.textControl.selectionEnd)
+                if (a !== b) {
+                    text = text.substring(a, b)
+                }
+            }
+            blocks.push({
+                blockType: model.blockType,
+                content: text,
+                depth: model.depth,
+                checked: model.checked,
+                collapsed: model.collapsed,
+                language: model.language,
+                headingLevel: model.headingLevel
+            })
+        }
+        return blocks
+    }
+
+    function copyCrossBlockSelectionToClipboard() {
+        if (selectionAnchorBlockIndex < 0 || selectionFocusBlockIndex < 0) return
+        Clipboard.setText(MarkdownBlocks.serialize(selectedBlocksForMarkdown()))
+    }
+
+    function pasteBlocksFromClipboard(atIndex) {
+        const markdown = Clipboard.text()
+        if (!MarkdownBlocks.isZincBlocksPayload(markdown)) {
+            return false
+        }
+        const parsed = MarkdownBlocks.parse(markdown)
+        if (!parsed || parsed.length === 0) {
+            return false
+        }
+
+        const blocks = []
+        for (let i = 0; i < parsed.length; i++) {
+            const b = parsed[i]
+            blocks.push({
+                blockId: generateUuid(),
+                blockType: b.blockType || "paragraph",
+                content: b.content || "",
+                depth: b.depth || 0,
+                checked: b.checked || false,
+                collapsed: b.collapsed || false,
+                language: b.language || "",
+                headingLevel: b.headingLevel || 0
+            })
+        }
+
+        const target = (atIndex >= 0 && atIndex < blockModel.count) ? atIndex : currentBlockIndex
+        let insertAt = Math.max(0, target + 1)
+        if (target >= 0 && target < blockModel.count) {
+            const current = blockModel.get(target)
+            if (current.blockType === "paragraph" && (current.content || "") === "") {
+                blockModel.remove(target)
+                blockModel.insert(target, blocks[0])
+                insertAt = target + 1
+                blocks.shift()
+            }
+        }
+
+        for (let i = 0; i < blocks.length; i++) {
+            blockModel.insert(insertAt + i, blocks[i])
+        }
+        scheduleAutosave()
+        clearCrossBlockSelection()
+        focusTimer.targetIndex = target >= 0 ? target : 0
+        focusTimer.start()
+        return true
+    }
+
+    function startReorderBlock(index) {
+        reorderDragging = true
+        reorderBlockIndex = index
+        if (debugSelection) console.log("BlockEditor: reorder start", index)
+    }
+
+    function updateReorderBlockByEditorY(editorY) {
+        if (!reorderDragging) return
+        lastReorderPoint = Qt.point(0, editorY)
+        autoscrollForEditorPoint(Qt.point(0, editorY))
+        const to = blockIndexAtEditorY(editorY)
+        if (to < 0 || to === reorderBlockIndex) return
+        blockModel.move(reorderBlockIndex, to, 1)
+        reorderBlockIndex = to
+        scheduleAutosave()
+    }
+
+    function endReorderBlock() {
+        reorderDragging = false
+        reorderBlockIndex = -1
+        if (debugSelection) console.log("BlockEditor: reorder end")
+    }
     
     function loadPage(id) {
         // Save current page first if we have one
@@ -35,8 +284,8 @@ Item {
         pageId = id
         blockModel.clear()
         
-        // Try to load blocks from storage
-        if (!loadBlocksFromStorage(id)) {
+        // Try to load markdown from storage
+        if (!loadMarkdownFromStorage(id)) {
             // Add initial empty paragraph if nothing saved
             blockModel.append({
                 blockId: generateUuid(),
@@ -51,48 +300,61 @@ Item {
         }
     }
     
+    function blocksForMarkdown() {
+        let blocks = []
+        for (let i = 0; i < blockModel.count; i++) {
+            let b = blockModel.get(i)
+            blocks.push({
+                blockType: b.blockType,
+                content: b.content,
+                depth: b.depth,
+                checked: b.checked,
+                collapsed: b.collapsed,
+                language: b.language,
+                headingLevel: b.headingLevel
+            })
+        }
+        return blocks
+    }
+
     function saveBlocks() {
         if (!pageId || pageId === "") return
         
         try {
-            let blocks = []
-            for (let i = 0; i < blockModel.count; i++) {
-                let b = blockModel.get(i)
-                blocks.push({
-                    blockId: b.blockId,
-                    blockType: b.blockType,
-                    content: b.content,
-                    depth: b.depth,
-                    checked: b.checked,
-                    collapsed: b.collapsed,
-                    language: b.language,
-                    headingLevel: b.headingLevel
-                })
-            }
-            
-            if (DataStore) DataStore.saveBlocksForPage(pageId, blocks)
+            const markdown = MarkdownBlocks.serializeContent(blocksForMarkdown())
+            if (DataStore) DataStore.savePageContentMarkdown(pageId, markdown)
         } catch (e) {
             console.log("Error saving blocks:", e)
         }
     }
     
-    function loadBlocksFromStorage(id) {
+    function loadFromMarkdown(markdown) {
+        blockModel.clear()
+        const parsed = MarkdownBlocks.parse(markdown || "")
+        if (!parsed || parsed.length === 0) {
+            return false
+        }
+        for (let i = 0; i < parsed.length; i++) {
+            const b = parsed[i]
+            blockModel.append({
+                blockId: generateUuid(),
+                blockType: b.blockType || "paragraph",
+                content: b.content || "",
+                depth: b.depth || 0,
+                checked: b.checked || false,
+                collapsed: b.collapsed || false,
+                language: b.language || "",
+                headingLevel: b.headingLevel || 0
+            })
+        }
+        return true
+    }
+
+    function loadMarkdownFromStorage(id) {
         try {
-            let blocks = DataStore ? DataStore.getBlocksForPage(id) : []
-            if (blocks && blocks.length > 0) {
-                for (let b of blocks) {
-                    blockModel.append({
-                        blockId: b.blockId || generateUuid(),
-                        blockType: b.blockType || "paragraph",
-                        content: b.content || "",
-                        depth: b.depth || 0,
-                        checked: b.checked || false,
-                        collapsed: b.collapsed || false,
-                        language: b.language || "",
-                        headingLevel: b.headingLevel || 0
-                    })
-                }
-                return true
+            const markdown = DataStore ? DataStore.getPageContentMarkdown(id) : ""
+            if (markdown && markdown !== "") {
+                return loadFromMarkdown(markdown)
             }
         } catch (e) {
             console.log("Error loading blocks:", e)
@@ -114,71 +376,12 @@ Item {
 
     function mergeBlocksFromStorage() {
         if (!pageId || pageId === "") return
-
-        let stored = DataStore ? DataStore.getBlocksForPage(pageId) : []
-        if (!stored) stored = []
-
-        let byId = {}
-        for (let i = 0; i < stored.length; i++) {
-            let b = stored[i]
-            if (b && b.blockId) {
-                byId[b.blockId] = b
-            }
-        }
-
-        // Update existing blocks in place
-        for (let i = 0; i < blockModel.count; i++) {
-            let local = blockModel.get(i)
-            let remote = byId[local.blockId]
-            if (!remote) continue
-
-            if (remote.blockType !== undefined && remote.blockType !== local.blockType) {
-                blockModel.setProperty(i, "blockType", remote.blockType)
-            }
-            if (remote.content !== undefined && remote.content !== local.content) {
-                blockModel.setProperty(i, "content", remote.content)
-            }
-            if (remote.depth !== undefined && remote.depth !== local.depth) {
-                blockModel.setProperty(i, "depth", remote.depth)
-            }
-            if (remote.checked !== undefined && remote.checked !== local.checked) {
-                blockModel.setProperty(i, "checked", remote.checked)
-            }
-            if (remote.collapsed !== undefined && remote.collapsed !== local.collapsed) {
-                blockModel.setProperty(i, "collapsed", remote.collapsed)
-            }
-            if (remote.language !== undefined && remote.language !== local.language) {
-                blockModel.setProperty(i, "language", remote.language)
-            }
-            if (remote.headingLevel !== undefined && remote.headingLevel !== local.headingLevel) {
-                blockModel.setProperty(i, "headingLevel", remote.headingLevel)
-            }
-        }
-
-        // Append blocks we don't have yet
-        for (let i = 0; i < stored.length; i++) {
-            let remote = stored[i]
-            if (!remote || !remote.blockId) continue
-
-            let found = false
-            for (let j = 0; j < blockModel.count; j++) {
-                if (blockModel.get(j).blockId === remote.blockId) {
-                    found = true
-                    break
-                }
-            }
-            if (found) continue
-
-            blockModel.append({
-                blockId: remote.blockId,
-                blockType: remote.blockType || "paragraph",
-                content: remote.content || "",
-                depth: remote.depth || 0,
-                checked: remote.checked || false,
-                collapsed: remote.collapsed || false,
-                language: remote.language || "",
-                headingLevel: remote.headingLevel || 0
-            })
+        try {
+            const markdown = DataStore ? DataStore.getPageContentMarkdown(pageId) : ""
+            if (!markdown) return
+            loadFromMarkdown(markdown)
+        } catch (e) {
+            console.log("Error merging markdown:", e)
         }
     }
 
@@ -192,7 +395,7 @@ Item {
     Connections {
         target: DataStore
 
-        function onBlocksChanged(changedPageId) {
+        function onPageContentChanged(changedPageId) {
             if (!changedPageId || changedPageId === "") return
             if (changedPageId !== pageId) return
 
@@ -225,6 +428,7 @@ Item {
         contentWidth: width
         contentHeight: contentColumn.height + 200
         clip: true
+        interactive: !(root.selectionDragging || root.reorderDragging)
         
         ScrollBar.vertical: ScrollBar {
             policy: ScrollBar.AsNeeded
@@ -267,18 +471,19 @@ Item {
             }
             
             // Blocks
-            Repeater {
-                id: blockRepeater
-                model: blockModel
+    Repeater {
+        id: blockRepeater
+        model: blockModel
                 
-                delegate: Block {
-                    Layout.fillWidth: true
+        delegate: Block {
+            Layout.fillWidth: true
                     
-                    blockIndex: index
-                    blockType: model.blockType
-                    content: model.content
-                    depth: model.depth
-                    checked: model.checked
+            blockIndex: index
+            editor: root
+            blockType: model.blockType
+            content: model.content
+            depth: model.depth
+            checked: model.checked
                     collapsed: model.collapsed
                     language: model.language
                     headingLevel: model.headingLevel
@@ -434,6 +639,27 @@ Item {
                         }
                     }
                 }
+            }
+        }
+    }
+
+    Shortcut {
+        enabled: root.hasCrossBlockSelection
+        sequence: StandardKey.Copy
+        context: Qt.ApplicationShortcut
+        onActivated: root.copyCrossBlockSelectionToClipboard()
+    }
+
+    Timer {
+        id: autoscrollTimer
+        interval: 16
+        repeat: true
+        running: root.selectionDragging || root.reorderDragging
+        onTriggered: {
+            if (root.selectionDragging) {
+                root.updateCrossBlockSelection(root.lastSelectionPoint)
+            } else if (root.reorderDragging) {
+                root.updateReorderBlockByEditorY(root.lastReorderPoint.y)
             }
         }
     }

@@ -9,6 +9,9 @@ Item {
     property string content: ""  // Format: "pageId|pageTitle"
     property string linkedPageId: content.split("|")[0] || ""
     property string linkedPageTitle: content.split("|")[1] || "Untitled"
+    property var editor: null
+    property int blockIndex: -1
+    property bool multiBlockSelectionActive: false
     
     signal contentEdited(string newContent)
     signal enterPressed()
@@ -66,6 +69,28 @@ Item {
             }
         }
     }
+
+    DragHandler {
+        target: null
+        acceptedButtons: Qt.LeftButton
+        grabPermissions: PointerHandler.CanTakeOverFromAnything
+
+        onActiveChanged: {
+            if (!root.editor) return
+            if (active) {
+                const p = root.mapToItem(root.editor, centroid.pressPosition.x, centroid.pressPosition.y)
+                root.editor.startCrossBlockSelection(p)
+            } else {
+                root.editor.endCrossBlockSelection()
+            }
+        }
+
+        onTranslationChanged: {
+            if (!active || !root.editor) return
+            const p = root.mapToItem(root.editor, centroid.position.x, centroid.position.y)
+            root.editor.updateCrossBlockSelection(p)
+        }
+    }
     
     // Set link data
     function setLink(pageId, pageTitle) {
@@ -74,7 +99,14 @@ Item {
     
     // Handle key events
     Keys.onPressed: function(event) {
-        if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+        if ((event.modifiers & Qt.ControlModifier) && event.key === Qt.Key_C && root.multiBlockSelectionActive && root.editor) {
+            event.accepted = true
+            root.editor.copyCrossBlockSelectionToClipboard()
+        } else if ((event.modifiers & Qt.ControlModifier) && event.key === Qt.Key_V && root.editor) {
+            if (root.editor.pasteBlocksFromClipboard(root.blockIndex)) {
+                event.accepted = true
+            }
+        } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
             event.accepted = true
             root.enterPressed()
         } else if (event.key === Qt.Key_Delete || event.key === Qt.Key_Backspace) {
@@ -86,4 +118,3 @@ Item {
     // Make focusable
     focus: true
 }
-

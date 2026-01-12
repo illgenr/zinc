@@ -230,10 +230,14 @@ target_link_libraries(zinc_network PUBLIC
 add_library(zinc_ui STATIC
     src/ui/qml_types.hpp
     src/ui/qml_types.cpp
+    src/ui/Clipboard.hpp
+    src/ui/Clipboard.cpp
     src/ui/FeatureFlags.hpp
     src/ui/FeatureFlags.cpp
     src/ui/DataStore.hpp
     src/ui/DataStore.cpp
+    src/ui/MarkdownBlocks.hpp
+    src/ui/MarkdownBlocks.cpp
     src/ui/models/BlockModel.hpp
     src/ui/models/BlockModel.cpp
     src/ui/models/PageTreeModel.hpp
@@ -302,6 +306,7 @@ qt_add_executable(appzinc
 
 set(ZINC_QML_FILES
     qml/Main.qml
+    qml/components/MarkdownEditor.qml
     qml/components/BlockEditor.qml
     qml/components/Block.qml
     qml/components/blocks/ParagraphBlock.qml
@@ -453,8 +458,10 @@ if(ZINC_BUILD_TESTS)
         tests/qml/test_main.cpp
         tests/qml/test_feature_flags.cpp
         tests/qml/test_datastore_sync.cpp
+        tests/qml/test_markdown_blocks.cpp
         tests/qml/test_sync_controller_settings.cpp
         tests/qml/test_pairing_dialog_qml.cpp
+        tests/qml/test_markdown_editor_qml.cpp
     )
 
     qt_add_qml_module(zinc_qml_tests

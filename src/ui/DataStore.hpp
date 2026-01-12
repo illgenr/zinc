@@ -54,6 +54,10 @@ public:
     Q_INVOKABLE void deleteBlocksForPage(const QString& pageId);
     Q_INVOKABLE void applyBlockUpdates(const QVariantList& blocks);
 
+    // Plume-style storage: one markdown document per page.
+    Q_INVOKABLE QString getPageContentMarkdown(const QString& pageId);
+    Q_INVOKABLE void savePageContentMarkdown(const QString& pageId, const QString& markdown);
+
     // Paired device operations
     Q_INVOKABLE QVariantList getPairedDevices();
     Q_INVOKABLE void savePairedDevice(const QString& deviceId,
@@ -77,7 +81,7 @@ public:
     
 signals:
     void pagesChanged();
-    void blocksChanged(const QString& pageId);
+    void pageContentChanged(const QString& pageId);
     void pairedDevicesChanged();
     void error(const QString& message);
 
