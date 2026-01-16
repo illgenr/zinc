@@ -5,6 +5,9 @@
 
 /.qt
 
+# Qt Language Server
+**/.qmlls.ini
+
 # Build artifacts (qmake)
 *.o
 *.obj

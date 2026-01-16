@@ -56,7 +56,7 @@
 
             <meta-data
                 android:name="android.app.arguments"
-                android:value="" />
+                android:value="--debug-attachments" />
         </activity>
 
         <provider

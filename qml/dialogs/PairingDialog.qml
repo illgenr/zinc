@@ -39,6 +39,8 @@ Dialog {
     property string pagesCursorId: ""
     property string deletedPagesCursorAt: ""
     property string deletedPagesCursorId: ""
+    property string attachmentsCursorAt: ""
+    property string attachmentsCursorId: ""
 
     PairingController {
         id: pairingController
@@ -111,7 +113,19 @@ Dialog {
             pagesCursorId = ""
             deletedPagesCursorAt = ""
             deletedPagesCursorId = ""
+            attachmentsCursorAt = ""
+            attachmentsCursorId = ""
             sendLocalPagesSnapshot(true)
+        }
+
+        function onAttachmentSnapshotReceivedAttachments(attachments) {
+            if (!attachments) {
+                return
+            }
+            console.log("PairingDialog: received attachments", attachments.length)
+            suppressOutgoingSnapshots = true
+            DataStore.applyAttachmentUpdates(attachments)
+            Qt.callLater(function() { suppressOutgoingSnapshots = false })
         }
 
         function onPageSnapshotReceivedPages(pages) {
@@ -133,6 +147,16 @@ Dialog {
             DataStore.applyDeletedPageUpdates(deletedPages)
             Qt.callLater(function() { suppressOutgoingSnapshots = false })
         }
+
+        function onBlockSnapshotReceivedBlocks(blocks) {
+            if (!blocks) {
+                return
+            }
+            console.log("PairingDialog: received blocks", blocks.length)
+            suppressOutgoingSnapshots = true
+            DataStore.applyBlockUpdates(blocks)
+            Qt.callLater(function() { suppressOutgoingSnapshots = false })
+        }
     }
 
     onStatusMessageChanged: {
@@ -151,6 +175,12 @@ Dialog {
         }
 
         function onPageContentChanged(pageId) {
+            if (activeSyncController.syncing && !suppressOutgoingSnapshots) {
+                scheduleOutgoingSnapshot()
+            }
+        }
+
+        function onAttachmentsChanged() {
             if (activeSyncController.syncing && !suppressOutgoingSnapshots) {
                 scheduleOutgoingSnapshot()
             }
@@ -184,16 +214,66 @@ Dialog {
         root[cursorIdKey] = cursorId
     }
 
+    function collectAttachmentIdsFromPages(pages) {
+        var unique = {}
+        var out = []
+        if (!pages) return out
+        var re = new RegExp("image://attachments/([0-9a-fA-F-]{36})", "g")
+        for (var i = 0; i < pages.length; i++) {
+            var p = pages[i] || {}
+            var md = p.contentMarkdown || ""
+            var m
+            while ((m = re.exec(md)) !== null) {
+                var id = m[1] || ""
+                if (id !== "" && !unique[id]) {
+                    unique[id] = true
+                    out.push(id)
+                }
+            }
+        }
+        return out
+    }
+
+    function mergeAttachments(primaryList, extraList) {
+        var seen = {}
+        var out = []
+        function add(list) {
+            if (!list) return
+            for (var i = 0; i < list.length; i++) {
+                var entry = list[i] || {}
+                var id = entry.attachmentId || entry.id || ""
+                if (id === "" || seen[id]) continue
+                seen[id] = true
+                out.push(entry)
+            }
+        }
+        add(primaryList)
+        add(extraList)
+        return out
+    }
+
     function sendLocalPagesSnapshot(full) {
         if (!activeSyncController.syncing) {
+            return
+        }
+        if (activeSyncController.peerCount <= 0) {
             return
         }
         var pages = full ? DataStore.getPagesForSync()
                          : DataStore.getPagesForSyncSince(pagesCursorAt, pagesCursorId)
         var deletedPages = full ? DataStore.getDeletedPagesForSync()
                                 : DataStore.getDeletedPagesForSyncSince(deletedPagesCursorAt, deletedPagesCursorId)
+        var attachments = full ? DataStore.getAttachmentsForSync()
+                               : DataStore.getAttachmentsForSyncSince(attachmentsCursorAt, attachmentsCursorId)
+        if (!full && DataStore.getAttachmentsByIds) {
+            var neededIds = collectAttachmentIdsFromPages(pages)
+            if (neededIds.length > 0) {
+                attachments = mergeAttachments(attachments, DataStore.getAttachmentsByIds(neededIds))
+            }
+        }
         if (!full && (!pages || pages.length === 0) &&
-            (!deletedPages || deletedPages.length === 0)) {
+            (!deletedPages || deletedPages.length === 0) &&
+            (!attachments || attachments.length === 0)) {
             return
         }
         var payload = JSON.stringify({
@@ -201,13 +281,15 @@ Dialog {
             workspaceId: activeSyncController.workspaceId,
             full: full === true,
             pages: pages,
-            deletedPages: deletedPages
+            deletedPages: deletedPages,
+            attachments: attachments
         })
-        console.log("PairingDialog: sending snapshot full=", full === true, "pages", pages.length, "deleted", deletedPages.length)
+        console.log("PairingDialog: sending snapshot full=", full === true, "pages", pages.length, "deleted", deletedPages.length, "attachments", attachments.length)
         activeSyncController.sendPageSnapshot(payload)
 
         advanceCursorFrom(pages, "pagesCursorAt", "pagesCursorId", "updatedAt", "pageId")
         advanceCursorFrom(deletedPages, "deletedPagesCursorAt", "deletedPagesCursorId", "deletedAt", "pageId")
+        advanceCursorFrom(attachments, "attachmentsCursorAt", "attachmentsCursorId", "updatedAt", "attachmentId")
     }
     
     background: Rectangle {

@@ -16,7 +16,7 @@ QString Cmark::toHtml(const QString& markdown) const {
     const auto utf8 = markdown.toUtf8();
     char* html = cmark_markdown_to_html(utf8.constData(),
                                         static_cast<size_t>(utf8.size()),
-                                        CMARK_OPT_DEFAULT);
+                                        CMARK_OPT_DEFAULT | CMARK_OPT_HARDBREAKS);
     if (!html) {
         return QString();
     }
@@ -27,4 +27,3 @@ QString Cmark::toHtml(const QString& markdown) const {
 }
 
 } // namespace zinc::ui
-

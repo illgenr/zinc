@@ -58,6 +58,16 @@ public:
     Q_INVOKABLE QString getPageContentMarkdown(const QString& pageId);
     Q_INVOKABLE void savePageContentMarkdown(const QString& pageId, const QString& markdown);
 
+    // Attachments (images, etc)
+    // Data URL format: data:<mime>;base64,<payload>
+    // Returns attachmentId (UUID) or empty on error.
+    Q_INVOKABLE QString saveAttachmentFromDataUrl(const QString& dataUrl);
+    Q_INVOKABLE QVariantList getAttachmentsForSync();
+    Q_INVOKABLE QVariantList getAttachmentsForSyncSince(const QString& updatedAtCursor,
+                                                        const QString& attachmentIdCursor);
+    Q_INVOKABLE QVariantList getAttachmentsByIds(const QVariantList& attachmentIds);
+    Q_INVOKABLE void applyAttachmentUpdates(const QVariantList& attachments);
+
     // Paired device operations
     Q_INVOKABLE QVariantList getPairedDevices();
     Q_INVOKABLE void savePairedDevice(const QString& deviceId,
@@ -82,6 +92,7 @@ public:
 signals:
     void pagesChanged();
     void pageContentChanged(const QString& pageId);
+    void attachmentsChanged();
     void pairedDevicesChanged();
     void error(const QString& message);
 

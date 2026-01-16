@@ -8,12 +8,16 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QSaveFile>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QSettings>
 #include <QSet>
 #include <QDebug>
+#include <QRegularExpression>
+#include <QUuid>
+#include <optional>
 
 namespace zinc::ui {
 
@@ -97,6 +101,71 @@ QString resolve_database_path() {
     return dataPath + "/zinc.db";
 }
 
+QString resolve_attachments_dir() {
+    const auto overrideDir = qEnvironmentVariable("ZINC_ATTACHMENTS_DIR");
+    if (!overrideDir.isEmpty()) {
+        QDir dir(overrideDir);
+        if (!dir.exists()) {
+            dir.mkpath(".");
+        }
+        return dir.absolutePath();
+    }
+
+    const auto overrideDb = qEnvironmentVariable("ZINC_DB_PATH");
+    if (!overrideDb.isEmpty()) {
+        QFileInfo info(overrideDb);
+        QDir dir(info.absolutePath() + "/attachments");
+        if (!dir.exists()) {
+            dir.mkpath(".");
+        }
+        return dir.absolutePath();
+    }
+
+    QString dataPath = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    QDir dir(dataPath + "/attachments");
+    if (!dir.exists()) {
+        dir.mkpath(".");
+    }
+    return dir.absolutePath();
+}
+
+QString normalize_attachment_id(QString id) {
+    if (id.startsWith('/')) id.remove(0, 1);
+    const auto queryIndex = id.indexOf('?');
+    if (queryIndex >= 0) id = id.left(queryIndex);
+    return id;
+}
+
+bool is_safe_attachment_id(const QString& id) {
+    if (id.isEmpty()) return false;
+    if (id.contains('/') || id.contains('\\')) return false;
+    return true;
+}
+
+QString attachment_file_path_for_id(QString id) {
+    id = normalize_attachment_id(std::move(id));
+    return resolve_attachments_dir() + "/" + id;
+}
+
+bool write_bytes_atomic(const QString& path, const QByteArray& bytes) {
+    QSaveFile file(path);
+    if (!file.open(QIODevice::WriteOnly)) {
+        return false;
+    }
+    if (file.write(bytes) != bytes.size()) {
+        return false;
+    }
+    return file.commit();
+}
+
+std::optional<QByteArray> read_file_bytes(const QString& path) {
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly)) {
+        return std::nullopt;
+    }
+    return f.readAll();
+}
+
 QString normalize_parent_id(const QVariant& value) {
     const auto str = value.toString();
     return str.isNull() ? QString() : str;
@@ -163,13 +232,16 @@ bool DataStore::initialize() {
     
     const auto connectionName = QStringLiteral("zinc_datastore");
     if (QSqlDatabase::contains(connectionName)) {
-        m_db = QSqlDatabase::database(connectionName);
+        m_db = QSqlDatabase::database(connectionName, false);
+        if (m_db.isValid() && m_db.isOpen() && m_db.databaseName() != dbPath) {
+            m_db.close();
+        }
     } else {
         m_db = QSqlDatabase::addDatabase("QSQLITE", connectionName);
     }
     m_db.setDatabaseName(dbPath);
     
-    if (!m_db.open()) {
+    if (!m_db.isOpen() && !m_db.open()) {
         qWarning() << "DataStore: Failed to open database:" << m_db.lastError().text();
         emit error("Failed to open database: " + m_db.lastError().text());
         return false;
@@ -238,11 +310,23 @@ void DataStore::createTables() {
         )
     )");
 
+    // Attachments table (file-backed; bytes live on disk)
+    query.exec(R"(
+        CREATE TABLE IF NOT EXISTS attachments (
+            id TEXT PRIMARY KEY,
+            mime_type TEXT NOT NULL,
+            file_name TEXT NOT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    )");
+
     // Create index for faster lookups
     query.exec("CREATE INDEX IF NOT EXISTS idx_blocks_page_id ON blocks(page_id)");
     query.exec("CREATE INDEX IF NOT EXISTS idx_pages_parent_id ON pages(parent_id)");
     query.exec("CREATE INDEX IF NOT EXISTS idx_deleted_pages_deleted_at ON deleted_pages(deleted_at)");
     query.exec("CREATE INDEX IF NOT EXISTS idx_paired_devices_workspace_id ON paired_devices(workspace_id)");
+    query.exec("CREATE INDEX IF NOT EXISTS idx_attachments_updated_at ON attachments(updated_at, id)");
 }
 
 QVariantList DataStore::getAllPages() {
@@ -361,6 +445,292 @@ QVariantList DataStore::getDeletedPagesForSync() {
         deletedPages.append(entry);
     }
     return deletedPages;
+}
+
+namespace {
+
+struct ParsedDataUrl {
+    QString mime;
+    QByteArray bytes;
+};
+
+std::optional<ParsedDataUrl> parse_data_url(const QString& dataUrl) {
+    // data:<mime>;base64,<payload>
+    static const QRegularExpression re(R"(^data:([^;]+);base64,(.+)$)");
+    const auto m = re.match(dataUrl);
+    if (!m.hasMatch()) return std::nullopt;
+    const auto mime = m.captured(1).trimmed();
+    const auto b64 = m.captured(2).trimmed();
+    if (mime.isEmpty() || b64.isEmpty()) return std::nullopt;
+
+    const auto bytes = QByteArray::fromBase64(b64.toLatin1(), QByteArray::Base64Encoding);
+    if (bytes.isEmpty()) return std::nullopt;
+    return ParsedDataUrl{mime, bytes};
+}
+
+} // namespace
+
+QString DataStore::saveAttachmentFromDataUrl(const QString& dataUrl) {
+    if (!m_ready) return {};
+    const auto parsed = parse_data_url(dataUrl);
+    if (!parsed) return {};
+
+    const auto id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    const auto updatedAt = now_timestamp_utc();
+
+    if (!write_bytes_atomic(attachment_file_path_for_id(id), parsed->bytes)) {
+        qWarning() << "DataStore: saveAttachmentFromDataUrl failed to write file id=" << id;
+        return {};
+    }
+
+    QSqlQuery upsert(m_db);
+    upsert.prepare(R"SQL(
+        INSERT INTO attachments (id, mime_type, file_name, updated_at)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+            mime_type = excluded.mime_type,
+            file_name = excluded.file_name,
+            updated_at = excluded.updated_at;
+    )SQL");
+    upsert.addBindValue(id);
+    upsert.addBindValue(parsed->mime);
+    upsert.addBindValue(id);
+    upsert.addBindValue(updatedAt);
+    if (!upsert.exec()) {
+        qWarning() << "DataStore: saveAttachmentFromDataUrl failed:" << upsert.lastError().text();
+        return {};
+    }
+
+    emit attachmentsChanged();
+    return id;
+}
+
+QVariantList DataStore::getAttachmentsForSync() {
+    QVariantList out;
+    if (!m_ready) return out;
+
+    QSqlQuery query(m_db);
+    query.exec(R"SQL(
+        SELECT id, mime_type, file_name, updated_at
+        FROM attachments
+        ORDER BY updated_at, id
+    )SQL");
+
+    while (query.next()) {
+        const auto id = query.value(0).toString();
+        const auto fileName = query.value(2).toString().isEmpty() ? id : query.value(2).toString();
+        const auto path = attachment_file_path_for_id(fileName);
+        const auto bytes = read_file_bytes(path);
+        if (!bytes || bytes->isEmpty()) {
+            qWarning() << "DataStore: Missing attachment file id=" << id << "path=" << path;
+            continue;
+        }
+        QVariantMap entry;
+        entry["attachmentId"] = id;
+        entry["mimeType"] = query.value(1).toString();
+        entry["dataBase64"] = QString::fromLatin1(bytes->toBase64());
+        entry["updatedAt"] = query.value(3).toString();
+        out.append(entry);
+    }
+    return out;
+}
+
+QVariantList DataStore::getAttachmentsForSyncSince(const QString& updatedAtCursor,
+                                                   const QString& attachmentIdCursor) {
+    if (updatedAtCursor.isEmpty()) {
+        return getAttachmentsForSync();
+    }
+
+    QVariantList out;
+    if (!m_ready) return out;
+
+    QSqlQuery query(m_db);
+    query.prepare(R"SQL(
+        SELECT id, mime_type, file_name, updated_at
+        FROM attachments
+        WHERE updated_at > ?
+           OR (updated_at = ? AND id > ?)
+        ORDER BY updated_at, id
+    )SQL");
+    query.addBindValue(updatedAtCursor);
+    query.addBindValue(updatedAtCursor);
+    query.addBindValue(attachmentIdCursor);
+    if (!query.exec()) {
+        qWarning() << "DataStore: getAttachmentsForSyncSince query failed:" << query.lastError().text();
+        return out;
+    }
+
+    while (query.next()) {
+        const auto id = query.value(0).toString();
+        const auto fileName = query.value(2).toString().isEmpty() ? id : query.value(2).toString();
+        const auto path = attachment_file_path_for_id(fileName);
+        const auto bytes = read_file_bytes(path);
+        if (!bytes || bytes->isEmpty()) {
+            qWarning() << "DataStore: Missing attachment file id=" << id << "path=" << path;
+            continue;
+        }
+        QVariantMap entry;
+        entry["attachmentId"] = id;
+        entry["mimeType"] = query.value(1).toString();
+        entry["dataBase64"] = QString::fromLatin1(bytes->toBase64());
+        entry["updatedAt"] = query.value(3).toString();
+        out.append(entry);
+    }
+    return out;
+}
+
+QVariantList DataStore::getAttachmentsByIds(const QVariantList& attachmentIds) {
+    QVariantList out;
+    if (!m_ready) return out;
+    if (attachmentIds.isEmpty()) return out;
+
+    QSet<QString> ids;
+    ids.reserve(attachmentIds.size());
+    for (const auto& item : attachmentIds) {
+        const auto id = normalize_attachment_id(item.toString());
+        if (id.isEmpty() || !is_safe_attachment_id(id)) continue;
+        ids.insert(id);
+    }
+    if (ids.isEmpty()) return out;
+
+    QStringList placeholders;
+    placeholders.reserve(ids.size());
+    for (int i = 0; i < ids.size(); ++i) {
+        placeholders.append(QStringLiteral("?"));
+    }
+
+    QSqlQuery query(m_db);
+    query.prepare(QStringLiteral(
+        "SELECT id, mime_type, file_name, updated_at "
+        "FROM attachments "
+        "WHERE id IN (%1) "
+        "ORDER BY updated_at, id").arg(placeholders.join(',')));
+    for (const auto& id : ids) {
+        query.addBindValue(id);
+    }
+    if (!query.exec()) {
+        qWarning() << "DataStore: getAttachmentsByIds query failed:" << query.lastError().text();
+        return out;
+    }
+
+    while (query.next()) {
+        const auto id = query.value(0).toString();
+        const auto fileName = query.value(2).toString().isEmpty() ? id : query.value(2).toString();
+        const auto path = attachment_file_path_for_id(fileName);
+        const auto bytes = read_file_bytes(path);
+        if (!bytes || bytes->isEmpty()) {
+            qWarning() << "DataStore: Missing attachment file id=" << id << "path=" << path;
+            continue;
+        }
+        QVariantMap entry;
+        entry["attachmentId"] = id;
+        entry["mimeType"] = query.value(1).toString();
+        entry["dataBase64"] = QString::fromLatin1(bytes->toBase64());
+        entry["updatedAt"] = query.value(3).toString();
+        out.append(entry);
+    }
+    return out;
+}
+
+void DataStore::applyAttachmentUpdates(const QVariantList& attachments) {
+    if (!m_ready) return;
+    if (attachments.isEmpty()) return;
+
+    const bool debugAttachments = qEnvironmentVariableIsSet("ZINC_DEBUG_ATTACHMENTS");
+    const bool debugSync = qEnvironmentVariableIsSet("ZINC_DEBUG_SYNC");
+
+    m_db.transaction();
+
+    QSqlQuery upsert(m_db);
+    upsert.prepare(R"SQL(
+        INSERT INTO attachments (id, mime_type, file_name, updated_at)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+            mime_type = excluded.mime_type,
+            file_name = excluded.file_name,
+            updated_at = excluded.updated_at;
+    )SQL");
+
+    for (const auto& item : attachments) {
+        const auto map = item.toMap();
+        const auto id = map.value(QStringLiteral("attachmentId")).toString().isEmpty()
+            ? map.value(QStringLiteral("id")).toString()
+            : map.value(QStringLiteral("attachmentId")).toString();
+        const auto mime = map.value(QStringLiteral("mimeType")).toString().isEmpty()
+            ? map.value(QStringLiteral("mime_type")).toString()
+            : map.value(QStringLiteral("mimeType")).toString();
+        const auto b64 = map.value(QStringLiteral("dataBase64")).toString().isEmpty()
+            ? (map.value(QStringLiteral("data_base64")).toString().isEmpty()
+                ? map.value(QStringLiteral("data")).toString()
+                : map.value(QStringLiteral("data_base64")).toString())
+            : map.value(QStringLiteral("dataBase64")).toString();
+        const auto updatedAt = map.value(QStringLiteral("updatedAt")).toString().isEmpty()
+            ? map.value(QStringLiteral("updated_at")).toString()
+            : map.value(QStringLiteral("updatedAt")).toString();
+        if (id.isEmpty() || mime.isEmpty() || b64.isEmpty() || updatedAt.isEmpty()) continue;
+
+        const auto bytes = QByteArray::fromBase64(b64.toLatin1(), QByteArray::Base64Encoding);
+        if (bytes.isEmpty()) continue;
+        const auto normalizedId = normalize_attachment_id(id);
+        if (!is_safe_attachment_id(normalizedId)) continue;
+        if (!write_bytes_atomic(attachment_file_path_for_id(normalizedId), bytes)) continue;
+
+        upsert.bindValue(0, normalizedId);
+        upsert.bindValue(1, mime);
+        upsert.bindValue(2, normalizedId);
+        upsert.bindValue(3, updatedAt);
+        upsert.exec();
+        upsert.finish();
+    }
+
+    m_db.commit();
+    if (debugAttachments || debugSync) {
+        int total = attachments.size();
+        int insertedOrUpdated = 0;
+        int skippedMissing = 0;
+        int skippedDecode = 0;
+
+        QSqlQuery countQuery(m_db);
+        countQuery.exec(QStringLiteral("SELECT COUNT(*) FROM attachments"));
+        const int afterCount = countQuery.next() ? countQuery.value(0).toInt() : -1;
+
+        // Re-run the parsing logic cheaply for stats (no DB writes).
+        for (const auto& item : attachments) {
+            const auto map = item.toMap();
+            const auto id = map.value(QStringLiteral("attachmentId")).toString().isEmpty()
+                ? map.value(QStringLiteral("id")).toString()
+                : map.value(QStringLiteral("attachmentId")).toString();
+            const auto mime = map.value(QStringLiteral("mimeType")).toString().isEmpty()
+                ? map.value(QStringLiteral("mime_type")).toString()
+                : map.value(QStringLiteral("mimeType")).toString();
+            const auto b64 = map.value(QStringLiteral("dataBase64")).toString().isEmpty()
+                ? (map.value(QStringLiteral("data_base64")).toString().isEmpty()
+                    ? map.value(QStringLiteral("data")).toString()
+                    : map.value(QStringLiteral("data_base64")).toString())
+                : map.value(QStringLiteral("dataBase64")).toString();
+            const auto updatedAt = map.value(QStringLiteral("updatedAt")).toString().isEmpty()
+                ? map.value(QStringLiteral("updated_at")).toString()
+                : map.value(QStringLiteral("updatedAt")).toString();
+
+            if (id.isEmpty() || mime.isEmpty() || b64.isEmpty() || updatedAt.isEmpty()) {
+                skippedMissing++;
+                continue;
+            }
+            const auto bytes = QByteArray::fromBase64(b64.toLatin1(), QByteArray::Base64Encoding);
+            if (bytes.isEmpty()) {
+                skippedDecode++;
+                continue;
+            }
+            insertedOrUpdated++;
+        }
+
+        qInfo() << "DataStore: applyAttachmentUpdates total=" << total
+                << "ok=" << insertedOrUpdated
+                << "skippedMissing=" << skippedMissing
+                << "skippedDecode=" << skippedDecode
+                << "attachmentsCountAfter=" << afterCount;
+    }
+    emit attachmentsChanged();
 }
 
 QVariantList DataStore::getDeletedPagesForSyncSince(const QString& deletedAtCursor,
@@ -1256,6 +1626,9 @@ bool DataStore::resetDatabase() {
     QFile::remove(dbPath + "-journal");
     QFile::remove(dbPath + "-wal");
     QFile::remove(dbPath + "-shm");
+
+    // Remove attachments stored alongside the DB (best-effort).
+    QDir(resolve_attachments_dir()).removeRecursively();
     
     // Reinitialize
     if (!initialize()) {
@@ -1282,6 +1655,7 @@ bool DataStore::runMigrations() {
     if (query.next()) {
         currentVersion = query.value(0).toInt();
     }
+    query.finish();
     
     qDebug() << "DataStore: Current schema version:" << currentVersion;
     
@@ -1433,6 +1807,158 @@ bool DataStore::runMigrations() {
         migration.exec("PRAGMA user_version = 4");
         m_db.commit();
         currentVersion = 4;
+    }
+
+    // Migration 5: Attachments table for image blobs.
+    if (currentVersion < 5) {
+        qDebug() << "DataStore: Running migration to version 5";
+        m_db.transaction();
+        QSqlQuery migration(m_db);
+        migration.exec(R"(
+            CREATE TABLE IF NOT EXISTS attachments (
+                id TEXT PRIMARY KEY,
+                mime_type TEXT NOT NULL,
+                data BLOB NOT NULL,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        )");
+        migration.exec("CREATE INDEX IF NOT EXISTS idx_attachments_updated_at ON attachments(updated_at, id)");
+        migration.exec("PRAGMA user_version = 5");
+        m_db.commit();
+        currentVersion = 5;
+    }
+
+    // Migration 6: Move attachment blobs to disk and store only metadata in SQLite.
+    if (currentVersion < 6) {
+        qDebug() << "DataStore: Running migration to version 6";
+        // Phase 1: copy metadata + write blobs to disk into a staging table.
+        m_db.transaction();
+
+        QSqlQuery migration(m_db);
+        auto execChecked = [&](const QString& sql) -> bool {
+            if (migration.exec(sql)) return true;
+            qWarning() << "DataStore: Migration 6 SQL failed:" << migration.lastError().text()
+                       << "sql=" << sql;
+            return false;
+        };
+
+        bool ok = true;
+        ok = ok && execChecked(QStringLiteral("DROP TABLE IF EXISTS attachments_v6"));
+        ok = ok && execChecked(QString::fromUtf8(R"SQL(
+            CREATE TABLE attachments_v6 (
+                id TEXT PRIMARY KEY,
+                mime_type TEXT NOT NULL,
+                file_name TEXT NOT NULL,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        )SQL"));
+
+        QSet<QString> columns;
+        QSqlQuery info(m_db);
+        if (info.exec("PRAGMA table_info(attachments)")) {
+            while (info.next()) {
+                columns.insert(info.value(1).toString());
+            }
+        }
+        info.finish();
+
+        if (!columns.isEmpty()) {
+            const bool hasData = columns.contains(QStringLiteral("data"));
+            const bool hasFileName = columns.contains(QStringLiteral("file_name"));
+            const bool hasCreatedAt = columns.contains(QStringLiteral("created_at"));
+            const bool hasUpdatedAt = columns.contains(QStringLiteral("updated_at"));
+
+            QSqlQuery select(m_db);
+            if (hasData) {
+                ok = ok && select.exec("SELECT id, mime_type, data, created_at, updated_at FROM attachments");
+            } else if (hasFileName && hasCreatedAt && hasUpdatedAt) {
+                ok = ok && select.exec("SELECT id, mime_type, file_name, created_at, updated_at FROM attachments");
+            } else if (hasFileName) {
+                ok = ok && select.exec("SELECT id, mime_type, file_name FROM attachments");
+            } else {
+                ok = ok && select.exec("SELECT id, mime_type FROM attachments");
+            }
+            if (!ok) {
+                qWarning() << "DataStore: Migration 6 select failed:" << select.lastError().text();
+            }
+
+            QSqlQuery insert(m_db);
+            insert.prepare(R"SQL(
+                INSERT INTO attachments_v6 (id, mime_type, file_name, created_at, updated_at)
+                VALUES (?, ?, ?, COALESCE(NULLIF(?, ''), CURRENT_TIMESTAMP), COALESCE(NULLIF(?, ''), CURRENT_TIMESTAMP))
+                ON CONFLICT(id) DO UPDATE SET
+                    mime_type = excluded.mime_type,
+                    file_name = excluded.file_name,
+                    created_at = excluded.created_at,
+                    updated_at = excluded.updated_at;
+            )SQL");
+
+            while (ok && select.next()) {
+                const auto id = normalize_attachment_id(select.value(0).toString());
+                const auto mime = select.value(1).toString();
+                if (id.isEmpty() || mime.isEmpty() || !is_safe_attachment_id(id)) {
+                    continue;
+                }
+
+                QString fileName = id;
+                QString createdAt;
+                QString updatedAt;
+
+                if (hasData) {
+                    const auto bytes = select.value(2).toByteArray();
+                    if (!bytes.isEmpty()) {
+                        const auto path = attachment_file_path_for_id(id);
+                        if (!QFile::exists(path)) {
+                            write_bytes_atomic(path, bytes);
+                        }
+                    }
+                    createdAt = select.value(3).toString();
+                    updatedAt = select.value(4).toString();
+                } else if (hasFileName && hasCreatedAt && hasUpdatedAt) {
+                    fileName = select.value(2).toString().isEmpty() ? id : select.value(2).toString();
+                    createdAt = select.value(3).toString();
+                    updatedAt = select.value(4).toString();
+                } else if (hasFileName) {
+                    fileName = select.value(2).toString().isEmpty() ? id : select.value(2).toString();
+                }
+
+                insert.bindValue(0, id);
+                insert.bindValue(1, mime);
+                insert.bindValue(2, fileName);
+                insert.bindValue(3, createdAt);
+                insert.bindValue(4, updatedAt);
+                if (!insert.exec()) {
+                    ok = false;
+                    qWarning() << "DataStore: Migration 6 insert failed:" << insert.lastError().text();
+                }
+                insert.finish();
+            }
+            select.finish();
+        }
+
+        if (!ok) {
+            qWarning() << "DataStore: Migration 6 failed; rolling back";
+            m_db.rollback();
+            return false;
+        }
+
+        m_db.commit();
+
+        // Phase 2: swap staging table into place.
+        m_db.transaction();
+        ok = ok && execChecked(QStringLiteral("DROP TABLE IF EXISTS attachments"));
+        ok = ok && execChecked(QStringLiteral("ALTER TABLE attachments_v6 RENAME TO attachments"));
+        ok = ok && execChecked(QStringLiteral("CREATE INDEX IF NOT EXISTS idx_attachments_updated_at ON attachments(updated_at, id)"));
+        ok = ok && execChecked(QStringLiteral("PRAGMA user_version = 6"));
+        if (!ok) {
+            qWarning() << "DataStore: Migration 6 failed; rolling back";
+            m_db.rollback();
+            return false;
+        }
+        m_db.commit();
+        currentVersion = 6;
     }
     
     qDebug() << "DataStore: Migrations complete. Schema version:" << currentVersion;

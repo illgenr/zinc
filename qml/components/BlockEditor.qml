@@ -20,6 +20,7 @@ Item {
     property double lastLocalEditMs: 0
     property bool pendingRemoteRefresh: false
     property bool renderBlocksWhenNotFocused: true
+    property int blockSelectDelayMs: AndroidUtils.isAndroid() ? 250 : 0
     
     signal blockFocused(int index)
     signal titleEdited(string newTitle)
@@ -293,13 +294,17 @@ Item {
 
     function pasteImageFromClipboard(atIndex) {
         if (!Clipboard.saveClipboardImage) return false
-        const imageUrl = Clipboard.saveClipboardImage()
-        if (!imageUrl || imageUrl.length === 0) return false
+        const dataUrl = Clipboard.saveClipboardImage()
+        if (!dataUrl || dataUrl.length === 0) return false
+        if (!DataStore || !DataStore.saveAttachmentFromDataUrl) return false
+        const attachmentId = DataStore.saveAttachmentFromDataUrl(dataUrl)
+        if (!attachmentId || attachmentId.length === 0) return false
+        const imageContent = JSON.stringify({ src: "image://attachments/" + attachmentId, w: 0, h: 0 })
 
         const imageBlock = {
             blockId: generateUuid(),
             blockType: "image",
-            content: imageUrl,
+            content: imageContent,
             depth: 0,
             checked: false,
             collapsed: false,
@@ -357,6 +362,27 @@ Item {
     function startImageUpload(atIndex) {
         pendingImageUploadBlockIndex = atIndex
         imageFileDialog.open()
+    }
+
+    function deleteBlockAt(blockIndex) {
+        if (blockIndex < 0 || blockIndex >= blockModel.count) return
+        blockModel.remove(blockIndex)
+        if (blockModel.count === 0) {
+            blockModel.append({
+                blockId: generateUuid(),
+                blockType: "paragraph",
+                content: "",
+                depth: 0,
+                checked: false,
+                collapsed: false,
+                language: "",
+                headingLevel: 0
+            })
+        }
+        scheduleAutosave()
+        const next = Math.max(0, Math.min(blockIndex - 1, blockModel.count - 1))
+        focusTimer.targetIndex = next
+        focusTimer.start()
     }
     
     function loadPage(id) {
@@ -503,7 +529,10 @@ Item {
     
     ListModel {
         id: blockModel
+        objectName: "blockModel"
     }
+
+    property alias blocksModel: blockModel
     
     Flickable {
         id: flickable
@@ -793,9 +822,15 @@ Item {
         nameFilters: ["Images (*.png *.jpg *.jpeg *.gif *.webp *.bmp)", "All files (*)"]
 
         onAccepted: {
-            const imported = Clipboard.importImageFile(selectedFile)
-            if (!imported || imported.length === 0) {
+            const dataUrl = Clipboard.importImageFile(selectedFile)
+            if (!dataUrl || dataUrl.length === 0) {
                 console.log("BlockEditor: Failed to import image:", selectedFile)
+                pendingImageUploadBlockIndex = -1
+                return
+            }
+            const attachmentId = DataStore.saveAttachmentFromDataUrl(dataUrl)
+            if (!attachmentId || attachmentId.length === 0) {
+                console.log("BlockEditor: Failed to store image attachment:", selectedFile)
                 pendingImageUploadBlockIndex = -1
                 return
             }
@@ -805,7 +840,7 @@ Item {
             if (idx < 0 || idx >= blockModel.count) return
 
             blockModel.setProperty(idx, "blockType", "image")
-            blockModel.setProperty(idx, "content", imported)
+            blockModel.setProperty(idx, "content", JSON.stringify({ src: "image://attachments/" + attachmentId, w: 0, h: 0 }))
             scheduleAutosave()
         }
 

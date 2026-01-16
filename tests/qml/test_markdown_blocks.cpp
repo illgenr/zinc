@@ -2,6 +2,8 @@
 
 #include <QVariantList>
 #include <QVariantMap>
+#include <QJsonDocument>
+#include <QJsonObject>
 
 #include "ui/MarkdownBlocks.hpp"
 
@@ -35,7 +37,7 @@ TEST_CASE("MarkdownBlocks: serialize/parse round-trip", "[qml][markdown]") {
     blocks.append(block("paragraph", "Hello\nWorld"));
     blocks.append(block("bulleted", "- item 1\n  continuation\n- item 2"));
     blocks.append(block("todo", "Task", 1, true));
-    blocks.append(block("image", "file:///tmp/example.png"));
+    blocks.append(block("image", R"({"src":"file:///tmp/example.png","w":320,"h":240})"));
     blocks.append(block("columns", R"({"cols":["Left","Right"]})"));
     blocks.append(block("quote", "A\nB"));
     blocks.append(block("code", "int main() {\n  return 0;\n}", 0, false, false, "cpp"));
@@ -53,7 +55,23 @@ TEST_CASE("MarkdownBlocks: serialize/parse round-trip", "[qml][markdown]") {
         const auto a = blocks[i].toMap();
         const auto b = parsed[i].toMap();
         REQUIRE(b.value("blockType") == a.value("blockType"));
-        REQUIRE(b.value("content") == a.value("content"));
+        if (b.value("blockType").toString() == QStringLiteral("image")) {
+            const auto aDoc = QJsonDocument::fromJson(a.value("content").toString().toUtf8());
+            const auto bDoc = QJsonDocument::fromJson(b.value("content").toString().toUtf8());
+            REQUIRE(aDoc.isObject());
+            REQUIRE(bDoc.isObject());
+            REQUIRE(aDoc.object().value("src").toString() == bDoc.object().value("src").toString());
+            REQUIRE(aDoc.object().value("w").toInt() == bDoc.object().value("w").toInt());
+            REQUIRE(aDoc.object().value("h").toInt() == bDoc.object().value("h").toInt());
+        } else if (b.value("blockType").toString() == QStringLiteral("columns")) {
+            const auto aDoc = QJsonDocument::fromJson(a.value("content").toString().toUtf8());
+            const auto bDoc = QJsonDocument::fromJson(b.value("content").toString().toUtf8());
+            REQUIRE(aDoc.isObject());
+            REQUIRE(bDoc.isObject());
+            REQUIRE(aDoc.object() == bDoc.object());
+        } else {
+            REQUIRE(b.value("content") == a.value("content"));
+        }
         REQUIRE(b.value("depth") == a.value("depth"));
         REQUIRE(b.value("checked") == a.value("checked"));
         REQUIRE(b.value("collapsed") == a.value("collapsed"));

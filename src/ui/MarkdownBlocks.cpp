@@ -2,6 +2,7 @@
 
 #include <QRegularExpression>
 #include <QJsonDocument>
+#include <QJsonObject>
 #include <QJsonParseError>
 #include <QStringList>
 #include <algorithm>
@@ -44,15 +45,39 @@ QString link_to_markdown(const QString& content) {
 }
 
 QString image_to_markdown(const QString& content) {
-    QString url = content.trimmed();
-    if (url.isEmpty()) {
+    QString src;
+    int w = 0;
+    int h = 0;
+
+    const auto trimmed = content.trimmed();
+    if (trimmed.startsWith('{')) {
+        QJsonParseError err{};
+        const auto doc = QJsonDocument::fromJson(trimmed.toUtf8(), &err);
+        if (err.error == QJsonParseError::NoError && doc.isObject()) {
+            const auto obj = doc.object();
+            src = obj.value(QStringLiteral("src")).toString().trimmed();
+            w = obj.value(QStringLiteral("w")).toInt(0);
+            h = obj.value(QStringLiteral("h")).toInt(0);
+        } else {
+            src = trimmed;
+        }
+    } else {
+        src = trimmed;
+    }
+
+    if (src.isEmpty()) {
         return QStringLiteral("![]()");
     }
-    const bool needsAngle = url.contains(' ') || url.contains('(') || url.contains(')');
+
+    const bool needsAngle = src.contains(' ') || src.contains('(') || src.contains(')');
+    QStringList meta;
+    if (w > 0) meta << QStringLiteral("zinc-w=%1").arg(w);
+    if (h > 0) meta << QStringLiteral("zinc-h=%1").arg(h);
+    const QString title = meta.isEmpty() ? QString() : QStringLiteral(" \"%1\"").arg(meta.join(' '));
     if (needsAngle) {
-        return QStringLiteral("![](<%1>)").arg(url);
+        return QStringLiteral("![](<%1>%2)").arg(src, title);
     }
-    return QStringLiteral("![](%1)").arg(url);
+    return QStringLiteral("![](%1%2)").arg(src, title);
 }
 
 std::optional<QString> parse_link(const QString& line) {
@@ -66,13 +91,49 @@ std::optional<QString> parse_link(const QString& line) {
 }
 
 std::optional<QString> parse_image(const QString& line) {
-    static const QRegularExpression re1(R"(^!\[[^\]]*\]\(<([^>]+)>\)\s*$)");
+    static const QRegularExpression re1(
+        R"re(^!\[[^\]]*\]\(<([^>]+)>(?:\s+"([^"]*)")?\)\s*$)re");
     if (const auto m = re1.match(line); m.hasMatch()) {
-        return m.captured(1).trimmed();
+        const auto src = m.captured(1).trimmed();
+        const auto title = m.captured(2).trimmed();
+        int w = 0;
+        int h = 0;
+        const auto parts = title.split(' ', Qt::SkipEmptyParts);
+        for (const auto& part : parts) {
+            if (part.startsWith(QStringLiteral("zinc-w="))) {
+                w = part.mid(QStringLiteral("zinc-w=").size()).toInt();
+            } else if (part.startsWith(QStringLiteral("zinc-h="))) {
+                h = part.mid(QStringLiteral("zinc-h=").size()).toInt();
+            }
+        }
+        const auto json = QJsonObject{
+            {QStringLiteral("src"), src},
+            {QStringLiteral("w"), w},
+            {QStringLiteral("h"), h},
+        };
+        return QString::fromUtf8(QJsonDocument(json).toJson(QJsonDocument::Compact));
     }
-    static const QRegularExpression re2(R"(^!\[[^\]]*\]\(([^)]+)\)\s*$)");
+    static const QRegularExpression re2(
+        R"re(^!\[[^\]]*\]\(([^)]+?)(?:\s+"([^"]*)")?\)\s*$)re");
     if (const auto m = re2.match(line); m.hasMatch()) {
-        return m.captured(1).trimmed();
+        const auto src = m.captured(1).trimmed();
+        const auto title = m.captured(2).trimmed();
+        int w = 0;
+        int h = 0;
+        const auto parts = title.split(' ', Qt::SkipEmptyParts);
+        for (const auto& part : parts) {
+            if (part.startsWith(QStringLiteral("zinc-w="))) {
+                w = part.mid(QStringLiteral("zinc-w=").size()).toInt();
+            } else if (part.startsWith(QStringLiteral("zinc-h="))) {
+                h = part.mid(QStringLiteral("zinc-h=").size()).toInt();
+            }
+        }
+        const auto json = QJsonObject{
+            {QStringLiteral("src"), src},
+            {QStringLiteral("w"), w},
+            {QStringLiteral("h"), h},
+        };
+        return QString::fromUtf8(QJsonDocument(json).toJson(QJsonDocument::Compact));
     }
     return std::nullopt;
 }

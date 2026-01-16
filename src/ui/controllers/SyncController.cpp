@@ -29,6 +29,18 @@ SyncController::SyncController(QObject* parent)
                 emit peerCountChanged();
                 emit peersChanged();
             });
+    connect(sync_manager_.get(), &network::SyncManager::peerConnected,
+            this, [this](const Uuid& device_id) {
+                emit peerConnected(QString::fromStdString(device_id.to_string()));
+                emit peerCountChanged();
+                emit peersChanged();
+            });
+    connect(sync_manager_.get(), &network::SyncManager::peerDisconnected,
+            this, [this](const Uuid& device_id) {
+                emit peerDisconnected(QString::fromStdString(device_id.to_string()));
+                emit peerCountChanged();
+                emit peersChanged();
+            });
     connect(sync_manager_.get(), &network::SyncManager::peerDiscovered,
             this, [this](const network::PeerInfo& peer) {
                 emit peerDiscovered(
@@ -55,6 +67,11 @@ SyncController::SyncController(QObject* parent)
                     qWarning() << "SYNC: PagesSnapshot missing pages array";
                     return;
                 }
+                auto attachmentsValue = obj.value("attachments");
+                if (attachmentsValue.isArray()) {
+                    emit attachmentSnapshotReceivedAttachments(attachmentsValue.toArray().toVariantList());
+                }
+
                 emit pageSnapshotReceivedPages(pagesValue.toArray().toVariantList());
 
                 auto blocksValue = obj.value("blocks");

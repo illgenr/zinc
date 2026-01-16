@@ -20,7 +20,7 @@ else()
 endif()
 
 # Find Qt packages
-find_package(Qt6 REQUIRED COMPONENTS Quick Sql Network Multimedia)
+find_package(Qt6 REQUIRED COMPONENTS Quick Sql Network Multimedia Svg Test)
 
 qt_standard_project_setup(REQUIRES 6.8)
 
@@ -232,6 +232,8 @@ add_library(zinc_ui STATIC
     src/ui/qml_types.cpp
     src/ui/Clipboard.hpp
     src/ui/Clipboard.cpp
+    src/ui/AttachmentImageProvider.hpp
+    src/ui/AttachmentImageProvider.cpp
     src/ui/FeatureFlags.hpp
     src/ui/FeatureFlags.cpp
     src/ui/Cmark.hpp
@@ -357,6 +359,8 @@ qt_add_qml_module(appzinc
     VERSION 1.0
     QML_FILES
         ${ZINC_QML_FILES}
+    RESOURCES
+        src/assets/icon.svg
     SOURCES
         src/ui/qml_types.hpp
         src/ui/qml_types.cpp
@@ -379,6 +383,7 @@ target_link_libraries(appzinc PRIVATE
     Qt6::Quick
     Qt6::Sql
     Qt6::Multimedia
+    Qt6::Svg
 )
 
 include(GNUInstallDirs)
@@ -470,11 +475,13 @@ if(ZINC_BUILD_TESTS)
         tests/qml/test_main.cpp
         tests/qml/test_feature_flags.cpp
         tests/qml/test_datastore_sync.cpp
+        tests/qml/test_attachments_disk_storage.cpp
         tests/qml/test_markdown_blocks.cpp
         tests/qml/test_cmark.cpp
         tests/qml/test_sync_controller_settings.cpp
         tests/qml/test_pairing_dialog_qml.cpp
         tests/qml/test_markdown_editor_qml.cpp
+        tests/qml/test_image_block_interactions.cpp
     )
 
     qt_add_qml_module(zinc_qml_tests
@@ -490,6 +497,7 @@ if(ZINC_BUILD_TESTS)
         Qt6::Gui
         Qt6::Qml
         Qt6::Quick
+        Qt6::Test
         Catch2::Catch2
     )
 

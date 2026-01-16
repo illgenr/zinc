@@ -36,6 +36,8 @@ Item {
         textFormat: Text.RichText
         text: Cmark.toHtml(root.markdownForRender())
         color: ThemeManager.text
+        font.family: ThemeManager.fontFamily
+        font.pixelSize: ThemeManager.fontSizeNormal
         wrapMode: TextEdit.Wrap
         readOnly: true
         selectByMouse: false
@@ -133,23 +135,49 @@ Item {
         }
     }
 
+    Timer {
+        id: selectionDelayTimer
+        interval: (AndroidUtils.isAndroid() && root.editor) ? root.editor.blockSelectDelayMs : 0
+        repeat: false
+        onTriggered: {
+            if (!selectionDrag.active || !root.editor) return
+            selectionDrag.selectionArmed = true
+            const p = root.mapToItem(root.editor, selectionDrag.centroid.pressPosition.x, selectionDrag.centroid.pressPosition.y)
+            root.editor.startCrossBlockSelection(p)
+        }
+    }
+
     DragHandler {
+        id: selectionDrag
         target: null
         acceptedButtons: Qt.LeftButton
-        grabPermissions: PointerHandler.CanTakeOverFromAnything
+        grabPermissions: (AndroidUtils.isAndroid() && root.editor && root.editor.blockSelectDelayMs > 0)
+            ? PointerHandler.ApprovesTakeOverByAnything
+            : PointerHandler.CanTakeOverFromAnything
+
+        property bool selectionArmed: false
 
         onActiveChanged: {
             if (!root.editor) return
             if (active) {
-                const p = root.mapToItem(root.editor, centroid.pressPosition.x, centroid.pressPosition.y)
-                root.editor.startCrossBlockSelection(p)
+                selectionArmed = !(AndroidUtils.isAndroid() && root.editor.blockSelectDelayMs > 0)
+                if (selectionArmed) {
+                    const p = root.mapToItem(root.editor, centroid.pressPosition.x, centroid.pressPosition.y)
+                    root.editor.startCrossBlockSelection(p)
+                } else {
+                    selectionDelayTimer.restart()
+                }
             } else {
-                root.editor.endCrossBlockSelection()
+                selectionDelayTimer.stop()
+                if (selectionArmed) {
+                    root.editor.endCrossBlockSelection()
+                }
+                selectionArmed = false
             }
         }
 
         onTranslationChanged: {
-            if (!active || !root.editor) return
+            if (!active || !root.editor || !selectionArmed) return
             const p = root.mapToItem(root.editor, centroid.position.x, centroid.position.y)
             root.editor.updateCrossBlockSelection(p)
         }

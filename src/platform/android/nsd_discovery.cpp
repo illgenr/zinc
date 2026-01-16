@@ -5,6 +5,7 @@
 #include <QJniObject>
 #include <QJniEnvironment>
 #include <QtCore/private/qandroidextras_p.h>
+#include <QtCore/qnativeinterface.h>
 
 namespace zinc::network {
 
@@ -121,4 +122,3 @@ std::unique_ptr<DiscoveryBackend> createNsdBackend() {
 } // namespace zinc::network
 
 #endif // Q_OS_ANDROID
-

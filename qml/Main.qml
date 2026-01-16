@@ -21,6 +21,13 @@ ApplicationWindow {
     property bool sidebarCollapsed: false
     property var mobilePagesList: []  // Reactive list for mobile
 
+    property string pagesCursorAt: ""
+    property string pagesCursorId: ""
+    property string deletedPagesCursorAt: ""
+    property string deletedPagesCursorId: ""
+    property string attachmentsCursorAt: ""
+    property string attachmentsCursorId: ""
+
     SyncController {
         id: appSyncController
 
@@ -639,6 +646,15 @@ ApplicationWindow {
                     root.mobilePagesList = DataStore.getAllPages()
                 })
             }
+            root.scheduleOutgoingSnapshot()
+        }
+    }
+
+    Connections {
+        target: DataStore
+
+        function onAttachmentsChanged() {
+            root.scheduleOutgoingSnapshot()
         }
     }
 
@@ -653,6 +669,144 @@ ApplicationWindow {
                 DataStore.updatePairedDeviceEndpoint(deviceId, host, port)
             }
         }
+
+        function onPeerConnected(deviceId) {
+            pagesCursorAt = ""
+            pagesCursorId = ""
+            deletedPagesCursorAt = ""
+            deletedPagesCursorId = ""
+            attachmentsCursorAt = ""
+            attachmentsCursorId = ""
+            root.sendLocalSnapshot(true)
+        }
+
+        function onAttachmentSnapshotReceivedAttachments(attachments) {
+            if (!DataStore || !attachments) return
+            console.log("SYNC: received attachments", attachments.length)
+            DataStore.applyAttachmentUpdates(attachments)
+        }
+
+        function onPageSnapshotReceivedPages(pages) {
+            if (!DataStore || !pages) return
+            console.log("SYNC: received pages", pages.length)
+            DataStore.applyPageUpdates(pages)
+        }
+
+        function onDeletedPageSnapshotReceivedPages(deletedPages) {
+            if (!DataStore || !deletedPages) return
+            console.log("SYNC: received deleted pages", deletedPages.length)
+            DataStore.applyDeletedPageUpdates(deletedPages)
+        }
+
+        function onBlockSnapshotReceivedBlocks(blocks) {
+            if (!DataStore || !blocks) return
+            console.log("SYNC: received blocks", blocks.length)
+            DataStore.applyBlockUpdates(blocks)
+        }
+    }
+
+    Timer {
+        id: outgoingSnapshotTimer
+        interval: 200
+        repeat: false
+        onTriggered: root.sendLocalSnapshot(false)
+    }
+
+    function scheduleOutgoingSnapshot() {
+        outgoingSnapshotTimer.restart()
+    }
+
+    function advanceCursorFrom(items, cursorAtKey, cursorIdKey, cursorAtField, idField) {
+        var cursorAt = root[cursorAtKey]
+        var cursorId = root[cursorIdKey]
+        for (var i = 0; i < items.length; i++) {
+            var entry = items[i]
+            var updatedAt = entry[cursorAtField] || ""
+            var entryId = entry[idField] || ""
+            if (cursorAt === "" || updatedAt > cursorAt || (updatedAt === cursorAt && entryId > cursorId)) {
+                cursorAt = updatedAt
+                cursorId = entryId
+            }
+        }
+        root[cursorAtKey] = cursorAt
+        root[cursorIdKey] = cursorId
+    }
+
+    function collectAttachmentIdsFromPages(pages) {
+        var unique = {}
+        var out = []
+        if (!pages) return out
+        var re = new RegExp("image://attachments/([0-9a-fA-F-]{36})", "g")
+        for (var i = 0; i < pages.length; i++) {
+            var p = pages[i] || {}
+            var md = p.contentMarkdown || ""
+            var m
+            while ((m = re.exec(md)) !== null) {
+                var id = m[1] || ""
+                if (id !== "" && !unique[id]) {
+                    unique[id] = true
+                    out.push(id)
+                }
+            }
+        }
+        return out
+    }
+
+    function mergeAttachments(primaryList, extraList) {
+        var seen = {}
+        var out = []
+        function add(list) {
+            if (!list) return
+            for (var i = 0; i < list.length; i++) {
+                var entry = list[i] || {}
+                var id = entry.attachmentId || entry.id || ""
+                if (id === "" || seen[id]) continue
+                seen[id] = true
+                out.push(entry)
+            }
+        }
+        add(primaryList)
+        add(extraList)
+        return out
+    }
+
+    function sendLocalSnapshot(full) {
+        if (!DataStore || !appSyncController) return
+        if (!appSyncController.syncing) return
+        if (appSyncController.peerCount <= 0) return
+
+        var pages = full ? DataStore.getPagesForSync()
+                         : DataStore.getPagesForSyncSince(pagesCursorAt, pagesCursorId)
+        var deletedPages = full ? DataStore.getDeletedPagesForSync()
+                                : DataStore.getDeletedPagesForSyncSince(deletedPagesCursorAt, deletedPagesCursorId)
+        var attachments = full ? DataStore.getAttachmentsForSync()
+                               : DataStore.getAttachmentsForSyncSince(attachmentsCursorAt, attachmentsCursorId)
+        if (!full && DataStore.getAttachmentsByIds) {
+            var neededIds = collectAttachmentIdsFromPages(pages)
+            if (neededIds.length > 0) {
+                attachments = mergeAttachments(attachments, DataStore.getAttachmentsByIds(neededIds))
+            }
+        }
+        if (!full && (!pages || pages.length === 0) &&
+            (!deletedPages || deletedPages.length === 0) &&
+            (!attachments || attachments.length === 0)) {
+            return
+        }
+
+        var payload = JSON.stringify({
+            v: 2,
+            workspaceId: appSyncController.workspaceId,
+            full: full === true,
+            pages: pages,
+            deletedPages: deletedPages,
+            attachments: attachments
+        })
+        console.log("SYNC: sending snapshot full=", full === true, "pages", pages.length, "deleted", deletedPages.length, "attachments", attachments.length)
+        appSyncController.sendPageSnapshot(payload)
+
+        advanceCursorFrom(pages, "pagesCursorAt", "pagesCursorId", "updatedAt", "pageId")
+        advanceCursorFrom(deletedPages, "deletedPagesCursorAt", "deletedPagesCursorId", "deletedAt", "pageId")
+        advanceCursorFrom(attachments, "attachmentsCursorAt", "attachmentsCursorId", "updatedAt", "attachmentId")
     }
 
     function tryStartSync() {

@@ -55,6 +55,7 @@ signals:
     void pageSnapshotReceivedPages(const QVariantList& pages);
     void blockSnapshotReceivedBlocks(const QVariantList& blocks);
     void deletedPageSnapshotReceivedPages(const QVariantList& deletedPages);
+    void attachmentSnapshotReceivedAttachments(const QVariantList& attachments);
     void error(const QString& message);
 
 private:

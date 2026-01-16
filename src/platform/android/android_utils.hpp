@@ -7,6 +7,7 @@
 #ifdef Q_OS_ANDROID
 #include <QJniObject>
 #include <QJniEnvironment>
+#include <QtCore/qnativeinterface.h>
 #endif
 
 namespace zinc::platform {

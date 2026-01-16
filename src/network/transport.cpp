@@ -3,6 +3,44 @@
 
 namespace zinc::network {
 
+namespace {
+bool sync_debug_enabled() {
+    return qEnvironmentVariableIsSet("ZINC_DEBUG_SYNC");
+}
+
+QString state_name(Connection::State state) {
+    switch (state) {
+        case Connection::State::Disconnected: return QStringLiteral("Disconnected");
+        case Connection::State::Connecting: return QStringLiteral("Connecting");
+        case Connection::State::Handshaking: return QStringLiteral("Handshaking");
+        case Connection::State::Connected: return QStringLiteral("Connected");
+        case Connection::State::Failed: return QStringLiteral("Failed");
+    }
+    return QStringLiteral("Unknown");
+}
+
+QString type_name(MessageType type) {
+    switch (type) {
+        case MessageType::NoiseMessage1: return QStringLiteral("NoiseMessage1");
+        case MessageType::NoiseMessage2: return QStringLiteral("NoiseMessage2");
+        case MessageType::NoiseMessage3: return QStringLiteral("NoiseMessage3");
+        case MessageType::PairingRequest: return QStringLiteral("PairingRequest");
+        case MessageType::PairingResponse: return QStringLiteral("PairingResponse");
+        case MessageType::PairingComplete: return QStringLiteral("PairingComplete");
+        case MessageType::PairingReject: return QStringLiteral("PairingReject");
+        case MessageType::SyncRequest: return QStringLiteral("SyncRequest");
+        case MessageType::SyncResponse: return QStringLiteral("SyncResponse");
+        case MessageType::ChangeNotify: return QStringLiteral("ChangeNotify");
+        case MessageType::ChangeAck: return QStringLiteral("ChangeAck");
+        case MessageType::Ping: return QStringLiteral("Ping");
+        case MessageType::Pong: return QStringLiteral("Pong");
+        case MessageType::Disconnect: return QStringLiteral("Disconnect");
+        case MessageType::PagesSnapshot: return QStringLiteral("PagesSnapshot");
+    }
+    return QStringLiteral("Unknown");
+}
+} // namespace
+
 // ============================================================================
 // Connection
 // ============================================================================
@@ -33,6 +71,9 @@ void Connection::connectToPeer(const QHostAddress& host, uint16_t port,
         crypto::NoiseRole::Initiator, local_keys_);
     
     setState(State::Connecting);
+    if (sync_debug_enabled()) {
+        qInfo() << "SYNC: socket connectToHost host=" << host.toString() << "port=" << port;
+    }
     socket_->connectToHost(host, port);
 }
 
@@ -55,11 +96,19 @@ void Connection::acceptConnection(QTcpSocket* socket,
             this, &Connection::onReadyRead);
     
     setState(State::Handshaking);
+    if (sync_debug_enabled()) {
+        qInfo() << "SYNC: socket accepted from"
+                << (socket_ ? socket_->peerAddress().toString() : QStringLiteral("<null>"))
+                << (socket_ ? socket_->peerPort() : 0);
+    }
     // Wait for initiator's message 1
 }
 
 void Connection::disconnect() {
     if (state_ != State::Disconnected) {
+        if (sync_debug_enabled()) {
+            qInfo() << "SYNC: socket disconnect state=" << state_name(state_);
+        }
         // Try to send disconnect message
         if (state_ == State::Connected) {
             send(MessageType::Disconnect, {});
@@ -97,6 +146,9 @@ const crypto::PublicKey& Connection::remotePeerKey() const {
 
 void Connection::setState(State state) {
     if (state_ != state) {
+        if (sync_debug_enabled()) {
+            qInfo() << "SYNC: socket state" << state_name(state_) << "->" << state_name(state);
+        }
         state_ = state;
         emit stateChanged(state);
     }
@@ -104,6 +156,9 @@ void Connection::setState(State state) {
 
 void Connection::onSocketConnected() {
     setState(State::Handshaking);
+    if (sync_debug_enabled()) {
+        qInfo() << "SYNC: socket connected, starting handshake";
+    }
     
     // Initiator sends message 1
     auto msg1_result = noise_->create_message1();
@@ -118,11 +173,18 @@ void Connection::onSocketConnected() {
 }
 
 void Connection::onSocketDisconnected() {
+    if (sync_debug_enabled()) {
+        qInfo() << "SYNC: socket disconnected state=" << state_name(state_);
+    }
     setState(State::Disconnected);
     emit disconnected();
 }
 
 void Connection::onSocketError(QAbstractSocket::SocketError err) {
+    if (sync_debug_enabled()) {
+        qInfo() << "SYNC: socket error" << static_cast<int>(err) << socket_->errorString()
+                << "state=" << state_name(state_);
+    }
     emit error(socket_->errorString());
     if (state_ == State::Connecting || state_ == State::Handshaking) {
         setState(State::Failed);
@@ -141,6 +203,9 @@ void Connection::onReadyRead() {
         
         auto header_result = deserializeHeader(header_data);
         if (header_result.is_err()) {
+            if (sync_debug_enabled()) {
+                qInfo() << "SYNC: invalid header, disconnecting:" << QString::fromStdString(header_result.unwrap_err().message);
+            }
             emit error("Invalid message header");
             disconnect();
             return;
@@ -168,7 +233,12 @@ void Connection::onReadyRead() {
             if (header.type == MessageType::NoiseMessage1 ||
                 header.type == MessageType::NoiseMessage2 ||
                 header.type == MessageType::NoiseMessage3) {
+                if (sync_debug_enabled()) {
+                    qInfo() << "SYNC: handshake rx" << type_name(header.type) << "bytes=" << payload.size();
+                }
                 processHandshake(header.type, payload);
+            } else if (sync_debug_enabled()) {
+                qInfo() << "SYNC: ignoring non-handshake msg during handshaking:" << type_name(header.type);
             }
         } else if (state_ == State::Connected) {
             // Decrypt and emit
@@ -236,6 +306,9 @@ void Connection::processHandshake(MessageType type, const std::vector<uint8_t>& 
 
         if (noise_->is_transport_ready()) {
             setState(State::Connected);
+            if (sync_debug_enabled()) {
+                qInfo() << "SYNC: handshake complete (initiator)";
+            }
             emit connected();
         }
         return;
@@ -260,6 +333,9 @@ void Connection::processHandshake(MessageType type, const std::vector<uint8_t>& 
 
         if (noise_->is_transport_ready()) {
             setState(State::Connected);
+            if (sync_debug_enabled()) {
+                qInfo() << "SYNC: handshake complete (responder)";
+            }
             emit connected();
         }
         return;

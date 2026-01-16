@@ -3,6 +3,12 @@
 
 namespace zinc::network {
 
+namespace {
+bool sync_debug_enabled() {
+    return qEnvironmentVariableIsSet("ZINC_DEBUG_SYNC");
+}
+} // namespace
+
 SyncManager::SyncManager(QObject* parent)
     : QObject(parent)
     , discovery_(std::make_unique<DiscoveryService>(this))
@@ -46,6 +52,11 @@ bool SyncManager::start(uint16_t port) {
     }
     
     uint16_t actual_port = listen_result.unwrap();
+    if (sync_debug_enabled()) {
+        qInfo() << "SYNC: listen port=" << actual_port
+                << "device_id=" << QString::fromStdString(device_id_.to_string())
+                << "workspace_id=" << QString::fromStdString(workspace_id_.to_string());
+    }
     
     // Start advertising our service
     ServiceInfo info{
@@ -80,6 +91,9 @@ void SyncManager::stop() {
     if (!started_) return;
     
     stopping_ = true;
+    if (sync_debug_enabled()) {
+        qInfo() << "SYNC: stop";
+    }
     // Disconnect all peers
     for (auto& [id, peer] : peers_) {
         if (peer->connection) {
@@ -105,6 +119,11 @@ void SyncManager::connectToPeer(const Uuid& device_id) {
     if (!peer_info) {
         emit error("Peer not found");
         return;
+    }
+    if (sync_debug_enabled()) {
+        qInfo() << "SYNC: connectToPeer device_id=" << QString::fromStdString(device_id.to_string())
+                << "host=" << peer_info->host.toString()
+                << "port=" << peer_info->port;
     }
     
     // Check if already connected
@@ -140,6 +159,11 @@ void SyncManager::connectToEndpoint(const Uuid& device_id,
     if (device_id == device_id_) {
         return;
     }
+    if (sync_debug_enabled()) {
+        qInfo() << "SYNC: connectToEndpoint device_id=" << QString::fromStdString(device_id.to_string())
+                << "host=" << host.toString()
+                << "port=" << port;
+    }
     
     // Check if already connected
     auto it = peers_.find(device_id);
@@ -162,6 +186,9 @@ void SyncManager::connectToEndpoint(const Uuid& device_id,
 void SyncManager::disconnectFromPeer(const Uuid& device_id) {
     auto it = peers_.find(device_id);
     if (it != peers_.end()) {
+        if (sync_debug_enabled()) {
+            qInfo() << "SYNC: disconnectFromPeer device_id=" << QString::fromStdString(device_id.to_string());
+        }
         if (it->second->connection) {
             it->second->connection->disconnect();
         }
@@ -229,6 +256,13 @@ void SyncManager::setupConnection(PeerConnection& peer) {
 }
 
 void SyncManager::onPeerDiscovered(const PeerInfo& peer) {
+    if (sync_debug_enabled()) {
+        qInfo() << "SYNC: peerDiscovered device_id=" << QString::fromStdString(peer.device_id.to_string())
+                << "workspace_id=" << QString::fromStdString(peer.workspace_id.to_string())
+                << "host=" << peer.host.toString()
+                << "port=" << peer.port
+                << "protocol=" << peer.protocol_version;
+    }
     // Auto-connect to peers in same workspace
     if (peer.workspace_id == workspace_id_ && peer.device_id != device_id_) {
         // Deterministic tie-breaker: only one side initiates the connection to
@@ -243,11 +277,19 @@ void SyncManager::onPeerDiscovered(const PeerInfo& peer) {
 }
 
 void SyncManager::onPeerLost(const Uuid& device_id) {
+    if (sync_debug_enabled()) {
+        qInfo() << "SYNC: peerLost device_id=" << QString::fromStdString(device_id.to_string());
+    }
     disconnectFromPeer(device_id);
     autoconnect_attempted_.erase(device_id);
 }
 
 void SyncManager::onNewConnection(QTcpSocket* socket) {
+    if (sync_debug_enabled()) {
+        qInfo() << "SYNC: incoming connection from"
+                << (socket ? socket->peerAddress().toString() : QStringLiteral("<null>"))
+                << (socket ? socket->peerPort() : 0);
+    }
     // Accept incoming connection
     auto peer = std::make_unique<PeerConnection>();
     peer->device_id = Uuid::generate();  // Will be updated after handshake
@@ -269,6 +311,9 @@ void SyncManager::onConnectionConnected() {
     for (auto& [id, peer] : peers_) {
         if (peer->connection.get() == conn) {
             peer->sync_state = SyncState::Streaming;
+            if (sync_debug_enabled()) {
+                qInfo() << "SYNC: connected peer_id=" << QString::fromStdString(id.to_string());
+            }
             emit peerConnected(id);
             emit peersChanged();
             break;
@@ -285,6 +330,9 @@ void SyncManager::onConnectionDisconnected() {
     for (auto it = peers_.begin(); it != peers_.end(); ++it) {
         if (it->second->connection.get() == conn) {
             Uuid id = it->first;
+            if (sync_debug_enabled()) {
+                qInfo() << "SYNC: disconnected peer_id=" << QString::fromStdString(id.to_string());
+            }
             peers_.erase(it);
             emit peerDisconnected(id);
             emit peersChanged();
@@ -309,6 +357,9 @@ void SyncManager::onMessageReceived(MessageType type,
     
     switch (type) {
         case MessageType::PagesSnapshot: {
+            if (sync_debug_enabled()) {
+                qInfo() << "SYNC: msg PagesSnapshot bytes=" << payload.size();
+            }
             qInfo() << "SYNC: Received PagesSnapshot bytes=" << payload.size();
             QByteArray data(
                 reinterpret_cast<const char*>(payload.data()),
@@ -369,6 +420,9 @@ void SyncManager::handleChangeNotify(const Uuid& peer_id,
 void SyncManager::sendPageSnapshot(const std::vector<uint8_t>& payload) {
     qInfo() << "SYNC: Sending PagesSnapshot bytes=" << payload.size()
              << "peers=" << peers_.size();
+    if (sync_debug_enabled()) {
+        qInfo() << "SYNC: sendPageSnapshot connectedPeers=" << connectedPeerCount();
+    }
     for (const auto& [id, peer] : peers_) {
         if (peer->connection && peer->connection->isConnected()) {
             peer->connection->send(MessageType::PagesSnapshot, payload);
