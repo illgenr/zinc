@@ -8,6 +8,8 @@ Popup {
     
     property var targetBlock: null
     property int currentBlockIndex: -1
+    property real desiredX: 0
+    property real desiredY: 0
     
     signal commandSelected(var command)
     
@@ -32,6 +34,9 @@ Popup {
         { type: "heading", level: 3, label: "Heading 3", description: "Small heading", icon: "H3" },
         { type: "bulleted", label: "Bulleted list", description: "Multi-line list block", icon: "•" },
         { type: "todo", label: "To-do", description: "Checkbox item", icon: "☑️" },
+        { type: "date", label: "Date", description: "Insert a date", icon: "📅" },
+        { type: "datetime", label: "Date/Time", description: "Insert a date with optional time", icon: "🕒" },
+        { type: "now", label: "Now", description: "Insert current date and time", icon: "⏱" },
         { type: "image", label: "Image", description: "Upload an image", icon: "🖼" },
         { type: "columns", count: 2, label: "2 columns", description: "Side-by-side columns", icon: "▦" },
         { type: "columns", count: 3, label: "3 columns", description: "Three columns", icon: "▦" },
@@ -43,6 +48,32 @@ Popup {
     ]
     
     property var filteredCommands: commands
+
+    function clamp(value, minValue, maxValue) {
+        return Math.max(minValue, Math.min(value, maxValue))
+    }
+
+    function keyboardTopY() {
+        const kb = Qt.inputMethod.keyboardRectangle
+        if (!Qt.inputMethod.visible || !kb || kb.height <= 0) {
+            return parent ? parent.height : 0
+        }
+        if (kb.y > 0) {
+            return kb.y
+        }
+        return parent ? (parent.height - kb.height) : 0
+    }
+
+    function updatePosition() {
+        if (!parent) return
+
+        const margin = ThemeManager.spacingSmall
+        const maxX = parent.width - root.width - margin
+        const maxY = keyboardTopY() - root.height - margin
+
+        root.x = clamp(root.desiredX, margin, Math.max(margin, maxX))
+        root.y = clamp(root.desiredY, margin, Math.max(margin, maxY))
+    }
     
     function updateFilteredCommands() {
         if (filterText.length === 0) {
@@ -61,6 +92,17 @@ Popup {
     height: Math.min(filteredCommands.length * 44 + 54, 340)
     padding: ThemeManager.spacingSmall
     closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+
+    onDesiredXChanged: updatePosition()
+    onDesiredYChanged: updatePosition()
+    onWidthChanged: updatePosition()
+    onHeightChanged: updatePosition()
+
+    Connections {
+        target: Qt.inputMethod
+        function onVisibleChanged() { root.updatePosition() }
+        function onKeyboardRectangleChanged() { root.updatePosition() }
+    }
     
     background: Rectangle {
         color: ThemeManager.surface
@@ -199,6 +241,7 @@ Popup {
     }
     
     onOpened: {
+        updatePosition()
         filterInput.text = filterText
         filterInput.forceActiveFocus()
     }

@@ -14,6 +14,51 @@ Item {
         }
         return s4() + s4() + '-' + s4() + '-' + s4() + '-' + s4() + '-' + s4() + s4() + s4()
     }
+
+    function pad2(n) {
+        const s = "" + n
+        return s.length === 1 ? "0" + s : s
+    }
+
+    function formatLocalDate(d) {
+        return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate())
+    }
+
+    function formatLocalDateTime(d) {
+        return formatLocalDate(d) + " " + pad2(d.getHours()) + ":" + pad2(d.getMinutes())
+    }
+
+    function parseLocalDateOrDateTime(s) {
+        const raw = (s || "").trim().replace("T", " ")
+        const parts = raw.split(" ")
+        const datePart = parts[0] || ""
+        const m = datePart.match(/^(\\d{4})-(\\d{2})-(\\d{2})$/)
+        if (!m) return null
+        const y = parseInt(m[1], 10)
+        const mo = parseInt(m[2], 10) - 1
+        const d = parseInt(m[3], 10)
+        let h = 0
+        let min = 0
+        let hasTime = false
+        if (parts.length > 1) {
+            const tm = (parts[1] || "").match(/^(\\d{2}):(\\d{2})/)
+            if (tm) {
+                h = parseInt(tm[1], 10)
+                min = parseInt(tm[2], 10)
+                hasTime = true
+            }
+        }
+        return { date: new Date(y, mo, d, h, min), hasTime: hasTime }
+    }
+
+    function openDateEditor(blockIndex, initialValue) {
+        if (blockIndex < 0 || blockIndex >= blockModel.count) return
+        const parsed = parseLocalDateOrDateTime(initialValue)
+        pendingDateInsertBlockIndex = blockIndex
+        datePicker.selectedDate = parsed ? parsed.date : new Date()
+        datePicker.includeTime = parsed ? parsed.hasTime : false
+        datePicker.open()
+    }
     
     property string pageTitle: ""
     property string pageId: ""
@@ -42,6 +87,7 @@ Item {
     property point lastReorderPoint: Qt.point(0, 0)
 
     property bool debugSelection: Qt.application.arguments.indexOf("--debug-selection") !== -1
+    property int pendingDateInsertBlockIndex: -1
 
     readonly property bool hasCrossBlockSelection: selectionAnchorBlockIndex >= 0 &&
                                                   selectionFocusBlockIndex >= 0 &&
@@ -610,8 +656,16 @@ Item {
                         if (newContent === "/" || (newContent.startsWith("/") && !newContent.includes(" "))) {
                             slashMenu.currentBlockIndex = index
                             slashMenu.filterText = newContent.substring(1)
-                            slashMenu.x = Qt.binding(() => contentColumn.x + ThemeManager.spacingLarge)
-                            slashMenu.y = Qt.binding(() => contentColumn.y + titleInput.height + index * 40 + 40)
+                            const blockItem = blockRepeater.itemAt(index)
+                            if (blockItem) {
+                                const p = blockItem.mapToItem(null, ThemeManager.spacingLarge, blockItem.height)
+                                slashMenu.desiredX = p.x
+                                slashMenu.desiredY = p.y
+                            } else {
+                                const p = root.mapToItem(null, contentColumn.x + ThemeManager.spacingLarge, contentColumn.y)
+                                slashMenu.desiredX = p.x
+                                slashMenu.desiredY = p.y
+                            }
                             slashMenu.open()
                         } else {
                             slashMenu.close()
@@ -789,7 +843,22 @@ Item {
         onCommandSelected: function(command) {
             let idx = slashMenu.currentBlockIndex
             if (idx >= 0 && idx < blockModel.count) {
-                if (command.type === "link") {
+                if (command.type === "date") {
+                    pendingDateInsertBlockIndex = idx
+                    datePicker.selectedDate = new Date()
+                    datePicker.includeTime = false
+                    datePicker.open()
+                } else if (command.type === "datetime") {
+                    pendingDateInsertBlockIndex = idx
+                    datePicker.selectedDate = new Date()
+                    datePicker.includeTime = true
+                    datePicker.open()
+                } else if (command.type === "now") {
+                    blockModel.setProperty(idx, "blockType", "paragraph")
+                    blockModel.setProperty(idx, "content", formatLocalDateTime(new Date()))
+                    scheduleAutosave()
+                    Qt.callLater(() => root.focusBlock(idx))
+                } else if (command.type === "link") {
                     // Show page picker for link blocks
                     blockModel.setProperty(idx, "blockType", "link")
                     blockModel.setProperty(idx, "content", "")
@@ -814,6 +883,20 @@ Item {
                 scheduleAutosave()
             }
         }
+    }
+
+    DatePickerPopup {
+        id: datePicker
+        onAccepted: function(date) {
+            const idx = pendingDateInsertBlockIndex
+            pendingDateInsertBlockIndex = -1
+            if (idx < 0 || idx >= blockModel.count) return
+            blockModel.setProperty(idx, "blockType", "paragraph")
+            blockModel.setProperty(idx, "content", datePicker.includeTime ? formatLocalDateTime(date) : formatLocalDate(date))
+            scheduleAutosave()
+            Qt.callLater(() => root.focusBlock(idx))
+        }
+        onCanceled: pendingDateInsertBlockIndex = -1
     }
 
     FileDialog {

@@ -17,6 +17,20 @@ Item {
     property int dragTargetIndex: -1
 
     property double lastLocalEditMs: 0
+    property var pendingDateInsertSpan: null
+
+    function pad2(n) {
+        const s = "" + n
+        return s.length === 1 ? "0" + s : s
+    }
+
+    function formatLocalDate(d) {
+        return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate())
+    }
+
+    function formatLocalDateTime(d) {
+        return formatLocalDate(d) + " " + pad2(d.getHours()) + ":" + pad2(d.getMinutes())
+    }
 
     function loadPage(id) {
         if (pageId && pageId !== "" && pageId !== id) {
@@ -248,9 +262,9 @@ Item {
                                 const t = textItem()
                                 if (t) {
                                     const r = t.cursorRectangle
-                                    const p = t.mapToItem(root, r.x, r.y + r.height)
-                                    slashMenu.x = p.x
-                                    slashMenu.y = p.y
+                                    const p = t.mapToItem(null, r.x, r.y + r.height)
+                                    slashMenu.desiredX = p.x
+                                    slashMenu.desiredY = p.y
                                 }
                                 slashMenu.open()
                             } else {
@@ -446,7 +460,6 @@ Item {
 
     SlashMenu {
         id: slashMenu
-        parent: root
         z: 9999
         onCommandSelected: function(command) {
             const idx = root.currentBlockIndex()
@@ -467,7 +480,19 @@ Item {
                 root.replaceRange(b.start, b.end, text + "\n")
             }
 
-            if (command.type === "heading") {
+            if (command.type === "date") {
+                pendingDateInsertSpan = b
+                datePicker.selectedDate = new Date()
+                datePicker.includeTime = false
+                datePicker.open()
+            } else if (command.type === "datetime") {
+                pendingDateInsertSpan = b
+                datePicker.selectedDate = new Date()
+                datePicker.includeTime = true
+                datePicker.open()
+            } else if (command.type === "now") {
+                replaceWith(formatLocalDateTime(new Date()))
+            } else if (command.type === "heading") {
                 const hashes = command.level === 1 ? "#" : command.level === 2 ? "##" : "###"
                 replaceWith(hashes + " " + content)
             } else if (command.type === "bulleted") {
@@ -498,6 +523,18 @@ Item {
                 replaceWith("[Link](zinc://page/)")
             }
         }
+    }
+
+    DatePickerPopup {
+        id: datePicker
+        z: 10000
+        onAccepted: function(date) {
+            const span = pendingDateInsertSpan
+            pendingDateInsertSpan = null
+            if (!span) return
+            root.replaceRange(span.start, span.end, (datePicker.includeTime ? formatLocalDateTime(date) : formatLocalDate(date)) + "\n")
+        }
+        onCanceled: pendingDateInsertSpan = null
     }
 
     function generateUuid() {

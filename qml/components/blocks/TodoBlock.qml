@@ -78,8 +78,12 @@ Item {
                 cursorShape: Qt.IBeamCursor
                 onClicked: function(mouse) {
                     if (!root.editor) return
+                    const link = rendered.linkAt(mouse.x, mouse.y)
+                    if (link && link.indexOf("zinc://date/") === 0 && "openDateEditor" in root.editor) {
+                        root.editor.openDateEditor(root.blockIndex, link.substring("zinc://date/".length))
+                        return
+                    }
                     if (mouse.modifiers & Qt.ControlModifier) {
-                        const link = rendered.linkAt(mouse.x, mouse.y)
                         if (link && link.indexOf("zinc://page/") === 0) {
                             root.editor.navigateToPage(link.substring("zinc://page/".length))
                             return

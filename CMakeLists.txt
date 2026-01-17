@@ -331,6 +331,7 @@ set(ZINC_QML_FILES
     qml/components/blocks/ToggleBlock.qml
     qml/components/blocks/LinkBlock.qml
     qml/components/SlashMenu.qml
+    qml/components/DatePickerPopup.qml
     qml/components/PageTree.qml
     qml/components/SearchDialog.qml
     qml/dialogs/PairingDialog.qml
@@ -481,6 +482,7 @@ if(ZINC_BUILD_TESTS)
         tests/qml/test_sync_controller_settings.cpp
         tests/qml/test_pairing_dialog_qml.cpp
         tests/qml/test_markdown_editor_qml.cpp
+        tests/qml/test_slash_menu_qml.cpp
         tests/qml/test_image_block_interactions.cpp
     )
 
