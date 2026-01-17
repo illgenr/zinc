@@ -97,7 +97,6 @@ void PairingSession::submitCode(const QString& code) {
 
     verification_code_ = code;
     emit verificationCodeChanged();
-    setState(PairingState::Verifying);
 
     if (method_ == PairingMethod::NumericCode) {
         workspace_id_ = deriveWorkspaceIdFromSecret(QStringLiteral("code:") + verification_code_);
@@ -105,12 +104,9 @@ void PairingSession::submitCode(const QString& code) {
         workspace_id_ = deriveWorkspaceIdFromSecret(QStringLiteral("pass:") + verification_code_);
     }
 
-    paired_device_.workspace_id = workspace_id_;
-    paired_device_.verification_code = verification_code_;
-    paired_device_.method = method_;
-
-    setState(PairingState::Complete);
-    emit pairingComplete(paired_device_);
+    // Numeric/passphrase pairing is "workspace join" only; the actual peer device
+    // is discovered/connected via the sync layer afterwards.
+    setState(PairingState::WaitingForPeer);
 }
 
 void PairingSession::submitQrCodeData(const QString& qrData) {

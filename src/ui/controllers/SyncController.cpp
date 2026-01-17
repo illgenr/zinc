@@ -7,6 +7,7 @@
 #include <QJsonObject>
 #include <QHostAddress>
 #include <QSettings>
+#include <QDateTime>
 
 namespace zinc::ui {
 
@@ -49,6 +50,29 @@ SyncController::SyncController(QObject* parent)
                     QString::fromStdString(peer.workspace_id.to_string()),
                     peer.host.toString(),
                     static_cast<int>(peer.port));
+
+                QVariantMap device;
+                device["deviceId"] = QString::fromStdString(peer.device_id.to_string());
+                device["deviceName"] = peer.device_name;
+                device["workspaceId"] = QString::fromStdString(peer.workspace_id.to_string());
+                device["host"] = peer.host.toString();
+                device["port"] = static_cast<int>(peer.port);
+                device["lastSeen"] = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
+
+                const auto deviceId = device.value("deviceId").toString();
+                bool updated = false;
+                for (auto i = 0; i < discovered_peers_.size(); ++i) {
+                    const auto existing = discovered_peers_[i].toMap();
+                    if (existing.value("deviceId").toString() == deviceId) {
+                        discovered_peers_[i] = device;
+                        updated = true;
+                        break;
+                    }
+                }
+                if (!updated) {
+                    discovered_peers_.append(device);
+                }
+                emit discoveredPeersChanged();
             });
     connect(sync_manager_.get(), &network::SyncManager::pageSnapshotReceived,
             this, [this](const QByteArray& payload) {
@@ -110,6 +134,10 @@ QString SyncController::workspaceId() const {
     return workspace_id_;
 }
 
+QVariantList SyncController::discoveredPeers() const {
+    return discovered_peers_;
+}
+
 bool SyncController::configure(const QString& workspaceId, const QString& deviceName) {
     auto parsed = Uuid::parse(workspaceId.toStdString());
     if (!parsed) {
@@ -140,6 +168,8 @@ bool SyncController::configure(const QString& workspaceId, const QString& device
     sync_manager_->initialize(keys, *parsed, resolved_name, device_id);
     configured_ = true;
     workspace_id_ = workspaceId;
+    discovered_peers_.clear();
+    emit discoveredPeersChanged();
     emit configuredChanged();
     return true;
 }
@@ -162,7 +192,8 @@ bool SyncController::startSync() {
         emit error("Sync not configured");
         return false;
     }
-    return sync_manager_->start();
+    static constexpr uint16_t preferred_port = 47888;
+    return sync_manager_->start(preferred_port);
 }
 
 void SyncController::stopSync() {

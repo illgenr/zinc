@@ -33,6 +33,11 @@ struct PeerConnection {
     SyncState sync_state = SyncState::Idle;
     Timestamp last_sync;
     int retry_count = 0;
+    bool initiated_by_us = false;
+    bool hello_received = false;
+    QString device_name;
+    QHostAddress host;
+    uint16_t port = 0;
 };
 
 /**
@@ -122,6 +127,7 @@ private slots:
     void onNewConnection(QTcpSocket* socket);
     void onConnectionConnected();
     void onConnectionDisconnected();
+    void onConnectionStateChanged(Connection::State state);
     void onMessageReceived(MessageType type, const std::vector<uint8_t>& payload);
 
 private:
@@ -142,6 +148,8 @@ private:
     std::set<Uuid> autoconnect_attempted_;
     
     void setupConnection(PeerConnection& peer);
+    void sendHello(Connection& conn) const;
+    void handleHello(Connection& conn, const std::vector<uint8_t>& payload);
     void handleSyncRequest(const Uuid& peer_id, const std::vector<uint8_t>& payload);
     void handleSyncResponse(const Uuid& peer_id, const std::vector<uint8_t>& payload);
     void handleChangeNotify(const Uuid& peer_id, const std::vector<uint8_t>& payload);

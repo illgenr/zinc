@@ -9,6 +9,7 @@ This repository uses CMake + Ninja for native builds and CMake (Android toolchai
 - Ninja
 - Qt 6.10.1 installed under `~/Qt/6.10.1/`
 - Git (if contributing)
+- ImageMagick (`magick`) for regenerating Android launcher icons
 
 ### Android
 - Android SDK installed at: `~/Android/Sdk`
@@ -84,6 +85,21 @@ If Qt host tools aren’t found, confirm:
 -DQT_HOST_PATH=/home/raleigh/Qt/6.10.1/gcc_64
 
 If Android NDK mismatch errors appear, verify the toolchain file path and NDK version.
+
+Android Launcher Icon Assets
+
+- Canonical icon source (used for desktop + Android generation): `src/assets/icon.png`
+- To regenerate Android launcher icons (writes `android/res/mipmap-*/ic_launcher*.png`):
+
+```bash
+bash scripts/regenerate_android_launcher_icons.sh
+```
+
+- Verify the manifest + icon dimensions:
+
+```bash
+ninja -C ./build/build-debug zinc_android_icon_check
+```
 
 Clean Builds
 Native

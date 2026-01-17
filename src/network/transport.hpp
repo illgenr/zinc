@@ -19,6 +19,7 @@ enum class MessageType : uint8_t {
     NoiseMessage1 = 0x01,
     NoiseMessage2 = 0x02,
     NoiseMessage3 = 0x03,
+    Hello = 0x04,
     
     // Pairing
     PairingRequest = 0x10,
@@ -114,6 +115,9 @@ public:
      * Check if the connection is established and encrypted.
      */
     [[nodiscard]] bool isConnected() const { return state_ == State::Connected; }
+
+    [[nodiscard]] QHostAddress peerAddress() const;
+    [[nodiscard]] uint16_t peerPort() const;
 
 signals:
     void connected();

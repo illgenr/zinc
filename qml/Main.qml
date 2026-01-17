@@ -606,6 +606,7 @@ ApplicationWindow {
     
     SettingsDialog {
         id: settingsDialog
+        syncController: appSyncController
         
         onPairDeviceRequested: {
             pairingDialog.open()
@@ -664,7 +665,6 @@ ApplicationWindow {
         function onPeerDiscovered(deviceId, deviceName, workspaceId, host, port) {
             if (!DataStore) return
             if (!deviceId || !workspaceId) return
-            DataStore.savePairedDevice(deviceId, deviceName || "Paired device", workspaceId)
             if (host && host !== "" && port && port > 0) {
                 DataStore.updatePairedDeviceEndpoint(deviceId, host, port)
             }
@@ -852,6 +852,7 @@ ApplicationWindow {
                 if (!d) continue
                 if (!d.deviceId || !d.host || !d.port) continue
                 if (d.port <= 0) continue
+                if (d.workspaceId && d.workspaceId !== "" && d.workspaceId !== appSyncController.workspaceId) continue
                 appSyncController.connectToPeer(d.deviceId, d.host, d.port)
             }
         }

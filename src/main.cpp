@@ -28,7 +28,7 @@ int main(int argc, char *argv[])
     app.setApplicationVersion("0.1.0");
     app.setOrganizationName("Zinc");
     app.setOrganizationDomain("zinc.local");
-    app.setWindowIcon(QIcon(QStringLiteral(":/qt/qml/zinc/src/assets/icon.svg")));
+    app.setWindowIcon(QIcon(QStringLiteral(":/qt/qml/zinc/src/assets/icon.png")));
     
     // Initialize crypto
     auto crypto_result = zinc::crypto::init();

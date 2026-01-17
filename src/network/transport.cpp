@@ -24,6 +24,7 @@ QString type_name(MessageType type) {
         case MessageType::NoiseMessage1: return QStringLiteral("NoiseMessage1");
         case MessageType::NoiseMessage2: return QStringLiteral("NoiseMessage2");
         case MessageType::NoiseMessage3: return QStringLiteral("NoiseMessage3");
+        case MessageType::Hello: return QStringLiteral("Hello");
         case MessageType::PairingRequest: return QStringLiteral("PairingRequest");
         case MessageType::PairingResponse: return QStringLiteral("PairingResponse");
         case MessageType::PairingComplete: return QStringLiteral("PairingComplete");
@@ -61,6 +62,14 @@ Connection::Connection(QObject* parent)
 
 Connection::~Connection() {
     disconnect();
+}
+
+QHostAddress Connection::peerAddress() const {
+    return socket_ ? socket_->peerAddress() : QHostAddress{};
+}
+
+uint16_t Connection::peerPort() const {
+    return socket_ ? static_cast<uint16_t>(socket_->peerPort()) : 0;
 }
 
 void Connection::connectToPeer(const QHostAddress& host, uint16_t port,

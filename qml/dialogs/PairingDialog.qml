@@ -49,7 +49,9 @@ Dialog {
             statusOverride = ""
             scanInProgress = false
             var deviceId = pairingController.peerDeviceId
-            if (deviceId !== "") {
+            // Only persist when we have a real endpoint (QR flow); numeric code
+            // pairing is completed via the sync connection.
+            if (deviceId !== "" && pairingController.peerHost !== "" && pairingController.peerPort > 0) {
                 var name = pairingController.peerName
                 if (name === "") {
                     name = "Paired device"
@@ -86,29 +88,42 @@ Dialog {
     Connections {
         target: activeSyncController
 
+        property var discovered: ({})
+
         function onPeerCountChanged() {
             if (activeSyncController.peerCount > 0 &&
-                (mode === "code_show" || mode === "qr_show")) {
+                (mode === "code_show" || mode === "qr_show" || mode === "code_enter")) {
                 statusOverride = "Pairing complete!"
             }
         }
 
         function onPeerDiscovered(deviceId, deviceName, workspaceId, host, port) {
-            if (deviceId === "" || workspaceId === "") {
-                return
-            }
-            var name = deviceName
-            if (name === "") {
-                name = "Paired device"
-            }
-            DataStore.savePairedDevice(deviceId, name, workspaceId)
-            if (host && host !== "" && port && port > 0) {
-                DataStore.updatePairedDeviceEndpoint(deviceId, host, port)
+            // Do not implicitly "pair" devices on discovery; only persist a paired
+            // device once the pairing flow completes.
+            if (!deviceId || deviceId === "") return
+            discovered[deviceId] = {
+                deviceId: deviceId,
+                deviceName: deviceName,
+                workspaceId: workspaceId,
+                host: host,
+                port: port
             }
         }
 
-        function onPeerConnected(deviceName) {
-            console.log("PairingDialog: peer connected", deviceName)
+        function onPeerConnected(deviceId) {
+            console.log("PairingDialog: peer connected", deviceId)
+            if (DataStore && discovered[deviceId]) {
+                var d = discovered[deviceId]
+                if (d.workspaceId && d.workspaceId !== "") {
+                    DataStore.savePairedDevice(d.deviceId, d.deviceName || "Paired device", d.workspaceId)
+                    if (d.host && d.host !== "" && d.port && d.port > 0) {
+                        DataStore.updatePairedDeviceEndpoint(d.deviceId, d.host, d.port)
+                    }
+                }
+            }
+            if (mode === "code_show" || mode === "code_enter" || mode === "qr_show") {
+                Qt.callLater(function() { root.close() })
+            }
             pagesCursorAt = ""
             pagesCursorId = ""
             deletedPagesCursorAt = ""

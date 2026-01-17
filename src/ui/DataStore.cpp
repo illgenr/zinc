@@ -1567,8 +1567,10 @@ void DataStore::updatePairedDeviceEndpoint(const QString& deviceId,
         qWarning() << "DataStore: Failed to update paired device endpoint:" << query.lastError().text();
         return;
     }
-
-    emit pairedDevicesChanged();
+    const auto updated = query.numRowsAffected();
+    if (updated > 0) {
+        emit pairedDevicesChanged();
+    }
 }
 
 void DataStore::removePairedDevice(const QString& deviceId) {

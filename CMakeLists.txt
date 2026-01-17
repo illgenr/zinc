@@ -361,6 +361,7 @@ qt_add_qml_module(appzinc
     QML_FILES
         ${ZINC_QML_FILES}
     RESOURCES
+        src/assets/icon.png
         src/assets/icon.svg
     SOURCES
         src/ui/qml_types.hpp
@@ -373,6 +374,10 @@ set_target_properties(appzinc PROPERTIES
     MACOSX_BUNDLE TRUE
     WIN32_EXECUTABLE TRUE
 )
+
+if(ANDROID)
+    set_property(TARGET appzinc PROPERTY QT_ANDROID_PACKAGE_SOURCE_DIR "${CMAKE_SOURCE_DIR}/android")
+endif()
 
 
 
@@ -392,6 +397,40 @@ install(TARGETS appzinc
     BUNDLE DESTINATION .
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+)
+
+add_custom_target(zinc_android_icon_check
+    COMMAND ${CMAKE_COMMAND} -DZINC_SOURCE_DIR=${CMAKE_SOURCE_DIR} -P ${CMAKE_SOURCE_DIR}/cmake/check_android_icons.cmake
+    COMMENT "Checking Android launcher icons"
+    VERBATIM
+)
+
+add_executable(zinc_sync_connect_endpoint_check
+    tools/sync_connect_endpoint_check.cpp
+)
+target_link_libraries(zinc_sync_connect_endpoint_check PRIVATE
+    zinc_network
+    Qt6::Core
+)
+
+add_custom_target(zinc_sync_connect_endpoint_check_run
+    COMMAND $<TARGET_FILE:zinc_sync_connect_endpoint_check>
+    COMMENT "Checking SyncManager connectToEndpoint does not cancel in-progress connects"
+    VERBATIM
+)
+
+add_executable(zinc_sync_hello_check
+    tools/sync_hello_check.cpp
+)
+target_link_libraries(zinc_sync_hello_check PRIVATE
+    zinc_network
+    Qt6::Core
+)
+
+add_custom_target(zinc_sync_hello_check_run
+    COMMAND $<TARGET_FILE:zinc_sync_hello_check>
+    COMMENT "Checking SyncManager Hello/rekey handshake"
+    VERBATIM
 )
 
 # Testing

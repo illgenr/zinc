@@ -7,9 +7,14 @@ Dialog {
     id: root
     
     signal pairDeviceRequested()
+    property var syncController: null
 
     ListModel {
         id: pairedDevicesModel
+    }
+
+    ListModel {
+        id: availableDevicesModel
     }
 
     function refreshPairedDevices() {
@@ -20,11 +25,42 @@ Dialog {
         }
     }
 
+    function refreshAvailableDevices() {
+        availableDevicesModel.clear()
+        if (!syncController) return
+        var devices = syncController.discoveredPeers
+        if (!devices) return
+        for (var i = 0; i < devices.length; i++) {
+            var d = devices[i]
+            if (!d) continue
+            // Filter out other workspaces if we know ours.
+            if (syncController.workspaceId && syncController.workspaceId !== "" &&
+                d.workspaceId && d.workspaceId !== "" &&
+                d.workspaceId !== syncController.workspaceId) {
+                continue
+            }
+            availableDevicesModel.append(d)
+        }
+    }
+
     Connections {
         target: DataStore
 
         function onPairedDevicesChanged() {
             refreshPairedDevices()
+        }
+    }
+
+    Connections {
+        target: syncController
+        enabled: syncController !== null
+
+        function onDiscoveredPeersChanged() {
+            refreshAvailableDevices()
+        }
+
+        function onConfiguredChanged() {
+            refreshAvailableDevices()
         }
     }
     
@@ -513,8 +549,74 @@ Dialog {
     component DevicesSettings: SettingsPage {
         signal pairDevice()
         
-        Component.onCompleted: root.refreshPairedDevices()
-        onVisibleChanged: if (visible) root.refreshPairedDevices()
+        Component.onCompleted: {
+            root.refreshPairedDevices()
+            root.refreshAvailableDevices()
+        }
+        onVisibleChanged: if (visible) {
+            root.refreshPairedDevices()
+            root.refreshAvailableDevices()
+        }
+
+        SettingsSection {
+            title: "Available Devices"
+
+            Text {
+                text: "No devices discovered"
+                color: ThemeManager.textSecondary
+                font.pixelSize: ThemeManager.fontSizeNormal
+                visible: availableDevicesModel.count === 0
+            }
+
+            Repeater {
+                model: availableDevicesModel
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: implicitHeight
+                    implicitHeight: deviceRow.implicitHeight + ThemeManager.spacingSmall * 2
+                    radius: ThemeManager.radiusSmall
+                    color: ThemeManager.surfaceHover
+                    border.width: 1
+                    border.color: ThemeManager.border
+
+                    RowLayout {
+                        id: deviceRow
+                        anchors.fill: parent
+                        anchors.margins: ThemeManager.spacingSmall
+                        spacing: ThemeManager.spacingSmall
+
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            Layout.minimumWidth: 0
+                            spacing: 2
+                            clip: true
+
+                            Text {
+                                text: deviceName && deviceName !== "" ? deviceName : deviceId
+                                color: ThemeManager.text
+                                font.pixelSize: ThemeManager.fontSizeNormal
+                                font.weight: Font.Medium
+                                elide: Text.ElideRight
+                                wrapMode: Text.NoWrap
+                                maximumLineCount: 1
+                                Layout.fillWidth: true
+                            }
+
+                            Text {
+                                Layout.fillWidth: true
+                                color: ThemeManager.textSecondary
+                                font.pixelSize: ThemeManager.fontSizeSmall
+                                elide: Text.ElideRight
+                                wrapMode: Text.NoWrap
+                                maximumLineCount: 1
+                                text: (host && host !== "" && port && port > 0) ? (host + ":" + port) : "unknown"
+                            }
+                        }
+                    }
+                }
+            }
+        }
         
         SettingsSection {
             title: "Paired Devices"

@@ -19,6 +19,7 @@ class SyncController : public QObject {
     Q_PROPERTY(QStringList peers READ peers NOTIFY peersChanged)
     Q_PROPERTY(bool configured READ isConfigured NOTIFY configuredChanged)
     Q_PROPERTY(QString workspaceId READ workspaceId NOTIFY configuredChanged)
+    Q_PROPERTY(QVariantList discoveredPeers READ discoveredPeers NOTIFY discoveredPeersChanged)
     
 public:
     explicit SyncController(QObject* parent = nullptr);
@@ -28,6 +29,7 @@ public:
     [[nodiscard]] QStringList peers() const;
     [[nodiscard]] bool isConfigured() const;
     [[nodiscard]] QString workspaceId() const;
+    [[nodiscard]] QVariantList discoveredPeers() const;
     
     Q_INVOKABLE bool configure(const QString& workspaceId, const QString& deviceName);
     Q_INVOKABLE bool tryAutoStart(const QString& defaultDeviceName);
@@ -44,6 +46,7 @@ signals:
     void peerCountChanged();
     void peersChanged();
     void configuredChanged();
+    void discoveredPeersChanged();
     void peerDiscovered(const QString& deviceId,
                         const QString& deviceName,
                         const QString& workspaceId,
@@ -62,6 +65,7 @@ private:
     std::unique_ptr<network::SyncManager> sync_manager_;
     bool configured_ = false;
     QString workspace_id_;
+    QVariantList discovered_peers_;
 };
 
 } // namespace zinc::ui
