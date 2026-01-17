@@ -9,6 +9,11 @@ Item {
     property bool collapsed: false
     property bool showNewPageButton: true
     property bool showExpandArrowsAlways: false
+    property bool actionsAlwaysVisible: false
+    property bool activateOnSingleTap: true
+    property int actionButtonSize: 20
+    property string selectedPageId: ""
+    property bool enableContextMenu: true
     
     signal pageSelected(string pageId, string title)
     signal pagesChanged()
@@ -77,6 +82,7 @@ Item {
         savePagesToStorage()
         pagesChanged()
         
+        root.selectedPageId = id
         pageSelected(id, "Untitled")
         return id
     }
@@ -214,11 +220,30 @@ Item {
         }
         return neededDepth < 0
     }
+
+    function handleRowTap(pageId, title) {
+        if (root.activateOnSingleTap || root.selectedPageId === pageId) {
+            root.selectedPageId = pageId
+            root.pageSelected(pageId, title)
+            return
+        }
+        root.selectedPageId = pageId
+    }
+
+    function openContextMenu(pageId, title) {
+        if (!root.enableContextMenu) return
+        const menu = pageContextMenuLoader.item
+        if (!menu) return
+        menu.targetPageId = pageId
+        menu.targetPageTitle = title
+        menu.popup()
+    }
     
     function ensureInitialPage() {
         // Select first page (pages are already loaded by Component.onCompleted)
         if (pageModel.count > 0) {
             let first = pageModel.get(0)
+            root.selectedPageId = first.pageId
             pageSelected(first.pageId, first.title)
         }
     }
@@ -295,11 +320,16 @@ Item {
         
         delegate: Rectangle {
             id: delegateItem
+            objectName: "pageTreeRow_" + index
             width: pageList.width
             height: rowVisible(index) ? (collapsed ? 32 : 28) : 0
             visible: rowVisible(index)
             radius: ThemeManager.radiusSmall
-            color: delegateMouseArea.containsMouse ? ThemeManager.surfaceHover : "transparent"
+            readonly property bool selected: root.selectedPageId === model.pageId
+            readonly property string pageId: model.pageId
+            color: selected
+                ? ThemeManager.surfaceActive
+                : (delegateMouseArea.containsMouse || delegateMouseArea.pressed ? ThemeManager.surfaceHover : "transparent")
             
             // Background MouseArea for hover and page selection (z = 0)
             MouseArea {
@@ -311,7 +341,7 @@ Item {
                 
                 onClicked: function(mouse) {
                     if (mouse.button === Qt.LeftButton) {
-                        root.pageSelected(model.pageId, model.title)
+                        root.handleRowTap(model.pageId, model.title)
                     }
                 }
             }
@@ -376,13 +406,15 @@ Item {
                 // Actions (appear on hover)
                 RowLayout {
                     spacing: 2
-                    visible: delegateMouseArea.containsMouse && !collapsed
+                    visible: (root.actionsAlwaysVisible || delegateMouseArea.containsMouse) && !collapsed
                     
                     Rectangle {
-                        width: 20
-                        height: 20
+                        id: addChildButton
+                        objectName: "pageTreeAddChildButton_" + index
+                        width: root.actionButtonSize
+                        height: root.actionButtonSize
                         radius: ThemeManager.radiusSmall
-                        color: addChildMouse.containsMouse ? ThemeManager.surfaceActive : "transparent"
+                        color: addChildMouse.containsMouse || addChildMouse.pressed ? ThemeManager.surfaceActive : "transparent"
                         
                         Text {
                             anchors.centerIn: parent
@@ -396,6 +428,9 @@ Item {
                             anchors.fill: parent
                             hoverEnabled: true
                             cursorShape: Qt.PointingHandCursor
+                            acceptedButtons: Qt.LeftButton
+                            preventStealing: true
+                            onPressed: function(mouse) { mouse.accepted = true }
                             onClicked: function(mouse) {
                                 root.createPage(model.pageId)
                                 mouse.accepted = true
@@ -404,10 +439,12 @@ Item {
                     }
                     
                     Rectangle {
-                        width: 20
-                        height: 20
+                        id: menuButton
+                        objectName: "pageTreeMenuButton_" + index
+                        width: root.actionButtonSize
+                        height: root.actionButtonSize
                         radius: ThemeManager.radiusSmall
-                        color: menuMouse.containsMouse ? ThemeManager.surfaceActive : "transparent"
+                        color: menuMouse.containsMouse || menuMouse.pressed ? ThemeManager.surfaceActive : "transparent"
                         
                         Text {
                             anchors.centerIn: parent
@@ -421,10 +458,11 @@ Item {
                             anchors.fill: parent
                             hoverEnabled: true
                             cursorShape: Qt.PointingHandCursor
+                            acceptedButtons: Qt.LeftButton
+                            preventStealing: true
+                            onPressed: function(mouse) { mouse.accepted = true }
                             onClicked: function(mouse) {
-                                pageContextMenu.targetPageId = model.pageId
-                                pageContextMenu.targetPageTitle = model.title
-                                pageContextMenu.popup()
+                                root.openContextMenu(model.pageId, model.title)
                                 mouse.accepted = true
                             }
                         }
@@ -435,36 +473,41 @@ Item {
     }
     
     // Context menu for page actions
-    Menu {
-        id: pageContextMenu
-        property string targetPageId: ""
-        property string targetPageTitle: ""
-        
-        MenuItem {
-            text: "Add sub-page"
-            onTriggered: root.createPage(pageContextMenu.targetPageId)
-        }
-        
-        MenuSeparator {}
-        
-        MenuItem {
-            text: "Delete"
-            onTriggered: {
-                if (pageModel.count > 1) {
-                    root.deletePage(pageContextMenu.targetPageId)
+    Loader {
+        id: pageContextMenuLoader
+        active: root.enableContextMenu
+
+        sourceComponent: Menu {
+            id: pageContextMenu
+            property string targetPageId: ""
+            property string targetPageTitle: ""
+
+            MenuItem {
+                text: "Add sub-page"
+                onTriggered: root.createPage(pageContextMenu.targetPageId)
+            }
+
+            MenuSeparator {}
+
+            MenuItem {
+                text: "Delete"
+                onTriggered: {
+                    if (pageModel.count > 1) {
+                        root.deletePage(pageContextMenu.targetPageId)
+                    }
                 }
             }
-        }
-        
-        MenuSeparator {}
-        
-        MenuItem {
-            text: "Reset all pages to defaults"
-            onTriggered: {
-                root.createDefaultPages()
-                if (pageModel.count > 0) {
-                    let first = pageModel.get(0)
-                    root.pageSelected(first.pageId, first.title)
+
+            MenuSeparator {}
+
+            MenuItem {
+                text: "Reset all pages to defaults"
+                onTriggered: {
+                    root.createDefaultPages()
+                    if (pageModel.count > 0) {
+                        let first = pageModel.get(0)
+                        root.pageSelected(first.pageId, first.title)
+                    }
                 }
             }
         }

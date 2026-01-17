@@ -217,6 +217,9 @@ ApplicationWindow {
                     Layout.fillHeight: true
                     showNewPageButton: false
                     showExpandArrowsAlways: true
+                    actionsAlwaysVisible: true
+                    actionButtonSize: 44
+                    activateOnSingleTap: false
 
                     onPageSelected: function(pageId, title) {
                         root.currentPage = { id: pageId, title: title }

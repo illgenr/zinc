@@ -18,6 +18,12 @@
 namespace zinc::ui {
 
 void registerQmlTypes() {
+    static bool registered = false;
+    if (registered) {
+        return;
+    }
+    registered = true;
+
     // Data Store singleton (registered under "zinc" module to match QML imports)
     qmlRegisterSingletonType<DataStore>("zinc", 1, 0, "DataStore", DataStore::create);
     qmlRegisterSingletonType<Clipboard>("zinc", 1, 0, "Clipboard", Clipboard::create);
