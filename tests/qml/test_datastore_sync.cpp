@@ -44,6 +44,17 @@ QString titleForPage(zinc::ui::DataStore& store, const QString& pageId) {
     return {};
 }
 
+QString updatedAtForPage(zinc::ui::DataStore& store, const QString& pageId) {
+    const auto pages = store.getPagesForSync();
+    for (const auto& entry : pages) {
+        const auto page = entry.toMap();
+        if (page.value("pageId").toString() == pageId) {
+            return page.value("updatedAt").toString();
+        }
+    }
+    return {};
+}
+
 bool deletedPagePresent(zinc::ui::DataStore& store, const QString& pageId) {
     const auto deleted = store.getDeletedPagesForSync();
     for (const auto& entry : deleted) {
@@ -56,6 +67,30 @@ bool deletedPagePresent(zinc::ui::DataStore& store, const QString& pageId) {
 }
 
 } // namespace
+
+TEST_CASE("DataStore: seedDefaultPages uses old timestamps", "[qml][datastore]") {
+    zinc::ui::DataStore store;
+    REQUIRE(store.initialize());
+    REQUIRE(store.resetDatabase());
+
+    REQUIRE(store.seedDefaultPages());
+
+    const auto seedTs = QStringLiteral("1900-01-01 00:00:00.000");
+    REQUIRE(titleForPage(store, "1") == QStringLiteral("Getting Started"));
+    REQUIRE(titleForPage(store, "2") == QStringLiteral("Projects"));
+    REQUIRE(titleForPage(store, "3") == QStringLiteral("Work Project"));
+    REQUIRE(titleForPage(store, "4") == QStringLiteral("Personal"));
+
+    REQUIRE(updatedAtForPage(store, "1") == seedTs);
+    REQUIRE(updatedAtForPage(store, "2") == seedTs);
+    REQUIRE(updatedAtForPage(store, "3") == seedTs);
+    REQUIRE(updatedAtForPage(store, "4") == seedTs);
+
+    QVariantList incoming;
+    incoming.append(makePage("1", QStringLiteral("Getting Started"), QStringLiteral("2026-01-01 00:00:00.000"), QStringLiteral("Hello")));
+    store.applyPageUpdates(incoming);
+    REQUIRE(store.getPageContentMarkdown(QStringLiteral("1")) == QStringLiteral("Hello"));
+}
 
 TEST_CASE("DataStore: saveAllPages coerces null title to Untitled", "[qml][datastore]") {
     zinc::ui::DataStore store;

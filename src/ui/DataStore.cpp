@@ -26,6 +26,7 @@ namespace {
 constexpr const char* kSettingsDeletedPagesRetention = "sync/deleted_pages_retention";
 constexpr int kDefaultDeletedPagesRetention = 100;
 constexpr int kMaxDeletedPagesRetention = 10000;
+constexpr auto kDefaultPagesSeedTimestamp = "1900-01-01 00:00:00.000";
 
 QString now_timestamp_utc() {
     return QDateTime::currentDateTimeUtc().toString("yyyy-MM-dd HH:mm:ss.zzz");
@@ -1597,6 +1598,58 @@ void DataStore::clearPairedDevices() {
         return;
     }
     emit pairedDevicesChanged();
+}
+
+bool DataStore::seedDefaultPages() {
+    if (!m_ready) return false;
+
+    struct DefaultPage {
+        const char* id;
+        const char* title;
+        const char* parent;
+        int depth;
+        int sortOrder;
+    };
+
+    static constexpr DefaultPage defaults[] = {
+        {"1", "Getting Started", "", 0, 0},
+        {"2", "Projects", "", 0, 1},
+        {"3", "Work Project", "2", 1, 2},
+        {"4", "Personal", "", 0, 3},
+    };
+
+    bool insertedAny = false;
+    m_db.transaction();
+
+    QSqlQuery insert(m_db);
+    insert.prepare(R"SQL(
+        INSERT INTO pages (id, title, parent_id, content_markdown, depth, sort_order, created_at, updated_at)
+        VALUES (?, ?, ?, '', ?, ?, ?, ?)
+        ON CONFLICT(id) DO NOTHING;
+    )SQL");
+
+    const auto seedTs = QString::fromLatin1(kDefaultPagesSeedTimestamp);
+    for (const auto& page : defaults) {
+        insert.bindValue(0, QString::fromLatin1(page.id));
+        insert.bindValue(1, QString::fromLatin1(page.title));
+        insert.bindValue(2, QString::fromLatin1(page.parent));
+        insert.bindValue(3, page.depth);
+        insert.bindValue(4, page.sortOrder);
+        insert.bindValue(5, seedTs);
+        insert.bindValue(6, seedTs);
+        if (!insert.exec()) {
+            qWarning() << "DataStore: seedDefaultPages failed:" << insert.lastError().text();
+        } else if (insert.numRowsAffected() > 0) {
+            insertedAny = true;
+        }
+        insert.finish();
+    }
+
+    m_db.commit();
+    if (insertedAny) {
+        emit pagesChanged();
+    }
+    return insertedAny;
 }
 
 QString DataStore::databasePath() const {

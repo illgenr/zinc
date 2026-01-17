@@ -224,6 +224,11 @@ Item {
     }
     
     function createDefaultPages() {
+        if (DataStore) {
+            DataStore.seedDefaultPages()
+            loadPagesFromStorage()
+            return
+        }
         pageModel.clear()
         pageModel.append({ pageId: "1", title: "Getting Started", parentId: "", expanded: true, depth: 0 })
         pageModel.append({ pageId: "2", title: "Projects", parentId: "", expanded: true, depth: 0 })

@@ -74,10 +74,14 @@ public:
                                       const QString& deviceName,
                                       const QString& workspaceId);
     Q_INVOKABLE void updatePairedDeviceEndpoint(const QString& deviceId,
-                                                const QString& host,
-                                                int port);
+                                               const QString& host,
+                                               int port);
     Q_INVOKABLE void removePairedDevice(const QString& deviceId);
     Q_INVOKABLE void clearPairedDevices();
+
+    // Seed the initial "Getting Started" style pages using a sentinel old timestamp so
+    // they never win sync conflicts against real user edits from other clients.
+    Q_INVOKABLE bool seedDefaultPages();
     
     // Initialize database
     Q_INVOKABLE bool initialize();
