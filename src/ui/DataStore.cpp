@@ -24,12 +24,19 @@ namespace zinc::ui {
 namespace {
 
 constexpr const char* kSettingsDeletedPagesRetention = "sync/deleted_pages_retention";
+constexpr const char* kSettingsStartupMode = "ui/startup_mode";
+constexpr const char* kSettingsStartupFixedPageId = "ui/startup_fixed_page_id";
+constexpr const char* kSettingsLastViewedPageId = "ui/last_viewed_page_id";
 constexpr int kDefaultDeletedPagesRetention = 100;
 constexpr int kMaxDeletedPagesRetention = 10000;
 constexpr auto kDefaultPagesSeedTimestamp = "1900-01-01 00:00:00.000";
 
 QString now_timestamp_utc() {
     return QDateTime::currentDateTimeUtc().toString("yyyy-MM-dd HH:mm:ss.zzz");
+}
+
+int normalize_startup_mode(int mode) {
+    return (mode == 1) ? 1 : 0;
 }
 
 int normalize_retention_limit(int limit) {
@@ -43,6 +50,65 @@ int deleted_pages_retention_limit() {
     return normalize_retention_limit(
         settings.value(QString::fromLatin1(kSettingsDeletedPagesRetention),
                        kDefaultDeletedPagesRetention).toInt());
+}
+
+int startup_page_mode() {
+    QSettings settings;
+    return normalize_startup_mode(settings.value(QString::fromLatin1(kSettingsStartupMode), 0).toInt());
+}
+
+QString startup_fixed_page_id() {
+    QSettings settings;
+    return settings.value(QString::fromLatin1(kSettingsStartupFixedPageId), QString{}).toString();
+}
+
+QString last_viewed_page_id() {
+    QSettings settings;
+    return settings.value(QString::fromLatin1(kSettingsLastViewedPageId), QString{}).toString();
+}
+
+QString page_id_from_variant_map(const QVariantMap& page) {
+    const auto pageId = page.value(QStringLiteral("pageId")).toString();
+    if (!pageId.isEmpty()) return pageId;
+    return page.value(QStringLiteral("id")).toString();
+}
+
+QString first_page_id(const QVariantList& pages) {
+    if (pages.isEmpty()) return {};
+    const auto page = pages.first().toMap();
+    return page_id_from_variant_map(page);
+}
+
+QSet<QString> page_ids_set(const QVariantList& pages) {
+    QSet<QString> ids;
+    ids.reserve(pages.size());
+    for (const auto& v : pages) {
+        const auto page = v.toMap();
+        const auto id = page_id_from_variant_map(page);
+        if (!id.isEmpty()) {
+            ids.insert(id);
+        }
+    }
+    return ids;
+}
+
+QString resolve_startup_page_id(int mode,
+                               const QString& lastViewedId,
+                               const QString& fixedId,
+                               const QVariantList& pages) {
+    const auto ids = page_ids_set(pages);
+    const auto has = [&ids](const QString& id) { return !id.isEmpty() && ids.contains(id); };
+
+    if (pages.isEmpty()) return {};
+
+    if (mode == 1) {
+        if (has(fixedId)) return fixedId;
+        if (has(lastViewedId)) return lastViewedId;
+        return first_page_id(pages);
+    }
+
+    if (has(lastViewedId)) return lastViewedId;
+    return first_page_id(pages);
 }
 
 void prune_deleted_pages(QSqlDatabase& db, int keepLimit) {
@@ -1245,6 +1311,40 @@ void DataStore::setDeletedPagesRetentionLimit(int limit) {
     if (m_ready) {
         prune_deleted_pages(m_db, deleted_pages_retention_limit());
     }
+}
+
+int DataStore::startupPageMode() const {
+    return startup_page_mode();
+}
+
+void DataStore::setStartupPageMode(int mode) {
+    QSettings settings;
+    settings.setValue(QString::fromLatin1(kSettingsStartupMode), normalize_startup_mode(mode));
+}
+
+QString DataStore::startupFixedPageId() const {
+    return startup_fixed_page_id();
+}
+
+void DataStore::setStartupFixedPageId(const QString& pageId) {
+    QSettings settings;
+    settings.setValue(QString::fromLatin1(kSettingsStartupFixedPageId), pageId);
+}
+
+QString DataStore::lastViewedPageId() const {
+    return last_viewed_page_id();
+}
+
+void DataStore::setLastViewedPageId(const QString& pageId) {
+    QSettings settings;
+    settings.setValue(QString::fromLatin1(kSettingsLastViewedPageId), pageId);
+}
+
+QString DataStore::resolveStartupPageId(const QVariantList& pages) const {
+    return resolve_startup_page_id(startup_page_mode(),
+                                  last_viewed_page_id(),
+                                  startup_fixed_page_id(),
+                                  pages);
 }
 
 QVariantList DataStore::getBlocksForSync() {

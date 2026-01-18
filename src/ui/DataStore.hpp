@@ -44,6 +44,17 @@ public:
 
     Q_INVOKABLE int deletedPagesRetentionLimit() const;
     Q_INVOKABLE void setDeletedPagesRetentionLimit(int limit);
+
+    // UI startup behavior:
+    // - mode=0: open last viewed page (default)
+    // - mode=1: always open fixed page id (if available)
+    Q_INVOKABLE int startupPageMode() const;
+    Q_INVOKABLE void setStartupPageMode(int mode);
+    Q_INVOKABLE QString startupFixedPageId() const;
+    Q_INVOKABLE void setStartupFixedPageId(const QString& pageId);
+    Q_INVOKABLE QString lastViewedPageId() const;
+    Q_INVOKABLE void setLastViewedPageId(const QString& pageId);
+    Q_INVOKABLE QString resolveStartupPageId(const QVariantList& pages) const;
     
     // Block operations  
     Q_INVOKABLE QVariantList getBlocksForPage(const QString& pageId);

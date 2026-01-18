@@ -449,6 +449,44 @@ Dialog {
     
     // General Settings
     component GeneralSettings: SettingsPage {
+        property ListModel startupPagesModel: ListModel {}
+
+        function refreshStartupPages() {
+            startupPagesModel.clear()
+            const pages = DataStore ? DataStore.getAllPages() : []
+            for (let i = 0; i < pages.length; i++) {
+                const p = pages[i] || {}
+                const depth = p.depth || 0
+                let prefix = ""
+                for (let d = 0; d < depth; d++) prefix += "  "
+                if (p.pageId) {
+                    startupPagesModel.append({
+                        pageId: p.pageId,
+                        title: prefix + (p.title || "Untitled")
+                    })
+                }
+            }
+
+            const fixedId = DataStore ? DataStore.startupFixedPageId() : ""
+            if (!fixedId || fixedId === "") return
+            if (!startupPageCombo) return
+            for (let i = 0; i < startupPagesModel.count; i++) {
+                if (startupPagesModel.get(i).pageId === fixedId) {
+                    startupPageCombo.currentIndex = i
+                    break
+                }
+            }
+        }
+
+        Component.onCompleted: refreshStartupPages()
+
+        property Connections _dataStoreConnections: Connections {
+            target: DataStore
+            function onPagesChanged() {
+                refreshStartupPages()
+            }
+        }
+
         SettingsSection {
             title: "Appearance"
             
@@ -505,6 +543,52 @@ Dialog {
                     }
                     
                     onCurrentIndexChanged: ThemeManager.setFontScale(currentIndex)
+                }
+            }
+        }
+
+        SettingsSection {
+            title: "Startup"
+
+            SettingsRow {
+                label: "Open on launch"
+                ComboBox {
+                    id: startupModeCombo
+                    width: parent.width
+                    model: ["Last viewed page", "Always open a page"]
+                    Component.onCompleted: {
+                        startupModeCombo.currentIndex = DataStore ? DataStore.startupPageMode() : 0
+                    }
+
+                    onActivated: {
+                        if (DataStore) DataStore.setStartupPageMode(currentIndex)
+                    }
+                }
+            }
+
+            SettingsRow {
+                visible: startupModeCombo.currentIndex === 1
+                label: "Page"
+                ComboBox {
+                    id: startupPageCombo
+                    width: parent.width
+                    model: startupPagesModel
+                    textRole: "title"
+                    valueRole: "pageId"
+
+                    Component.onCompleted: {
+                        const fixedId = DataStore ? DataStore.startupFixedPageId() : ""
+                        for (let i = 0; i < startupPagesModel.count; i++) {
+                            if (startupPagesModel.get(i).pageId === fixedId) {
+                                startupPageCombo.currentIndex = i
+                                break
+                            }
+                        }
+                    }
+
+                    onActivated: {
+                        if (DataStore) DataStore.setStartupFixedPageId(currentValue)
+                    }
                 }
             }
         }

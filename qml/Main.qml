@@ -20,6 +20,8 @@ ApplicationWindow {
     property var currentPage: null
     property bool sidebarCollapsed: false
     property var mobilePagesList: []  // Reactive list for mobile
+    property bool startupPageAppliedDesktop: false
+    property bool startupPageAppliedMobile: false
 
     property string pagesCursorAt: ""
     property string pagesCursorId: ""
@@ -222,8 +224,16 @@ ApplicationWindow {
                     activateOnSingleTap: false
 
                     onPageSelected: function(pageId, title) {
+                        if (DataStore) DataStore.setLastViewedPageId(pageId)
                         root.currentPage = { id: pageId, title: title }
                         mobileStack.push(mobileEditorComponent)
+                    }
+                }
+
+                Connections {
+                    target: mobilePageTree
+                    function onPagesChanged() {
+                        root.applyStartupPageMobile()
                     }
                 }
             }
@@ -507,6 +517,7 @@ ApplicationWindow {
                     visible: !sidebarCollapsed
                     
                     onPageSelected: function(pageId, title) {
+                        if (DataStore) DataStore.setLastViewedPageId(pageId)
                         root.currentPage = { id: pageId, title: title }
                         if (isMobile) {
                             mobileStack.push(mobileEditorComponent)
@@ -517,6 +528,13 @@ ApplicationWindow {
                     
                     onPagesChanged: {
                         root.mobilePagesList = pageTree.getAllPages()
+                    }
+                }
+
+                Connections {
+                    target: pageTree
+                    function onPagesChanged() {
+                        root.applyStartupPageDesktop()
                     }
                 }
                 
@@ -556,6 +574,7 @@ ApplicationWindow {
                     if (!targetPageId || targetPageId === "") return
                     var page = DataStore ? DataStore.getPage(targetPageId) : null
                     var title = page && page.title ? page.title : "Untitled"
+                    if (DataStore) DataStore.setLastViewedPageId(targetPageId)
                     root.currentPage = { id: targetPageId, title: title }
                     blockEditor.loadPage(targetPageId)
                 }
@@ -576,6 +595,7 @@ ApplicationWindow {
         id: searchDialog
         
         onResultSelected: function(pageId, blockId) {
+            if (DataStore) DataStore.setLastViewedPageId(pageId)
             if (isMobile) {
                 root.currentPage = { id: pageId, title: "Note" }
                 mobileStack.push(mobileEditorComponent)
@@ -634,11 +654,41 @@ ApplicationWindow {
             root.mobilePagesList = DataStore.getAllPages()
         }
         // Pages are loaded by PageTree's Component.onCompleted
-        // Just need to select the first page for desktop
         if (!isMobile) {
-            pageTree.ensureInitialPage()
+            Qt.callLater(root.applyStartupPageDesktop)
         }
         // Mobile list is updated via pagesChanged signal
+        if (isMobile) {
+            Qt.callLater(root.applyStartupPageMobile)
+        }
+    }
+
+    function applyStartupPageDesktop() {
+        if (startupPageAppliedDesktop || isMobile) return
+        const pages = pageTree ? pageTree.getAllPages() : []
+        if (!pages || pages.length === 0) return
+        startupPageAppliedDesktop = true
+        const startupId = DataStore ? DataStore.resolveStartupPageId(pages) : ""
+        if (pageTree) {
+            pageTree.ensureInitialPage(startupId)
+        }
+    }
+
+    function applyStartupPageMobile() {
+        if (startupPageAppliedMobile || !isMobile) return
+        if (!DataStore) return
+        const pages = DataStore.getAllPages()
+        if (!pages || pages.length === 0) return
+        const startupId = DataStore.resolveStartupPageId(pages)
+        if (!startupId || startupId === "") return
+        const page = DataStore.getPage(startupId)
+        const title = page && page.title ? page.title : "Note"
+        startupPageAppliedMobile = true
+        DataStore.setLastViewedPageId(startupId)
+        root.currentPage = { id: startupId, title: title }
+        if (mobileStack.depth === 1) {
+            mobileStack.push(mobileEditorComponent)
+        }
     }
 
     Connections {

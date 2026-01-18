@@ -21,6 +21,7 @@ This repository uses CMake + Ninja for native builds and CMake (Android toolchai
 ## Repository Layout Conventions
 
 - Native debug build output: `./build/build-debug/`
+- Native test build output: `./build-tests/`
 - Android build directory: `./build-android/`
 - Android Gradle output APK (expected): `./android-build/build/outputs/apk/debug/android-build-debug.apk`
 
@@ -39,8 +40,13 @@ Build
 ninja -C ./build/build-debug
 
 Test
-cmake --build build --target zinc_qml_tests
-ctest -R zinc_qml_tests --output-on-failure
+The default `./build/build-debug/` configure uses `-DZINC_BUILD_TESTS=OFF`, so tests are built in a separate build dir:
+
+```bash
+cmake -S . -B ./build-tests -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCMAKE_PREFIX_PATH=~/Qt/6.10.1/gcc_64/lib/cmake -DZINC_BUILD_TESTS=ON
+ninja -C ./build-tests zinc_qml_tests
+ctest --test-dir ./build-tests -R zinc_qml_tests --output-on-failure
+```
 
 Notes
 

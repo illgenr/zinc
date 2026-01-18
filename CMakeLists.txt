@@ -519,6 +519,7 @@ if(ZINC_BUILD_TESTS)
         tests/qml/test_markdown_blocks.cpp
         tests/qml/test_cmark.cpp
         tests/qml/test_sync_controller_settings.cpp
+        tests/qml/test_startup_page_settings.cpp
         tests/qml/test_pairing_dialog_qml.cpp
         tests/qml/test_markdown_editor_qml.cpp
         tests/qml/test_slash_menu_qml.cpp

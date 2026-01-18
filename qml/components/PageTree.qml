@@ -238,11 +238,27 @@ Item {
         menu.targetPageTitle = title
         menu.popup()
     }
+
+    function selectPage(pageId) {
+        if (!pageId || pageId === "") return false
+        for (let i = 0; i < pageModel.count; i++) {
+            const page = pageModel.get(i)
+            if (page.pageId === pageId) {
+                root.selectedPageId = pageId
+                pageSelected(pageId, page.title)
+                return true
+            }
+        }
+        return false
+    }
     
-    function ensureInitialPage() {
-        // Select first page (pages are already loaded by Component.onCompleted)
+    function ensureInitialPage(preferredPageId) {
+        // Select preferred page when present, else first page.
+        if (preferredPageId && preferredPageId !== "" && selectPage(preferredPageId)) {
+            return
+        }
         if (pageModel.count > 0) {
-            let first = pageModel.get(0)
+            const first = pageModel.get(0)
             root.selectedPageId = first.pageId
             pageSelected(first.pageId, first.title)
         }
