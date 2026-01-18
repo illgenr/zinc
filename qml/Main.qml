@@ -110,6 +110,7 @@ ApplicationWindow {
             header: ToolBar {
                 background: Rectangle { 
                     color: ThemeManager.surface 
+                    height: 48
                     Rectangle {
                         anchors.bottom: parent.bottom
                         width: parent.width
@@ -167,59 +168,65 @@ ApplicationWindow {
                 anchors.fill: parent
                 spacing: 0
                 
+                RowLayout {                
+                    anchors.top: parent.top
+                    anchors.topMargin: 0
+                    height: 48                    
                 // Search bar
-                Rectangle {
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: 48
-                    Layout.margins: ThemeManager.spacingMedium
-                    radius: ThemeManager.radiusMedium
-                    color: ThemeManager.surfaceHover
-                    
-                    RowLayout {
-                        anchors.fill: parent
-                        anchors.margins: ThemeManager.spacingSmall
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 48
+                        Layout.preferredWidth: 96
+                        Layout.margins: ThemeManager.spacingMedium
+                        radius: ThemeManager.radiusMedium
+                        color: ThemeManager.surfaceHover
                         
-                        Text {
-                            text: "🔍"
-                            font.pixelSize: ThemeManager.fontSizeNormal
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.margins: ThemeManager.spacingSmall
+                            
+                            Text {
+                                text: "🔍"
+                                font.pixelSize: ThemeManager.fontSizeNormal
+                            }
+                            
+                            Text {
+                                Layout.fillWidth: true
+                                text: "Find"
+                                color: ThemeManager.textMuted
+                                font.pixelSize: ThemeManager.fontSizeNormal
+                            }
                         }
                         
-                        Text {
-                            Layout.fillWidth: true
-                            text: "Find"
-                            color: ThemeManager.textMuted
-                            font.pixelSize: ThemeManager.fontSizeNormal
+                        MouseArea {
+                            anchors.fill: parent
+                            onClicked: searchDialog.open()
                         }
                     }
-                    
-                    MouseArea {
-                        anchors.fill: parent
-                        onClicked: searchDialog.open()
-                    }
-                }
 
-                Button {
-                    Layout.fillWidth: true
-                    Layout.margins: ThemeManager.spacingMedium
-                    text: "+ New Page"
+                    Button {
+                        Layout.fillWidth: true
+                        Layout.margins: ThemeManager.spacingSmall
+                        text: "+ New Page"
 
-                    background: Rectangle {
-                        implicitHeight: 44
-                        radius: ThemeManager.radiusSmall
-                        color: parent.pressed ? ThemeManager.accentHover : ThemeManager.accent
-                    }
+                        background: Rectangle {
+                            implicitHeight: 44
+                            radius: ThemeManager.radiusSmall
+                            color: parent.pressed ? ThemeManager.accentHover : ThemeManager.accent
+                        }
 
-                    contentItem: Text {
-                        text: parent.text
-                        color: "white"
-                        font.pixelSize: ThemeManager.fontSizeNormal
-                        font.weight: Font.Medium
-                        horizontalAlignment: Text.AlignHCenter
-                        verticalAlignment: Text.AlignVCenter
-                    }
+                        contentItem: Text {
+                            text: parent.text
+                            color: "white"
+                            font.pixelSize: ThemeManager.fontSizeNormal
+                            font.weight: Font.Medium
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
 
-                    onClicked: {
-                        mobilePageTree.createPage("")
+                        onClicked: {
+                            mobilePageTree.createPage("")
+                        }
                     }
                 }
                 
