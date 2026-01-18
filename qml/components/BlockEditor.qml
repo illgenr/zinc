@@ -900,33 +900,27 @@ Item {
     }
 
     function openImageFileDialog() {
-        if (!imageFileDialogLoader.active) {
-            imageFileDialogLoader.active = true
-        }
-        Qt.callLater(function() {
-            if (imageFileDialogLoader.item) {
-                imageFileDialogLoader.item.open()
-            }
-        })
-    }
+        if (!imageFileDialog) {
+            imageFileDialog = Qt.createQmlObject(
+                "import QtQuick\\n" +
+                "import QtQuick.Dialogs\\n" +
+                "FileDialog {\\n" +
+                "  title: \\\"Select an image\\\"\\n" +
+                "  nameFilters: [\\\"Images (*.png *.jpg *.jpeg *.gif *.webp *.bmp)\\\", \\\"All files (*)\\\"]\\n" +
+                "}",
+                root,
+                "imageFileDialog")
 
-    Loader {
-        id: imageFileDialogLoader
-        active: false
-        sourceComponent: ImageFileDialog {
-            title: "Select an image"
-            nameFilters: ["Images (*.png *.jpg *.jpeg *.gif *.webp *.bmp)", "All files (*)"]
-
-            onAccepted: {
-                const dataUrl = Clipboard.importImageFile(selectedFile)
+            imageFileDialog.accepted.connect(function() {
+                const dataUrl = Clipboard.importImageFile(imageFileDialog.selectedFile)
                 if (!dataUrl || dataUrl.length === 0) {
-                    console.log("BlockEditor: Failed to import image:", selectedFile)
+                    console.log("BlockEditor: Failed to import image:", imageFileDialog.selectedFile)
                     pendingImageUploadBlockIndex = -1
                     return
                 }
                 const attachmentId = DataStore.saveAttachmentFromDataUrl(dataUrl)
                 if (!attachmentId || attachmentId.length === 0) {
-                    console.log("BlockEditor: Failed to store image attachment:", selectedFile)
+                    console.log("BlockEditor: Failed to store image attachment:", imageFileDialog.selectedFile)
                     pendingImageUploadBlockIndex = -1
                     return
                 }
@@ -938,11 +932,17 @@ Item {
                 blockModel.setProperty(idx, "blockType", "image")
                 blockModel.setProperty(idx, "content", JSON.stringify({ src: "image://attachments/" + attachmentId, w: 0, h: 0 }))
                 scheduleAutosave()
-            }
+            })
 
-            onRejected: pendingImageUploadBlockIndex = -1
+            imageFileDialog.rejected.connect(function() {
+                pendingImageUploadBlockIndex = -1
+            })
         }
+
+        imageFileDialog.open()
     }
+
+    property var imageFileDialog: null
     
     property int pendingLinkBlockIndex: -1
     
@@ -978,15 +978,41 @@ Item {
     }
     
     // Focus a specific block by index
-    function focusBlock(idx) {
-        if (idx >= 0 && idx < blockRepeater.count) {
-            let item = blockRepeater.itemAt(idx)
-            if (!item) return
-            const target = item.textControl ? item.textControl : item
-            target.forceActiveFocus()
-            if ("cursorPosition" in target) {
-                target.cursorPosition = (target.text || "").length
-            }
+    function focusBlockAt(idx, cursorPos) {
+        if (idx < 0 || idx >= blockRepeater.count) return
+        const item = blockRepeater.itemAt(idx)
+        if (!item) return
+        const target = item.textControl ? item.textControl : item
+        target.forceActiveFocus()
+        if ("cursorPosition" in target) {
+            const text = target.text || ""
+            const pos = (cursorPos === undefined || cursorPos < 0) ? text.length : Math.min(cursorPos, text.length)
+            target.cursorPosition = pos
         }
+    }
+
+    function adjacentBlockNavigation(blockIndex, key, cursorPos, textLen) {
+        const count = blockModel.count
+        const pos = cursorPos === undefined ? -1 : cursorPos
+        const len = textLen === undefined ? 0 : textLen
+        if (key === Qt.Key_Up && blockIndex > 0) {
+            return { handled: true, targetIndex: blockIndex - 1, targetPos: -1 }
+        }
+        if (key === Qt.Key_Down && blockIndex < (count - 1)) {
+            return { handled: true, targetIndex: blockIndex + 1, targetPos: 0 }
+        }
+        return { handled: false, targetIndex: -1, targetPos: 0 }
+    }
+
+    function focusBlockAtStart(idx) {
+        focusBlockAt(idx, 0)
+    }
+
+    function focusBlockAtEnd(idx) {
+        focusBlockAt(idx, -1)
+    }
+
+    function focusBlock(idx) {
+        focusBlockAtEnd(idx)
     }
 }

@@ -319,7 +319,6 @@ set(ZINC_QML_FILES
     qml/Main.qml
     qml/components/MarkdownEditor.qml
     qml/components/BlockEditor.qml
-    qml/components/ImageFileDialog.qml
     qml/components/Block.qml
     qml/components/blocks/ParagraphBlock.qml
     qml/components/blocks/HeadingBlock.qml
@@ -359,6 +358,7 @@ set_source_files_properties(qml/theme/ThemeManager.qml PROPERTIES QT_QML_SINGLET
 qt_add_qml_module(appzinc
     URI zinc
     VERSION 1.0
+    OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/appzinc_qml
     QML_FILES
         ${ZINC_QML_FILES}
     RESOURCES
@@ -375,6 +375,13 @@ set_target_properties(appzinc PROPERTIES
     MACOSX_BUNDLE TRUE
     WIN32_EXECUTABLE TRUE
 )
+
+if(NOT ANDROID)
+    # Keep CMake target name `appzinc`, but name the desktop binary `zinc`.
+    set_target_properties(appzinc PROPERTIES OUTPUT_NAME zinc)
+    # Avoid clashing with generated QML directories like `${CMAKE_CURRENT_BINARY_DIR}/zinc/`.
+    set_target_properties(appzinc PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/bin)
+endif()
 
 if(ANDROID)
     set_property(TARGET appzinc PROPERTY QT_ANDROID_PACKAGE_SOURCE_DIR "${CMAKE_SOURCE_DIR}/android")

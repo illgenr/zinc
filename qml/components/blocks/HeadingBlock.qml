@@ -110,6 +110,12 @@ Item {
                 if (root.editor.pasteFromClipboard(root.blockIndex)) {
                     event.accepted = true
                 }
+            } else if (event.modifiers === 0 && root.editor && (event.key === Qt.Key_Up || event.key === Qt.Key_Down)) {
+                const nav = root.editor.adjacentBlockNavigation(root.blockIndex, event.key, cursorPosition, text.length)
+                if (nav && nav.handled) {
+                    event.accepted = true
+                    root.editor.focusBlockAt(nav.targetIndex, nav.targetPos)
+                }
             } else if (event.key === Qt.Key_Backspace && text.length === 0) {
                 event.accepted = true
                 root.backspaceOnEmpty()

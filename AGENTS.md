@@ -39,6 +39,9 @@ cmake -S . -B ./build/build-debug -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCMAKE_PREF
 Build
 ninja -C ./build/build-debug
 
+Run
+`./build/build-debug/bin/zinc`
+
 Test
 The default `./build/build-debug/` configure uses `-DZINC_BUILD_TESTS=OFF`, so tests are built in a separate build dir:
 
