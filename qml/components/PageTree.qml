@@ -17,6 +17,76 @@ Item {
     
     signal pageSelected(string pageId, string title)
     signal pagesChanged()
+    signal pageActivatedByKeyboard(string pageId, string title)
+
+    function indexOfPageId(pageId) {
+        if (!pageId || pageId === "") return -1
+        for (let i = 0; i < pageModel.count; i++) {
+            if (pageModel.get(i).pageId === pageId) return i
+        }
+        return -1
+    }
+
+    function nextVisibleIndex(fromIndex) {
+        for (let i = fromIndex + 1; i < pageModel.count; i++) {
+            if (rowVisible(i)) return i
+        }
+        return -1
+    }
+
+    function previousVisibleIndex(fromIndex) {
+        for (let i = fromIndex - 1; i >= 0; i--) {
+            if (rowVisible(i)) return i
+        }
+        return -1
+    }
+
+    function focusTree() {
+        syncCurrentIndexToSelection()
+        pageList.focus = true
+        pageList.forceActiveFocus()
+    }
+
+    function syncCurrentIndexToSelection() {
+        const idx = indexOfPageId(root.selectedPageId)
+        if (idx >= 0) {
+            pageList.currentIndex = idx
+            return
+        }
+        const first = nextVisibleIndex(-1)
+        if (first >= 0) pageList.currentIndex = first
+    }
+
+    function selectIndex(idx) {
+        if (idx < 0 || idx >= pageModel.count) return false
+        if (!rowVisible(idx)) return false
+        pageList.currentIndex = idx
+        const page = pageModel.get(idx)
+        if (!page) return false
+        root.handleRowTap(page.pageId, page.title)
+        return true
+    }
+
+    function firstChildIndex(parentIndex) {
+        if (parentIndex < 0 || parentIndex >= pageModel.count) return -1
+        const parent = pageModel.get(parentIndex)
+        if (!parent) return -1
+        const wantDepth = parent.depth + 1
+        for (let i = parentIndex + 1; i < pageModel.count; i++) {
+            const row = pageModel.get(i)
+            if (!row) continue
+            if (row.depth <= parent.depth) break
+            if (row.depth === wantDepth) return i
+        }
+        return -1
+    }
+
+    function parentIndex(childIndex) {
+        if (childIndex < 0 || childIndex >= pageModel.count) return -1
+        const row = pageModel.get(childIndex)
+        if (!row || !row.parentId || row.parentId === "") return -1
+        return indexOfPageId(row.parentId)
+    }
     
     // Auto-load pages on component creation
     Component.onCompleted: {
@@ -327,14 +397,78 @@ Item {
         
         ListView {
             id: pageList
-            
+            objectName: root.objectName + "_list"
+
             Layout.fillWidth: true
             Layout.fillHeight: true
             model: pageModel
             clip: true
             spacing: 2
-        
-        delegate: Rectangle {
+
+            Keys.onPressed: function(event) {
+                if (event.key === Qt.Key_Down) {
+                    event.accepted = true
+                    const from = pageList.currentIndex >= 0 ? pageList.currentIndex : indexOfPageId(root.selectedPageId)
+                    if (from < 0) {
+                        selectIndex(nextVisibleIndex(-1))
+                        return
+                    }
+                    selectIndex(nextVisibleIndex(from))
+                    return
+                }
+                if (event.key === Qt.Key_Up) {
+                    event.accepted = true
+                    const from = pageList.currentIndex >= 0 ? pageList.currentIndex : indexOfPageId(root.selectedPageId)
+                    if (from < 0) {
+                        selectIndex(previousVisibleIndex(pageModel.count))
+                        return
+                    }
+                    selectIndex(previousVisibleIndex(from))
+                    return
+                }
+                if (event.key === Qt.Key_Right) {
+                    event.accepted = true
+                    const idx = pageList.currentIndex >= 0 ? pageList.currentIndex : indexOfPageId(root.selectedPageId)
+                    if (idx < 0) return
+                    const row = pageModel.get(idx)
+                    if (!row) return
+                    const hasKids = root.hasChildren(row.pageId)
+                    if (!hasKids) return
+                    if (!row.expanded) {
+                        pageModel.setProperty(idx, "expanded", true)
+                        return
+                    }
+                    selectIndex(firstChildIndex(idx))
+                    return
+                }
+                if (event.key === Qt.Key_Left) {
+                    event.accepted = true
+                    const idx = pageList.currentIndex >= 0 ? pageList.currentIndex : indexOfPageId(root.selectedPageId)
+                    if (idx < 0) return
+                    const row = pageModel.get(idx)
+                    if (!row) return
+                    const hasKids = root.hasChildren(row.pageId)
+                    if (hasKids && row.expanded) {
+                        pageModel.setProperty(idx, "expanded", false)
+                        return
+                    }
+                    selectIndex(parentIndex(idx))
+                    return
+                }
+                if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                    event.accepted = true
+                    const idx = pageList.currentIndex >= 0 ? pageList.currentIndex : indexOfPageId(root.selectedPageId)
+                    if (idx < 0 || idx >= pageModel.count) return
+                    if (!rowVisible(idx)) return
+                    const page = pageModel.get(idx)
+                    if (!page) return
+                    root.handleRowTap(page.pageId, page.title)
+                    root.pageActivatedByKeyboard(page.pageId, page.title)
+                    return
+                }
+            }
+
+            delegate: Rectangle {
             id: delegateItem
             objectName: "pageTreeRow_" + index
             width: pageList.width

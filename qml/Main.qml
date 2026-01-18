@@ -63,6 +63,16 @@ ApplicationWindow {
         onActivated: sidebarCollapsed = !sidebarCollapsed
     }
 
+    Shortcut {
+        enabled: !isMobile
+        context: Qt.ApplicationShortcut
+        sequence: "Ctrl+E"
+        onActivated: {
+            sidebarCollapsed = false
+            pageTree.focusTree()
+        }
+    }
+
     ShortcutsDialog {
         id: shortcutsDialog
     }
@@ -216,6 +226,7 @@ ApplicationWindow {
                 // Notes list
                 PageTree {
                     id: mobilePageTree
+                    objectName: "mobilePageTree"
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     showNewPageButton: false
@@ -519,9 +530,14 @@ ApplicationWindow {
                 // Page tree
                 PageTree {
                     id: pageTree
+                    objectName: "pageTree"
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     visible: !sidebarCollapsed
+
+                    onPageActivatedByKeyboard: function(pageId, title) {
+                        Qt.callLater(() => blockEditor.focusContent())
+                    }
                     
                     onPageSelected: function(pageId, title) {
                         if (DataStore) DataStore.setLastViewedPageId(pageId)

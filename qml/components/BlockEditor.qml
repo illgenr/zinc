@@ -3,7 +3,7 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import zinc
 
-Item {
+FocusScope {
     id: root
     
     // UUID generator (Qt.uuidCreate requires Qt 6.4+)
@@ -1043,5 +1043,11 @@ Item {
 
     function focusBlock(idx) {
         focusBlockAtEnd(idx)
+    }
+
+    function focusContent() {
+        if (blockModel.count <= 0) return
+        focusTimer.targetIndex = 0
+        focusTimer.start()
     }
 }

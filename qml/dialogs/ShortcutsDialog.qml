@@ -19,6 +19,7 @@ Dialog {
         { key: "Ctrl+N", desc: "New page" },
         { key: "Ctrl+F", desc: "Find" },
         { key: "Ctrl+\\", desc: "Toggle sidebar" },
+        { key: "Ctrl+E", desc: "Focus page tree" },
         { key: "Ctrl+Shift+?", desc: "Show this screen" },
         { key: "Shift+Enter", desc: "Insert newline in text blocks" },
         { key: "Alt+↑ / Alt+↓", desc: "Move block up/down" }
