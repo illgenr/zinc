@@ -2,6 +2,7 @@
 #include <QDebug>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QPointer>
 #include <algorithm>
 
 namespace zinc::network {
@@ -235,9 +236,16 @@ void SyncManager::broadcastChange(const std::string& doc_id,
     payload.insert(payload.end(), doc_id.begin(), doc_id.end());
     payload.insert(payload.end(), change_bytes.begin(), change_bytes.end());
     
-    for (auto& [id, peer] : peers_) {
-        if (peer->connection && peer->connection->isConnected()) {
-            peer->connection->send(MessageType::ChangeNotify, payload);
+    std::vector<QPointer<Connection>> targets;
+    targets.reserve(peers_.size());
+    for (const auto& [id, peer] : peers_) {
+        if (peer && peer->connection && peer->connection->isConnected()) {
+            targets.push_back(peer->connection.get());
+        }
+    }
+    for (const auto& conn : targets) {
+        if (conn && conn->isConnected()) {
+            conn->send(MessageType::ChangeNotify, payload);
         }
     }
 }
@@ -577,9 +585,16 @@ void SyncManager::sendPageSnapshot(const std::vector<uint8_t>& payload) {
     if (sync_debug_enabled()) {
         qInfo() << "SYNC: sendPageSnapshot connectedPeers=" << connectedPeerCount();
     }
+    std::vector<QPointer<Connection>> targets;
+    targets.reserve(peers_.size());
     for (const auto& [id, peer] : peers_) {
-        if (peer->connection && peer->connection->isConnected()) {
-            peer->connection->send(MessageType::PagesSnapshot, payload);
+        if (peer && peer->connection && peer->connection->isConnected()) {
+            targets.push_back(peer->connection.get());
+        }
+    }
+    for (const auto& conn : targets) {
+        if (conn && conn->isConnected()) {
+            conn->send(MessageType::PagesSnapshot, payload);
         }
     }
 }
