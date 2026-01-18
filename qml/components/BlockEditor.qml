@@ -1,7 +1,6 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import QtQuick.Dialogs
 import zinc
 
 Item {
@@ -407,7 +406,7 @@ Item {
 
     function startImageUpload(atIndex) {
         pendingImageUploadBlockIndex = atIndex
-        imageFileDialog.open()
+        openImageFileDialog()
     }
 
     function deleteBlockAt(blockIndex) {
@@ -634,8 +633,9 @@ Item {
         id: blockRepeater
         model: blockModel
                 
-                delegate: Block {
+        delegate: Block {
             Layout.fillWidth: true
+            objectName: "blockDelegate_" + index
                     
             blockIndex: index
             editor: root
@@ -706,7 +706,7 @@ Item {
                     
                     onBlockBackspaceOnEmpty: {
                         if (index > 0) {
-                            blockModel.remove(index)
+                            root.deleteBlockAt(index)
                         }
                     }
                     
@@ -899,35 +899,49 @@ Item {
         onCanceled: pendingDateInsertBlockIndex = -1
     }
 
-    FileDialog {
-        id: imageFileDialog
-        title: "Select an image"
-        nameFilters: ["Images (*.png *.jpg *.jpeg *.gif *.webp *.bmp)", "All files (*)"]
-
-        onAccepted: {
-            const dataUrl = Clipboard.importImageFile(selectedFile)
-            if (!dataUrl || dataUrl.length === 0) {
-                console.log("BlockEditor: Failed to import image:", selectedFile)
-                pendingImageUploadBlockIndex = -1
-                return
-            }
-            const attachmentId = DataStore.saveAttachmentFromDataUrl(dataUrl)
-            if (!attachmentId || attachmentId.length === 0) {
-                console.log("BlockEditor: Failed to store image attachment:", selectedFile)
-                pendingImageUploadBlockIndex = -1
-                return
-            }
-
-            const idx = pendingImageUploadBlockIndex
-            pendingImageUploadBlockIndex = -1
-            if (idx < 0 || idx >= blockModel.count) return
-
-            blockModel.setProperty(idx, "blockType", "image")
-            blockModel.setProperty(idx, "content", JSON.stringify({ src: "image://attachments/" + attachmentId, w: 0, h: 0 }))
-            scheduleAutosave()
+    function openImageFileDialog() {
+        if (!imageFileDialogLoader.active) {
+            imageFileDialogLoader.active = true
         }
+        Qt.callLater(function() {
+            if (imageFileDialogLoader.item) {
+                imageFileDialogLoader.item.open()
+            }
+        })
+    }
 
-        onRejected: pendingImageUploadBlockIndex = -1
+    Loader {
+        id: imageFileDialogLoader
+        active: false
+        sourceComponent: ImageFileDialog {
+            title: "Select an image"
+            nameFilters: ["Images (*.png *.jpg *.jpeg *.gif *.webp *.bmp)", "All files (*)"]
+
+            onAccepted: {
+                const dataUrl = Clipboard.importImageFile(selectedFile)
+                if (!dataUrl || dataUrl.length === 0) {
+                    console.log("BlockEditor: Failed to import image:", selectedFile)
+                    pendingImageUploadBlockIndex = -1
+                    return
+                }
+                const attachmentId = DataStore.saveAttachmentFromDataUrl(dataUrl)
+                if (!attachmentId || attachmentId.length === 0) {
+                    console.log("BlockEditor: Failed to store image attachment:", selectedFile)
+                    pendingImageUploadBlockIndex = -1
+                    return
+                }
+
+                const idx = pendingImageUploadBlockIndex
+                pendingImageUploadBlockIndex = -1
+                if (idx < 0 || idx >= blockModel.count) return
+
+                blockModel.setProperty(idx, "blockType", "image")
+                blockModel.setProperty(idx, "content", JSON.stringify({ src: "image://attachments/" + attachmentId, w: 0, h: 0 }))
+                scheduleAutosave()
+            }
+
+            onRejected: pendingImageUploadBlockIndex = -1
+        }
     }
     
     property int pendingLinkBlockIndex: -1

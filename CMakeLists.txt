@@ -319,6 +319,7 @@ set(ZINC_QML_FILES
     qml/Main.qml
     qml/components/MarkdownEditor.qml
     qml/components/BlockEditor.qml
+    qml/components/ImageFileDialog.qml
     qml/components/Block.qml
     qml/components/blocks/ParagraphBlock.qml
     qml/components/blocks/HeadingBlock.qml
