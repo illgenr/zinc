@@ -22,8 +22,11 @@ public:
     explicit DataStore(QObject* parent = nullptr);
     ~DataStore() override;
     
-    static DataStore* create(QQmlEngine*, QJSEngine*) {
+    static DataStore* create(QQmlEngine* engine, QJSEngine*) {
         static DataStore instance;
+        if (engine) {
+            QQmlEngine::setObjectOwnership(&instance, QQmlEngine::CppOwnership);
+        }
         return &instance;
     }
     
@@ -41,6 +44,7 @@ public:
     Q_INVOKABLE void saveAllPages(const QVariantList& pages);
     Q_INVOKABLE void applyPageUpdates(const QVariantList& pages);
     Q_INVOKABLE void applyDeletedPageUpdates(const QVariantList& deletedPages);
+    Q_INVOKABLE QVariantList searchPages(const QString& query, int limit = 50);
 
     Q_INVOKABLE int deletedPagesRetentionLimit() const;
     Q_INVOKABLE void setDeletedPagesRetentionLimit(int limit);

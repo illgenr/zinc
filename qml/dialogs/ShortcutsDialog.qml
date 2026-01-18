@@ -17,7 +17,7 @@ Dialog {
 
     readonly property var shortcuts: [
         { key: "Ctrl+N", desc: "New page" },
-        { key: "Ctrl+P", desc: "Search" },
+        { key: "Ctrl+F", desc: "Find" },
         { key: "Ctrl+\\", desc: "Toggle sidebar" },
         { key: "Ctrl+Shift+?", desc: "Show this screen" },
         { key: "Shift+Enter", desc: "Insert newline in text blocks" },

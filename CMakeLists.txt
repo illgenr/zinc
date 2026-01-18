@@ -519,20 +519,21 @@ if(ZINC_BUILD_TESTS)
         ${CMAKE_CURRENT_SOURCE_DIR}/src
     )
 
-    add_executable(zinc_qml_tests
-        tests/qml/test_main.cpp
-        tests/qml/test_feature_flags.cpp
-        tests/qml/test_datastore_sync.cpp
-        tests/qml/test_attachments_disk_storage.cpp
-        tests/qml/test_markdown_blocks.cpp
-        tests/qml/test_cmark.cpp
-        tests/qml/test_sync_controller_settings.cpp
-        tests/qml/test_startup_page_settings.cpp
-        tests/qml/test_pairing_dialog_qml.cpp
-        tests/qml/test_markdown_editor_qml.cpp
-        tests/qml/test_slash_menu_qml.cpp
-        tests/qml/test_image_block_interactions.cpp
-    )
+	    add_executable(zinc_qml_tests
+	        tests/qml/test_main.cpp
+	        tests/qml/test_feature_flags.cpp
+	        tests/qml/test_datastore_sync.cpp
+	        tests/qml/test_attachments_disk_storage.cpp
+	        tests/qml/test_markdown_blocks.cpp
+	        tests/qml/test_cmark.cpp
+	        tests/qml/test_sync_controller_settings.cpp
+	        tests/qml/test_startup_page_settings.cpp
+	        tests/qml/test_pairing_dialog_qml.cpp
+	        tests/qml/test_search_dialog_qml.cpp
+	        tests/qml/test_markdown_editor_qml.cpp
+	        tests/qml/test_slash_menu_qml.cpp
+	        tests/qml/test_image_block_interactions.cpp
+	    )
 
     qt_add_qml_module(zinc_qml_tests
         URI zinc

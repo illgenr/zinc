@@ -564,9 +564,10 @@ Item {
     }
     
     function scrollToBlock(blockId) {
+        if (!blockId || blockId === "") return
         for (let i = 0; i < blockModel.count; i++) {
             if (blockModel.get(i).blockId === blockId) {
-                blockList.positionViewAtIndex(i, ListView.Center)
+                revealSearchBlockIndex(i)
                 break
             }
         }
@@ -578,6 +579,34 @@ Item {
     }
 
     property alias blocksModel: blockModel
+
+    property int searchHighlightBlockIndex: -1
+
+    Timer {
+        id: searchHighlightClearTimer
+        interval: 1500
+        onTriggered: root.searchHighlightBlockIndex = -1
+    }
+
+    function clampContentY(y) {
+        return Math.max(0, Math.min(y, flickable.contentHeight - flickable.height))
+    }
+
+    function scrollToBlockIndex(idx) {
+        if (idx < 0 || idx >= blockRepeater.count) return
+        const item = blockRepeater.itemAt(idx)
+        if (!item) return
+        const y = item.mapToItem(flickable.contentItem, 0, 0).y
+        const desired = y - (flickable.height - item.height) * 0.5
+        flickable.contentY = clampContentY(desired)
+    }
+
+    function revealSearchBlockIndex(idx) {
+        if (idx < 0) return
+        scrollToBlockIndex(idx)
+        root.searchHighlightBlockIndex = idx
+        searchHighlightClearTimer.restart()
+    }
     
     Flickable {
         id: flickable

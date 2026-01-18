@@ -22,6 +22,7 @@ ApplicationWindow {
     property var mobilePagesList: []  // Reactive list for mobile
     property bool startupPageAppliedDesktop: false
     property bool startupPageAppliedMobile: false
+    property int pendingSearchBlockIndex: -1
 
     property string pagesCursorAt: ""
     property string pagesCursorId: ""
@@ -51,7 +52,7 @@ ApplicationWindow {
     }
     
     Shortcut {
-        sequence: "Ctrl+P"
+        sequence: "Ctrl+F"
         enabled: !isMobile
         onActivated: searchDialog.open()
     }
@@ -175,7 +176,7 @@ ApplicationWindow {
                         
                         Text {
                             Layout.fillWidth: true
-                            text: "Search notes..."
+                            text: "Find"
                             color: ThemeManager.textMuted
                             font.pixelSize: ThemeManager.fontSizeNormal
                         }
@@ -343,6 +344,12 @@ ApplicationWindow {
                 Component.onCompleted: {
                     if (root.currentPage) {
                         loadPage(root.currentPage.id)
+                        Qt.callLater(function() {
+                            if (root.pendingSearchBlockIndex >= 0) {
+                                mobileBlockEditor.revealSearchBlockIndex(root.pendingSearchBlockIndex)
+                                root.pendingSearchBlockIndex = -1
+                            }
+                        })
                     }
                 }
                 
@@ -490,13 +497,13 @@ ApplicationWindow {
                         
                         Text {
                             Layout.fillWidth: true
-                            text: "Search"
+                            text: "Find"
                             color: ThemeManager.textMuted
                             font.pixelSize: ThemeManager.fontSizeSmall
                         }
                         
                         Text {
-                            text: "Ctrl+P"
+                            text: "Ctrl+F"
                             color: ThemeManager.textMuted
                             font.pixelSize: ThemeManager.fontSizeSmall
                         }
@@ -594,16 +601,22 @@ ApplicationWindow {
     SearchDialog {
         id: searchDialog
         
-        onResultSelected: function(pageId, blockId) {
+        onResultSelected: function(pageId, blockId, blockIndex) {
             if (DataStore) DataStore.setLastViewedPageId(pageId)
+            root.pendingSearchBlockIndex = blockIndex
             if (isMobile) {
                 root.currentPage = { id: pageId, title: "Note" }
                 mobileStack.push(mobileEditorComponent)
             } else {
                 blockEditor.loadPage(pageId)
-                if (blockId) {
-                    blockEditor.scrollToBlock(blockId)
-                }
+                Qt.callLater(function() {
+                    if (blockIndex >= 0) {
+                        blockEditor.revealSearchBlockIndex(blockIndex)
+                    } else if (blockId) {
+                        blockEditor.scrollToBlock(blockId)
+                    }
+                    root.pendingSearchBlockIndex = -1
+                })
             }
         }
     }

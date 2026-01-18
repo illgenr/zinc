@@ -16,8 +16,11 @@ class Clipboard : public QObject {
 public:
     explicit Clipboard(QObject* parent = nullptr);
 
-    static Clipboard* create(QQmlEngine*, QJSEngine*) {
+    static Clipboard* create(QQmlEngine* engine, QJSEngine*) {
         static Clipboard instance;
+        if (engine) {
+            QQmlEngine::setObjectOwnership(&instance, QQmlEngine::CppOwnership);
+        }
         return &instance;
     }
 

@@ -6,11 +6,16 @@ import zinc
 Popup {
     id: root
     
-    signal resultSelected(string pageId, string blockId)
+    signal resultSelected(string pageId, string blockId, int blockIndex)
     
     anchors.centerIn: parent
-    width: 560
-    height: 400
+
+    readonly property int _maxWidth: 560
+    readonly property int _maxHeight: 400
+    readonly property real _outerMargin: ThemeManager.spacingMedium
+
+    width: Math.min(_maxWidth, Math.max(0, (parent ? parent.width : _maxWidth) - (_outerMargin * 2)))
+    height: Math.min(_maxHeight, Math.max(0, (parent ? parent.height : _maxHeight) - (_outerMargin * 2)))
     modal: true
     focus: true
     closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
@@ -46,17 +51,17 @@ Popup {
                 
                 TextField {
                     id: searchField
+                    objectName: "searchField"
                     
                     Layout.fillWidth: true
                     
-                    placeholderText: "Search pages and blocks..."
+                    placeholderText: "Find..."
                     color: ThemeManager.text
                     font.pixelSize: ThemeManager.fontSizeNormal
                     
                     background: Item {}
                     
                     onTextChanged: {
-                        // Trigger search
                         searchTimer.restart()
                     }
                     
@@ -68,7 +73,7 @@ Popup {
                     Keys.onReturnPressed: {
                         if (resultsList.count > 0) {
                             let item = resultsModel.get(0)
-                            root.resultSelected(item.pageId, item.blockId)
+                            root.resultSelected(item.pageId, item.blockId || "", item.blockIndex !== undefined ? item.blockIndex : -1)
                             root.close()
                         }
                     }
@@ -96,6 +101,7 @@ Popup {
         // Results
         ListView {
             id: resultsList
+            objectName: "resultsList"
             
             Layout.fillWidth: true
             Layout.fillHeight: true
@@ -140,7 +146,7 @@ Popup {
                     
                     onEntered: resultsList.currentIndex = index
                     onClicked: {
-                        root.resultSelected(model.pageId, model.blockId)
+                        root.resultSelected(model.pageId, model.blockId || "", model.blockIndex !== undefined ? model.blockIndex : -1)
                         root.close()
                     }
                 }
@@ -166,7 +172,7 @@ Popup {
             Keys.onReturnPressed: {
                 if (currentIndex >= 0) {
                     let item = resultsModel.get(currentIndex)
-                    root.resultSelected(item.pageId, item.blockId)
+                    root.resultSelected(item.pageId, item.blockId || "", item.blockIndex !== undefined ? item.blockIndex : -1)
                     root.close()
                 }
             }
@@ -186,26 +192,34 @@ Popup {
     function performSearch() {
         resultsModel.clear()
         
-        let query = searchField.text.toLowerCase()
+        const query = (searchField.text || "").trim()
         if (query.length === 0) return
-        
-        // Demo results - real implementation would use FTS
-        resultsModel.append({
-            pageId: "1",
-            blockId: "b1",
-            pageTitle: "Getting Started",
-            snippet: "Welcome to Zinc, a local-first note-taking app..."
-        })
-        resultsModel.append({
-            pageId: "2",
-            blockId: "b2",
-            pageTitle: "Projects",
-            snippet: "Project planning and organization..."
-        })
+
+        const results = DataStore ? DataStore.searchPages(query, 50) : []
+        for (let i = 0; i < results.length; i++) {
+            resultsModel.append(results[i])
+        }
     }
     
     onOpened: {
         searchField.forceActiveFocus()
         searchField.selectAll()
+        searchTimer.restart()
+    }
+
+    Connections {
+        target: DataStore
+
+        function onPagesChanged() {
+            if (!root.opened) return
+            if ((searchField.text || "").trim().length === 0) return
+            searchTimer.restart()
+        }
+
+        function onPageContentChanged(changedPageId) {
+            if (!root.opened) return
+            if ((searchField.text || "").trim().length === 0) return
+            searchTimer.restart()
+        }
     }
 }

@@ -15,8 +15,11 @@ class MarkdownBlocks : public QObject {
 public:
     explicit MarkdownBlocks(QObject* parent = nullptr);
 
-    static MarkdownBlocks* create(QQmlEngine*, QJSEngine*) {
+    static MarkdownBlocks* create(QQmlEngine* engine, QJSEngine*) {
         static MarkdownBlocks instance;
+        if (engine) {
+            QQmlEngine::setObjectOwnership(&instance, QQmlEngine::CppOwnership);
+        }
         return &instance;
     }
 

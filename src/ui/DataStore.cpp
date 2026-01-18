@@ -17,6 +17,7 @@
 #include <QDebug>
 #include <QRegularExpression>
 #include <QUuid>
+#include <algorithm>
 #include <optional>
 
 namespace zinc::ui {
@@ -418,6 +419,142 @@ QVariantList DataStore::getAllPages() {
     }
     
     return pages;
+}
+
+namespace {
+
+QString make_snippet(const QString& text, const QString& query, int contextChars) {
+    const auto trimmed = text.trimmed();
+    if (trimmed.isEmpty()) {
+        return {};
+    }
+
+    const int maxLen = std::max(0, contextChars * 2);
+    const auto queryTrimmed = query.trimmed();
+    if (queryTrimmed.isEmpty()) {
+        if (trimmed.size() <= maxLen) {
+            return trimmed;
+        }
+        return trimmed.left(maxLen) + QStringLiteral("...");
+    }
+
+    const int idx = trimmed.indexOf(queryTrimmed, 0, Qt::CaseInsensitive);
+    if (idx < 0) {
+        if (trimmed.size() <= maxLen) {
+            return trimmed;
+        }
+        return trimmed.left(maxLen) + QStringLiteral("...");
+    }
+
+    const int start = std::max(0, idx - contextChars);
+    const int end = std::min(trimmed.size(), idx + queryTrimmed.size() + contextChars);
+
+    QString snippet;
+    if (start > 0) snippet += QStringLiteral("...");
+    snippet += trimmed.mid(start, end - start);
+    if (end < trimmed.size()) snippet += QStringLiteral("...");
+    return snippet;
+}
+
+bool contains_case_insensitive(const QString& haystack, const QString& needle) {
+    if (needle.isEmpty()) return true;
+    return haystack.indexOf(needle, 0, Qt::CaseInsensitive) >= 0;
+}
+
+QString display_text_for_block(const QVariantMap& block) {
+    const auto type = block.value("blockType").toString();
+    const auto content = block.value("content").toString();
+    if (type == QStringLiteral("link")) {
+        const auto parts = content.split('|');
+        const auto title = parts.value(1, QStringLiteral("Untitled"));
+        return title;
+    }
+    return content;
+}
+
+} // namespace
+
+QVariantList DataStore::searchPages(const QString& query, int limit) {
+    QVariantList out;
+    if (!m_ready) {
+        return out;
+    }
+
+    const auto trimmed = query.trimmed();
+    if (trimmed.isEmpty()) {
+        return out;
+    }
+
+    const int clampedLimit = std::clamp(limit, 1, 200);
+
+    QSqlQuery q(m_db);
+    q.prepare(R"SQL(
+        SELECT id, title, content_markdown
+        FROM pages
+        WHERE instr(lower(title), lower(?)) > 0
+           OR instr(lower(content_markdown), lower(?)) > 0
+        ORDER BY updated_at DESC, id ASC
+        LIMIT ?
+    )SQL");
+    q.addBindValue(trimmed);
+    q.addBindValue(trimmed);
+    q.addBindValue(clampedLimit);
+
+    if (!q.exec()) {
+        qWarning() << "DataStore: searchPages failed:" << q.lastError().text();
+        return out;
+    }
+
+    MarkdownBlocks codec;
+    while (q.next()) {
+        const auto pageId = q.value(0).toString();
+        const auto title = q.value(1).toString();
+        const auto markdown = q.value(2).toString();
+
+        const bool titleMatch = contains_case_insensitive(title, trimmed);
+
+        QVariantList blocks;
+        if (!markdown.trimmed().isEmpty()) {
+            blocks = codec.parseWithSpans(markdown);
+        }
+
+        bool anyBlockMatch = false;
+        for (int i = 0; i < blocks.size(); ++i) {
+            const auto block = blocks[i].toMap();
+            const auto text = display_text_for_block(block);
+            if (!contains_case_insensitive(text, trimmed)) {
+                continue;
+            }
+            anyBlockMatch = true;
+
+            QVariantMap result;
+            result["pageId"] = pageId;
+            result["blockId"] = QString();
+            result["blockIndex"] = i;
+            result["pageTitle"] = title;
+            result["snippet"] = make_snippet(text, trimmed, 60);
+            result["rank"] = titleMatch ? 1.0 : 0.5;
+            out.append(result);
+            if (out.size() >= clampedLimit) {
+                return out;
+            }
+        }
+
+        if (!anyBlockMatch && titleMatch) {
+            QVariantMap result;
+            result["pageId"] = pageId;
+            result["blockId"] = QString();
+            result["blockIndex"] = -1;
+            result["pageTitle"] = title;
+            result["snippet"] = make_snippet(title, trimmed, 30);
+            result["rank"] = 1.0;
+            out.append(result);
+            if (out.size() >= clampedLimit) {
+                return out;
+            }
+        }
+    }
+    return out;
 }
 
 QVariantList DataStore::getPagesForSync() {

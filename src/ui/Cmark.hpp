@@ -15,8 +15,11 @@ class Cmark : public QObject {
 public:
     explicit Cmark(QObject* parent = nullptr);
 
-    static Cmark* create(QQmlEngine*, QJSEngine*) {
+    static Cmark* create(QQmlEngine* engine, QJSEngine*) {
         static Cmark instance;
+        if (engine) {
+            QQmlEngine::setObjectOwnership(&instance, QQmlEngine::CppOwnership);
+        }
         return &instance;
     }
 
@@ -24,4 +27,3 @@ public:
 };
 
 } // namespace zinc::ui
-

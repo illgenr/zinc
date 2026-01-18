@@ -21,6 +21,7 @@ Item {
         editor.selectionStartBlockIndex >= 0 &&
         blockIndex >= editor.selectionStartBlockIndex &&
         blockIndex <= editor.selectionEndBlockIndex
+    readonly property bool searchHighlighted: editor && editor.searchHighlightBlockIndex === blockIndex
 
     signal contentEdited(string newContent)
     signal blockEnterPressed()
@@ -38,7 +39,9 @@ Item {
 
     Rectangle {
         anchors.fill: parent
-        color: root.rangeSelected ? ThemeManager.accentLight : "transparent"
+        color: root.rangeSelected ? ThemeManager.accentLight : (root.searchHighlighted ? ThemeManager.accentLight : "transparent")
+        border.width: root.searchHighlighted ? 1 : 0
+        border.color: ThemeManager.accent
         radius: ThemeManager.radiusSmall
     }
 
