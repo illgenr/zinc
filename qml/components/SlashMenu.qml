@@ -157,19 +157,21 @@ Popup {
                 id: delegateItem
                 width: commandList.width
                 height: 44
+                anchors.margins: ThemeManager.spacingSmall
                 radius: ThemeManager.radiusSmall
                 color: commandList.currentIndex === index || delegateMouseArea.containsMouse
                        ? ThemeManager.surfaceHover : "transparent"
 
                 RowLayout {
                     anchors.fill: parent
-                    anchors.margins: ThemeManager.spacingSmall
+                    anchors.margins: ThemeManager.spacingSmall                    
                     spacing: ThemeManager.spacingSmall
 
                     // Icon
                     Rectangle {
                         width: 28
                         height: 28
+                        anchors.verticalCenter: parent.verticalCenter
                         radius: ThemeManager.radiusSmall
                         color: ThemeManager.background
 
@@ -184,6 +186,7 @@ Popup {
                     ColumnLayout {
                         Layout.fillWidth: true
                         spacing: 2
+                        anchors.verticalCenter: parent.verticalCenter
 
                         Text {
                             text: modelData.label

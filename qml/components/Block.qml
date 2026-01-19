@@ -68,9 +68,13 @@ Item {
 
                 onPressed: function(mouse) {
                     if (!root.editor) return
-                    root.editor.startBlockRangeSelection(root.blockIndex)
-                    const p = selectionGutter.mapToItem(root.editor, mouse.x, mouse.y)
-                    root.editor.updateBlockRangeSelectionByEditorY(p.y)
+                    if (mouse.modifiers & Qt.ShiftModifier) {
+                        root.editor.extendBlockRangeSelectionToIndex(root.blockIndex)
+                    } else {
+                        root.editor.startBlockRangeSelection(root.blockIndex)
+                        const p = selectionGutter.mapToItem(root.editor, mouse.x, mouse.y)
+                        root.editor.updateBlockRangeSelectionByEditorY(p.y)
+                    }
                     mouse.accepted = true
                 }
 

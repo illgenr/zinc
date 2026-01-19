@@ -202,10 +202,13 @@ FocusScope {
         applyCrossBlockSelection()
     }
 
-    function updateCrossBlockSelection(editorPoint) {
+    function updateCrossBlockSelection(editorPoint, opts) {
         if (!selectionDragging) return
         lastSelectionPoint = editorPoint
-        autoscrollForEditorPoint(editorPoint)
+        const allowAutoscroll = !(opts && opts.autoscroll === false)
+        if (allowAutoscroll) {
+            autoscrollForEditorPoint(editorPoint)
+        }
         const hit = blockTextControlAtEditorPoint(editorPoint)
         if (hit.index < 0) return
         selectionFocusBlockIndex = hit.index
@@ -228,7 +231,17 @@ FocusScope {
         applyCrossBlockSelection()
     }
 
-    function updateBlockRangeSelectionByEditorY(editorY) {
+    function extendBlockRangeSelectionToIndex(targetIndex) {
+        if (targetIndex < 0 || targetIndex >= blockRepeater.count) return
+        const anchor = selectionAnchorBlockIndex >= 0 ? selectionAnchorBlockIndex : targetIndex
+        selectionAnchorBlockIndex = anchor
+        selectionFocusBlockIndex = targetIndex
+        selectionAnchorPos = 0
+        selectionFocusPos = 1e9
+        applyCrossBlockSelection()
+    }
+
+    function updateBlockRangeSelectionByEditorY(editorY, opts) {
         if (!blockRangeSelecting) return
         lastSelectionPoint = Qt.point(0, editorY)
         const idx = blockIndexAtEditorY(editorY)
@@ -237,7 +250,10 @@ FocusScope {
         selectionAnchorPos = 0
         selectionFocusPos = 1e9
         applyCrossBlockSelection()
-        autoscrollForEditorPoint(Qt.point(0, editorY))
+        const allowAutoscroll = !(opts && opts.autoscroll === false)
+        if (allowAutoscroll) {
+            autoscrollForEditorPoint(Qt.point(0, editorY))
+        }
     }
 
     function endBlockRangeSelection() {
@@ -610,6 +626,7 @@ FocusScope {
     
     Flickable {
         id: flickable
+        objectName: "blockEditorFlickable"
         
         anchors.fill: parent
         contentWidth: width
@@ -619,6 +636,34 @@ FocusScope {
         
         ScrollBar.vertical: ScrollBar {
             policy: ScrollBar.AsNeeded
+        }
+
+        WheelHandler {
+            enabled: root.selectionDragging || root.blockRangeSelecting || root.reorderDragging
+            target: null
+            acceptedDevices: PointerDevice.Mouse
+
+            function wheelPixels(wheel) {
+                if (!wheel) return 0
+                if (wheel.pixelDelta && wheel.pixelDelta.y !== 0) return wheel.pixelDelta.y
+                if (wheel.angleDelta && wheel.angleDelta.y !== 0) return (wheel.angleDelta.y / 120) * 80
+                return 0
+            }
+
+            onWheel: function(wheel) {
+                const dy = wheelPixels(wheel)
+                if (dy === 0) return
+                flickable.contentY = clampContentY(flickable.contentY - dy)
+                wheel.accepted = true
+
+                if (root.selectionDragging) {
+                    root.updateCrossBlockSelection(root.lastSelectionPoint, { autoscroll: false })
+                } else if (root.blockRangeSelecting) {
+                    root.updateBlockRangeSelectionByEditorY(root.lastSelectionPoint.y, { autoscroll: false })
+                } else if (root.reorderDragging) {
+                    root.updateReorderBlockByEditorY(root.lastReorderPoint.y)
+                }
+            }
         }
         
         ColumnLayout {
