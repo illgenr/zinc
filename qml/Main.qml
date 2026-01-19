@@ -126,6 +126,7 @@ ApplicationWindow {
                     Rectangle {
                         width: 32
                         height: 32
+                        anchors.verticalCenter: parent.verticalCenter
                         radius: ThemeManager.radiusSmall
                         color: ThemeManager.accent
                         
@@ -144,16 +145,19 @@ ApplicationWindow {
                         color: ThemeManager.text
                         font.pixelSize: ThemeManager.fontSizeXLarge
                         font.weight: Font.Medium
+                        anchors.verticalCenter: parent.verticalCenter
                     }
                     
                     ToolButton {
-                        icon.name: "settings"
+                        icon.name: "settings"                        
+                        anchors.verticalCenter: parent.verticalCenter
                         contentItem: Text {
                             text: "⚙"
                             color: ThemeManager.text
                             font.pixelSize: 20
                             horizontalAlignment: Text.AlignHCenter
                             verticalAlignment: Text.AlignVCenter
+                            
                         }
                         background: Rectangle {
                             radius: ThemeManager.radiusSmall
@@ -165,18 +169,19 @@ ApplicationWindow {
             }
             
             ColumnLayout {
-                anchors.fill: parent
-                spacing: 0
-                
-                RowLayout {                
+                anchors.fill: parent                                
+                spacing: ThemeManager.spacingSmall
+
+                RowLayout {                         
                     anchors.top: parent.top
-                    anchors.topMargin: 0
-                    height: 48                    
-                // Search bar
+                    anchors.margins: ThemeManager.spacingSmall                    
+                    height: 48                                    
+                    // Search bar
                     Rectangle {
                         Layout.fillWidth: true
                         Layout.preferredHeight: 48
                         Layout.preferredWidth: 96
+                        anchors.verticalCenter: parent.verticalCenter
                         Layout.margins: ThemeManager.spacingMedium
                         radius: ThemeManager.radiusMedium
                         color: ThemeManager.surfaceHover
@@ -207,6 +212,7 @@ ApplicationWindow {
                     Button {
                         Layout.fillWidth: true
                         Layout.margins: ThemeManager.spacingSmall
+                        anchors.verticalCenter: parent.verticalCenter
                         text: "+ New Page"
 
                         background: Rectangle {
@@ -229,7 +235,7 @@ ApplicationWindow {
                         }
                     }
                 }
-                
+
                 // Notes list
                 PageTree {
                     id: mobilePageTree
