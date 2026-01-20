@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import zinc
+import "ScrollMath.js" as ScrollMath
 
 FocusScope {
     id: root
@@ -604,8 +605,147 @@ FocusScope {
         onTriggered: root.searchHighlightBlockIndex = -1
     }
 
+    property real keyboardTopYOverride: NaN
+
+    function windowHeight() {
+        if (root.Window && root.Window.height > 0) return root.Window.height
+        if (root.parent && root.parent.height > 0) return root.parent.height
+        return root.height
+    }
+
+    function keyboardHeightInWindow() {
+        const winH = windowHeight()
+        if (!isNaN(root.keyboardTopYOverride)) {
+            return Math.max(0, Math.min(winH, winH - root.keyboardTopYOverride))
+        }
+        const kb = Qt.inputMethod.keyboardRectangle
+        const kbUsable = kb && kb.height > 0 && (Qt.inputMethod.visible || AndroidUtils.isAndroid() || Qt.platform.os === "ios")
+        if (!kbUsable) return 0
+        return Math.max(0, Math.min(winH, kb.height))
+    }
+
+    function keyboardTopYInWindow() {
+        const winH = windowHeight()
+        return winH - keyboardHeightInWindow()
+    }
+
+    readonly property real keyboardInset: keyboardHeightInWindow()
+
+    Connections {
+        target: Qt.inputMethod
+        function onVisibleChanged() { root.scheduleEnsureFocusedCursorVisible() }
+        function onKeyboardRectangleChanged() { root.scheduleEnsureFocusedCursorVisible() }
+    }
+
+    Timer {
+        id: cursorRevealTimer
+        interval: 0
+        repeat: false
+        onTriggered: root.ensureFocusedCursorVisible()
+    }
+
+    function scheduleEnsureFocusedCursorVisible() {
+        cursorRevealTimer.restart()
+    }
+
     function clampContentY(y) {
         return Math.max(0, Math.min(y, flickable.contentHeight - flickable.height))
+    }
+
+    function ensureFocusedCursorVisible() {
+        if (root.selectionDragging || root.blockRangeSelecting || root.reorderDragging) return
+        if (flickable.dragging || flickable.flicking) return
+        if (root.currentBlockIndex < 0 || root.currentBlockIndex >= blockRepeater.count) return
+
+        const block = blockRepeater.itemAt(root.currentBlockIndex)
+        if (!block || !block.textControl || !("cursorRectangle" in block.textControl)) return
+
+        const textControl = block.textControl
+        const cursor = textControl.cursorRectangle
+        const cursorHalfH = cursor.height * 0.5
+
+        function clamp(v, lo, hi) { return Math.max(lo, Math.min(v, hi)) }
+
+        // Mobile: do math in global coordinates because Android's window-panning can make
+        // window/scene-relative math lie about what is actually visible on-screen.
+        if (AndroidUtils.isAndroid() || Qt.platform.os === "ios") {
+            if (!("mapToGlobal" in textControl) || !("mapToGlobal" in flickable)) return
+
+            const cursorGlobal = textControl.mapToGlobal(cursor.x, cursor.y)
+            const cursorTopGlobal = cursorGlobal.y
+            const cursorBottomGlobal = cursorGlobal.y + cursor.height
+
+            const viewportTopGlobal = flickable.mapToGlobal(0, 0).y
+            const viewportBottomGlobal = viewportTopGlobal + flickable.height
+
+            const kb = Qt.inputMethod.keyboardRectangle
+            const kbActive = kb && kb.height > 0 && (Qt.inputMethod.visible || AndroidUtils.isAndroid() || Qt.platform.os === "ios")
+            const kbTopGlobal = kbActive ? (kb.y > 0 ? kb.y : (Screen.height - kb.height)) : viewportBottomGlobal
+            const visibleBottomGlobal = Math.min(viewportBottomGlobal, kbTopGlobal)
+            const visibleHeightGlobal = Math.max(0, visibleBottomGlobal - viewportTopGlobal)
+            if (visibleHeightGlobal <= 0) return
+
+            const margin = ThemeManager.spacingMedium
+            const visibleTopWithMargin = viewportTopGlobal + margin
+            const visibleBottomWithMargin = visibleBottomGlobal - margin
+            const cursorFullyVisible = cursorTopGlobal >= visibleTopWithMargin && cursorBottomGlobal <= visibleBottomWithMargin
+            if (cursorFullyVisible) return
+
+            const minCenter = margin + cursorHalfH
+            const maxCenter = Math.max(minCenter, visibleHeightGlobal - margin - cursorHalfH)
+            const desiredCenterInViewport = clamp(visibleHeightGlobal * 0.4, minCenter, maxCenter)
+            const desiredCenterGlobal = viewportTopGlobal + desiredCenterInViewport
+            const cursorCenterGlobal = (cursorTopGlobal + cursorBottomGlobal) * 0.5
+
+            // Positive delta => cursor is too low => scroll down (increase contentY).
+            let dy = cursorCenterGlobal - desiredCenterGlobal
+
+            // Ensure it ends up fully visible even when the center target is constrained.
+            const projectedTop = cursorTopGlobal - dy
+            const projectedBottom = cursorBottomGlobal - dy
+            if (projectedBottom > visibleBottomWithMargin) {
+                dy += projectedBottom - visibleBottomWithMargin
+            } else if (projectedTop < visibleTopWithMargin) {
+                dy -= visibleTopWithMargin - projectedTop
+            }
+
+            flickable.contentY = clampContentY(flickable.contentY + dy)
+            return
+        }
+
+        const flickableTopInWindow = flickable.mapToItem(null, 0, 0).y
+        const flickableBottomInWindow = flickableTopInWindow + flickable.height
+        const margin = ThemeManager.spacingMedium
+        const visibleTopInWindow = Math.max(0, flickableTopInWindow)
+        const visibleBottomInWindow = Math.min(flickableBottomInWindow, root.keyboardTopYInWindow())
+        const visibleViewportHeight = Math.max(0, visibleBottomInWindow - visibleTopInWindow)
+        if (visibleViewportHeight <= 0) return
+
+        const cutTop = Math.max(0, visibleTopInWindow - flickableTopInWindow)
+        const visibleTopYInContent = flickable.contentY + cutTop
+        const visibleBottomYInContent = visibleTopYInContent + visibleViewportHeight
+
+        const cursorTopLeftInContent = textControl.mapToItem(flickable.contentItem, cursor.x, cursor.y)
+        const regionTop = cursorTopLeftInContent.y
+        const regionBottom = cursorTopLeftInContent.y + cursor.height
+
+        const visibleTopWithMargin = visibleTopYInContent + margin
+        const visibleBottomWithMargin = visibleBottomYInContent - margin
+        const cursorFullyVisible = regionTop >= visibleTopWithMargin && regionBottom <= visibleBottomWithMargin
+        if (cursorFullyVisible) return
+
+        const minCenter = margin + cursorHalfH
+        const maxCenter = Math.max(minCenter, visibleViewportHeight - margin - cursorHalfH)
+        const desiredCenter = Math.max(minCenter, Math.min(maxCenter, visibleViewportHeight * 0.4))
+
+        let desiredVisibleTopY = ScrollMath.contentYToPlaceRegionCenter(regionTop, regionBottom, desiredCenter)
+        desiredVisibleTopY = ScrollMath.contentYToRevealRegion(desiredVisibleTopY,
+                                                              regionTop,
+                                                              regionBottom,
+                                                              visibleViewportHeight,
+                                                              margin,
+                                                              margin)
+        flickable.contentY = clampContentY(desiredVisibleTopY - cutTop)
     }
 
     function scrollToBlockIndex(idx) {
@@ -744,6 +884,7 @@ FocusScope {
                         } else {
                             slashMenu.close()
                         }
+                        root.scheduleEnsureFocusedCursorVisible()
                     }
                     
                     onBlockEnterPressed: {
@@ -822,6 +963,7 @@ FocusScope {
                         }
                         currentBlockIndex = index
                         root.blockFocused(index)
+                        root.scheduleEnsureFocusedCursorVisible()
                     }
                     
                     onLinkClicked: function(linkedPageId) {
@@ -883,6 +1025,11 @@ FocusScope {
                         }
                     }
                 }
+            }
+
+            Item {
+                Layout.fillWidth: true
+                Layout.preferredHeight: root.keyboardInset > 0 ? (root.keyboardInset + ThemeManager.spacingXLarge) : 0
             }
         }
     }

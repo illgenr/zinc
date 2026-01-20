@@ -319,6 +319,7 @@ set(ZINC_QML_FILES
     qml/Main.qml
     qml/components/MarkdownEditor.qml
     qml/components/BlockEditor.qml
+    qml/components/ScrollMath.js
     qml/components/Block.qml
     qml/components/blocks/ParagraphBlock.qml
     qml/components/blocks/HeadingBlock.qml
@@ -524,6 +525,7 @@ if(ZINC_BUILD_TESTS)
 		        tests/qml/test_feature_flags.cpp
 		        tests/qml/test_datastore_sync.cpp
 		        tests/qml/test_attachments_disk_storage.cpp
+		        tests/qml/test_block_editor_cursor_visibility_qml.cpp
 		        tests/qml/test_markdown_blocks.cpp
 		        tests/qml/test_cmark.cpp
 		        tests/qml/test_sync_controller_settings.cpp
