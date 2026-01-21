@@ -35,6 +35,18 @@ public:
     Q_INVOKABLE QVariantList getPagesForSync();
     Q_INVOKABLE QVariantList getPagesForSyncSince(const QString& updatedAtCursor,
                                                   const QString& pageIdCursor);
+    // Mark pages as "synced base" (used for conflict detection).
+    // Accepts either a list of pageId strings or a list of {pageId: "..."} maps.
+    Q_INVOKABLE void markPagesAsSynced(const QVariantList& pagesOrIds);
+
+    // Sync conflict handling
+    Q_INVOKABLE QVariantList getPageConflicts();
+    Q_INVOKABLE QVariantMap getPageConflict(const QString& pageId);
+    Q_INVOKABLE bool hasPageConflict(const QString& pageId);
+    // Returns { mergedMarkdown: string, clean: bool, kind: string } or empty if not found.
+    Q_INVOKABLE QVariantMap previewMergeForPageConflict(const QString& pageId);
+    // resolution: "local" | "remote" | "merge"
+    Q_INVOKABLE void resolvePageConflict(const QString& pageId, const QString& resolution);
     Q_INVOKABLE QVariantList getDeletedPagesForSync();
     Q_INVOKABLE QVariantList getDeletedPagesForSyncSince(const QString& deletedAtCursor,
                                                          const QString& pageIdCursor);
@@ -113,6 +125,8 @@ signals:
     void pageContentChanged(const QString& pageId);
     void attachmentsChanged();
     void pairedDevicesChanged();
+    void pageConflictsChanged();
+    void pageConflictDetected(const QVariantMap& conflict);
     void error(const QString& message);
 
 private:

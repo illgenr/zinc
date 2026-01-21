@@ -8,6 +8,7 @@
 #include <QTemporaryDir>
 #include <QVariantList>
 #include <QVariantMap>
+#include <QDateTime>
 
 #include "ui/DataStore.hpp"
 #include "ui/MarkdownBlocks.hpp"
@@ -178,6 +179,112 @@ TEST_CASE("DataStore: applyPageUpdates allows equal updatedAt to overwrite conte
     pages2.append(makePage("p5", QStringLiteral("Page"), timestamp, QStringLiteral("World")));
     store.applyPageUpdates(pages2);
     REQUIRE(store.getPageContentMarkdown(QStringLiteral("p5")) == QStringLiteral("World"));
+}
+
+TEST_CASE("DataStore: applyPageUpdates records a conflict when both sides changed since last sync", "[qml][datastore]") {
+    zinc::ui::DataStore store;
+    REQUIRE(store.initialize());
+    REQUIRE(store.resetDatabase());
+
+    const auto baseTs = QStringLiteral("2026-01-11 00:00:00.000");
+    QVariantList base;
+    base.append(makePage("p_conflict", QStringLiteral("Page"), baseTs, QStringLiteral("Base")));
+    store.applyPageUpdates(base);
+
+    store.savePageContentMarkdown(QStringLiteral("p_conflict"), QStringLiteral("Local edit"));
+    REQUIRE(store.getPageContentMarkdown(QStringLiteral("p_conflict")) == QStringLiteral("Local edit"));
+
+    const auto localUpdated = updatedAtForPage(store, QStringLiteral("p_conflict"));
+    REQUIRE_FALSE(localUpdated.isEmpty());
+    auto localTime = QDateTime::fromString(localUpdated, "yyyy-MM-dd HH:mm:ss.zzz");
+    if (!localTime.isValid()) {
+        localTime = QDateTime::fromString(localUpdated, "yyyy-MM-dd HH:mm:ss");
+    }
+    REQUIRE(localTime.isValid());
+    const auto remoteUpdated = localTime.addSecs(10).toUTC().toString("yyyy-MM-dd HH:mm:ss.zzz");
+
+    QVariantList incoming;
+    incoming.append(makePage("p_conflict", QStringLiteral("Page"), remoteUpdated, QStringLiteral("Remote edit")));
+    store.applyPageUpdates(incoming);
+
+    REQUIRE(store.hasPageConflict(QStringLiteral("p_conflict")));
+    // Local content is preserved until resolution.
+    REQUIRE(store.getPageContentMarkdown(QStringLiteral("p_conflict")) == QStringLiteral("Local edit"));
+
+    store.resolvePageConflict(QStringLiteral("p_conflict"), QStringLiteral("remote"));
+    REQUIRE_FALSE(store.hasPageConflict(QStringLiteral("p_conflict")));
+    REQUIRE(store.getPageContentMarkdown(QStringLiteral("p_conflict")) == QStringLiteral("Remote edit"));
+}
+
+TEST_CASE("DataStore: resolvePageConflict merge applies merged markdown", "[qml][datastore]") {
+    zinc::ui::DataStore store;
+    REQUIRE(store.initialize());
+    REQUIRE(store.resetDatabase());
+
+    const auto baseTs = QStringLiteral("2026-01-11 00:00:00.000");
+    QVariantList base;
+    base.append(makePage("p_merge", QStringLiteral("Page"), baseTs, QStringLiteral("a\nb\nc")));
+    store.applyPageUpdates(base);
+
+    store.savePageContentMarkdown(QStringLiteral("p_merge"), QStringLiteral("a\nb\nc\nours"));
+    const auto localUpdated = updatedAtForPage(store, QStringLiteral("p_merge"));
+    auto localTime = QDateTime::fromString(localUpdated, "yyyy-MM-dd HH:mm:ss.zzz");
+    if (!localTime.isValid()) {
+        localTime = QDateTime::fromString(localUpdated, "yyyy-MM-dd HH:mm:ss");
+    }
+    REQUIRE(localTime.isValid());
+    const auto remoteUpdated = localTime.addSecs(10).toUTC().toString("yyyy-MM-dd HH:mm:ss.zzz");
+
+    QVariantList incoming;
+    incoming.append(makePage("p_merge", QStringLiteral("Page"), remoteUpdated, QStringLiteral("theirs\na\nb\nc")));
+    store.applyPageUpdates(incoming);
+    REQUIRE(store.hasPageConflict(QStringLiteral("p_merge")));
+
+    store.resolvePageConflict(QStringLiteral("p_merge"), QStringLiteral("merge"));
+    REQUIRE_FALSE(store.hasPageConflict(QStringLiteral("p_merge")));
+    const auto merged = store.getPageContentMarkdown(QStringLiteral("p_merge"));
+    REQUIRE(merged.contains(QStringLiteral("theirs")));
+    REQUIRE(merged.contains(QStringLiteral("ours")));
+    REQUIRE_FALSE(merged.contains(QStringLiteral("<<<<<<<")));
+}
+
+TEST_CASE("DataStore: incoming resolved page clears existing conflict", "[qml][datastore]") {
+    zinc::ui::DataStore store;
+    REQUIRE(store.initialize());
+    REQUIRE(store.resetDatabase());
+
+    const auto baseTs = QStringLiteral("2026-01-11 00:00:00.000");
+    QVariantList base;
+    base.append(makePage("p_resolve", QStringLiteral("Page"), baseTs, QStringLiteral("Base")));
+    store.applyPageUpdates(base);
+
+    store.savePageContentMarkdown(QStringLiteral("p_resolve"), QStringLiteral("Local edit"));
+    const auto localUpdated = updatedAtForPage(store, QStringLiteral("p_resolve"));
+    REQUIRE_FALSE(localUpdated.isEmpty());
+
+    auto localTime = QDateTime::fromString(localUpdated, "yyyy-MM-dd HH:mm:ss.zzz");
+    if (!localTime.isValid()) {
+        localTime = QDateTime::fromString(localUpdated, "yyyy-MM-dd HH:mm:ss");
+    }
+    REQUIRE(localTime.isValid());
+
+    const auto remoteAtConflict = localTime.addSecs(10).toString("yyyy-MM-dd HH:mm:ss.zzz");
+    QVariantList incomingConflict;
+    incomingConflict.append(makePage("p_resolve", QStringLiteral("Page"), remoteAtConflict, QStringLiteral("Remote edit")));
+    store.applyPageUpdates(incomingConflict);
+    REQUIRE(store.hasPageConflict(QStringLiteral("p_resolve")));
+
+    // Simulate a "no-op" local write (e.g., autosave) that bumps updated_at without changing content.
+    store.savePageContentMarkdown(QStringLiteral("p_resolve"), QStringLiteral("Local edit"));
+
+    // Simulate the other device resolving and sending a newer snapshot.
+    const auto remoteResolved = localTime.addSecs(60).toString("yyyy-MM-dd HH:mm:ss.zzz");
+    QVariantList incomingResolved;
+    incomingResolved.append(makePage("p_resolve", QStringLiteral("Page"), remoteResolved, QStringLiteral("Remote chosen")));
+    store.applyPageUpdates(incomingResolved);
+
+    REQUIRE_FALSE(store.hasPageConflict(QStringLiteral("p_resolve")));
+    REQUIRE(store.getPageContentMarkdown(QStringLiteral("p_resolve")) == QStringLiteral("Remote chosen"));
 }
 
 TEST_CASE("DataStore: saveAllPages records deleted pages tombstones", "[qml][datastore]") {

@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(zinc VERSION 0.1 LANGUAGES C CXX)
+project(zinc VERSION 0.2.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -128,6 +128,8 @@ add_library(zinc_core STATIC
     src/core/fractional_index.cpp
     src/core/commands.hpp
     src/core/commands.cpp
+    src/core/three_way_merge.hpp
+    src/core/three_way_merge.cpp
     src/core/page.hpp
     src/core/page.cpp
     src/core/workspace.hpp
@@ -339,6 +341,7 @@ set(ZINC_QML_FILES
     qml/dialogs/SettingsDialog.qml
     qml/dialogs/PagePickerDialog.qml
     qml/dialogs/ShortcutsDialog.qml
+    qml/dialogs/SyncConflictDialog.qml
     qml/theme/Theme.qml
     qml/theme/ThemeManager.qml
 )
@@ -470,6 +473,7 @@ if(ZINC_BUILD_TESTS)
         tests/unit/test_block_types.cpp
         tests/unit/test_fractional_index.cpp
         tests/unit/test_commands.cpp
+        tests/unit/test_three_way_merge.cpp
         tests/unit/test_storage.cpp
     )
     

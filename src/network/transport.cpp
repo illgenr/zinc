@@ -1,5 +1,6 @@
 #include "network/transport.hpp"
 #include <QDebug>
+#include <limits>
 
 namespace zinc::network {
 
@@ -78,6 +79,8 @@ void Connection::connectToPeer(const QHostAddress& host, uint16_t port,
     noise_role_ = crypto::NoiseRole::Initiator;
     noise_ = std::make_unique<crypto::NoiseSession>(
         crypto::NoiseRole::Initiator, local_keys_);
+    connect_host_ = host;
+    connect_port_ = port;
     
     setState(State::Connecting);
     if (sync_debug_enabled()) {
@@ -103,6 +106,9 @@ void Connection::acceptConnection(QTcpSocket* socket,
             this, &Connection::onSocketError);
     connect(socket_.get(), &QTcpSocket::readyRead, 
             this, &Connection::onReadyRead);
+
+    connect_host_ = socket_ ? socket_->peerAddress() : QHostAddress{};
+    connect_port_ = socket_ ? static_cast<uint16_t>(socket_->peerPort()) : 0;
     
     setState(State::Handshaking);
     if (sync_debug_enabled()) {
@@ -124,6 +130,8 @@ void Connection::disconnect() {
         }
         
         socket_->disconnectFromHost();
+        connect_host_ = QHostAddress{};
+        connect_port_ = 0;
         setState(State::Disconnected);
     }
 }
@@ -185,6 +193,8 @@ void Connection::onSocketDisconnected() {
     if (sync_debug_enabled()) {
         qInfo() << "SYNC: socket disconnected state=" << state_name(state_);
     }
+    connect_host_ = QHostAddress{};
+    connect_port_ = 0;
     setState(State::Disconnected);
     emit disconnected();
 }
@@ -194,7 +204,12 @@ void Connection::onSocketError(QAbstractSocket::SocketError err) {
         qInfo() << "SYNC: socket error" << static_cast<int>(err) << socket_->errorString()
                 << "state=" << state_name(state_);
     }
-    emit error(socket_->errorString());
+    const auto host = connect_host_.isNull() ? socket_->peerAddress() : connect_host_;
+    const auto port = connect_port_ != 0 ? connect_port_ : static_cast<uint16_t>(socket_->peerPort());
+    const auto where = (host.isNull() || port == 0)
+        ? QStringLiteral("")
+        : QStringLiteral(" (%1:%2)").arg(host.toString()).arg(port);
+    emit error(socket_->errorString() + where);
     if (state_ == State::Connecting || state_ == State::Handshaking) {
         setState(State::Failed);
     }
@@ -202,6 +217,9 @@ void Connection::onSocketError(QAbstractSocket::SocketError err) {
 
 void Connection::onReadyRead() {
     read_buffer_.append(socket_->readAll());
+
+    // Defensive: reject unreasonably large messages to avoid allocation spikes or integer overflows.
+    static constexpr size_t kMaxMessagePayloadBytes = 10 * 1024 * 1024; // 10 MiB
     
     while (read_buffer_.size() >= static_cast<int>(MessageHeader::HEADER_SIZE)) {
         // Try to parse header
@@ -221,9 +239,21 @@ void Connection::onReadyRead() {
         }
         
         auto header = header_result.unwrap();
-        size_t total_size = MessageHeader::HEADER_SIZE + header.length;
+        const size_t payload_size = static_cast<size_t>(header.length);
+        if (payload_size > kMaxMessagePayloadBytes) {
+            emit error("Message too large");
+            disconnect();
+            return;
+        }
+        if (payload_size > (std::numeric_limits<size_t>::max() - MessageHeader::HEADER_SIZE)) {
+            emit error("Invalid message length");
+            disconnect();
+            return;
+        }
+        const size_t total_size = MessageHeader::HEADER_SIZE + payload_size;
         
-        if (read_buffer_.size() < static_cast<int>(total_size)) {
+        const size_t available = static_cast<size_t>(read_buffer_.size());
+        if (available < total_size) {
             // Need more data
             return;
         }

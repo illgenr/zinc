@@ -87,6 +87,7 @@ Dialog {
 
     Connections {
         target: activeSyncController
+        enabled: root.visible
 
         property var discovered: ({})
 
@@ -182,6 +183,7 @@ Dialog {
 
     Connections {
         target: DataStore
+        enabled: root.visible
 
         function onPagesChanged() {
             if (activeSyncController.syncing && !suppressOutgoingSnapshots) {

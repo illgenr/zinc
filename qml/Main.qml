@@ -654,6 +654,32 @@ ApplicationWindow {
         id: pairingDialog
         externalSyncController: appSyncController
     }
+
+    property var pendingSyncConflicts: []
+
+    function showSyncConflict(conflict) {
+        if (!conflict || !conflict.pageId) return
+        if (syncConflictDialog.visible) {
+            pendingSyncConflicts.push(conflict)
+            return
+        }
+        syncConflictDialog.conflict = conflict
+        syncConflictDialog.open()
+    }
+
+    SyncConflictDialog {
+        id: syncConflictDialog
+        parent: Overlay.overlay
+
+        onClosed: {
+            if (pendingSyncConflicts.length <= 0) return
+            var next = pendingSyncConflicts.shift()
+            if (next) {
+                syncConflictDialog.conflict = next
+                syncConflictDialog.open()
+            }
+        }
+    }
     
     PagePickerDialog {
         id: pagePickerDialog
@@ -742,7 +768,23 @@ ApplicationWindow {
                     root.mobilePagesList = DataStore.getAllPages()
                 })
             }
+            if (pairingDialog && pairingDialog.visible) {
+                return
+            }
             root.scheduleOutgoingSnapshot()
+        }
+
+        function onPageConflictDetected(conflict) {
+            root.showSyncConflict(conflict)
+        }
+
+        function onPageConflictsChanged() {
+            if (!syncConflictDialog.visible) return
+            if (!DataStore || !DataStore.hasPageConflict) return
+            if (!syncConflictDialog.pageId || syncConflictDialog.pageId === "") return
+            if (!DataStore.hasPageConflict(syncConflictDialog.pageId)) {
+                syncConflictDialog.close()
+            }
         }
     }
 
@@ -750,6 +792,9 @@ ApplicationWindow {
         target: DataStore
 
         function onAttachmentsChanged() {
+            if (pairingDialog && pairingDialog.visible) {
+                return
+            }
             root.scheduleOutgoingSnapshot()
         }
     }
@@ -766,6 +811,9 @@ ApplicationWindow {
         }
 
         function onPeerConnected(deviceId) {
+            if (pairingDialog && pairingDialog.visible) {
+                return
+            }
             pagesCursorAt = ""
             pagesCursorId = ""
             deletedPagesCursorAt = ""
@@ -776,24 +824,36 @@ ApplicationWindow {
         }
 
         function onAttachmentSnapshotReceivedAttachments(attachments) {
+            if (pairingDialog && pairingDialog.visible) {
+                return
+            }
             if (!DataStore || !attachments) return
             console.log("SYNC: received attachments", attachments.length)
             DataStore.applyAttachmentUpdates(attachments)
         }
 
         function onPageSnapshotReceivedPages(pages) {
+            if (pairingDialog && pairingDialog.visible) {
+                return
+            }
             if (!DataStore || !pages) return
             console.log("SYNC: received pages", pages.length)
             DataStore.applyPageUpdates(pages)
         }
 
         function onDeletedPageSnapshotReceivedPages(deletedPages) {
+            if (pairingDialog && pairingDialog.visible) {
+                return
+            }
             if (!DataStore || !deletedPages) return
             console.log("SYNC: received deleted pages", deletedPages.length)
             DataStore.applyDeletedPageUpdates(deletedPages)
         }
 
         function onBlockSnapshotReceivedBlocks(blocks) {
+            if (pairingDialog && pairingDialog.visible) {
+                return
+            }
             if (!DataStore || !blocks) return
             console.log("SYNC: received blocks", blocks.length)
             DataStore.applyBlockUpdates(blocks)

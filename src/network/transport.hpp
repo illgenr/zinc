@@ -139,6 +139,8 @@ private:
     crypto::NoiseRole noise_role_ = crypto::NoiseRole::Initiator;
     crypto::KeyPair local_keys_;
     QByteArray read_buffer_;
+    QHostAddress connect_host_;
+    uint16_t connect_port_ = 0;
     
     void setState(State state);
     void processHandshake(MessageType type, const std::vector<uint8_t>& payload);

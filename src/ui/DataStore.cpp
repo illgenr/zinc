@@ -20,6 +20,8 @@
 #include <algorithm>
 #include <optional>
 
+#include "core/three_way_merge.hpp"
+
 namespace zinc::ui {
 
 namespace {
@@ -334,6 +336,9 @@ void DataStore::createTables() {
             content_markdown TEXT NOT NULL DEFAULT '',
             depth INTEGER DEFAULT 0,
             sort_order INTEGER DEFAULT 0,
+            last_synced_at TEXT DEFAULT '',
+            last_synced_title TEXT DEFAULT '',
+            last_synced_content_markdown TEXT NOT NULL DEFAULT '',
             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
             updated_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
@@ -343,6 +348,23 @@ void DataStore::createTables() {
         CREATE TABLE IF NOT EXISTS deleted_pages (
             page_id TEXT PRIMARY KEY,
             deleted_at TEXT NOT NULL
+        )
+    )");
+
+    // Page conflicts (detected when both sides changed since last synced base)
+    query.exec(R"(
+        CREATE TABLE IF NOT EXISTS page_conflicts (
+            page_id TEXT PRIMARY KEY,
+            base_updated_at TEXT NOT NULL DEFAULT '',
+            local_updated_at TEXT NOT NULL DEFAULT '',
+            remote_updated_at TEXT NOT NULL DEFAULT '',
+            base_title TEXT NOT NULL DEFAULT '',
+            local_title TEXT NOT NULL DEFAULT '',
+            remote_title TEXT NOT NULL DEFAULT '',
+            base_content_markdown TEXT NOT NULL DEFAULT '',
+            local_content_markdown TEXT NOT NULL DEFAULT '',
+            remote_content_markdown TEXT NOT NULL DEFAULT '',
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
     )");
     
@@ -395,6 +417,7 @@ void DataStore::createTables() {
     query.exec("CREATE INDEX IF NOT EXISTS idx_deleted_pages_deleted_at ON deleted_pages(deleted_at)");
     query.exec("CREATE INDEX IF NOT EXISTS idx_paired_devices_workspace_id ON paired_devices(workspace_id)");
     query.exec("CREATE INDEX IF NOT EXISTS idx_attachments_updated_at ON attachments(updated_at, id)");
+    query.exec("CREATE INDEX IF NOT EXISTS idx_page_conflicts_created_at ON page_conflicts(created_at, page_id)");
 }
 
 QVariantList DataStore::getAllPages() {
@@ -627,6 +650,211 @@ QVariantList DataStore::getPagesForSyncSince(const QString& updatedAtCursor,
     qDebug() << "DataStore: getPagesForSyncSince count=" << pages.size()
              << "cursorAt=" << updatedAtCursor << "cursorId=" << pageIdCursor;
     return pages;
+}
+
+void DataStore::markPagesAsSynced(const QVariantList& pagesOrIds) {
+    if (!m_ready) return;
+    if (pagesOrIds.isEmpty()) return;
+
+    auto pageIdFor = [](const QVariant& v) -> QString {
+        if (v.canConvert<QVariantMap>()) {
+            const auto m = v.toMap();
+            return m.value(QStringLiteral("pageId")).toString();
+        }
+        return v.toString();
+    };
+
+    m_db.transaction();
+    QSqlQuery q(m_db);
+    q.prepare(R"SQL(
+        UPDATE pages
+        SET last_synced_at = updated_at,
+            last_synced_title = title,
+            last_synced_content_markdown = content_markdown
+        WHERE id = ?
+          AND NOT EXISTS (SELECT 1 FROM page_conflicts WHERE page_id = ?)
+    )SQL");
+
+    for (const auto& v : pagesOrIds) {
+        const auto pageId = pageIdFor(v);
+        if (pageId.isEmpty()) continue;
+        q.bindValue(0, pageId);
+        q.bindValue(1, pageId);
+        q.exec();
+        q.finish();
+    }
+    m_db.commit();
+}
+
+QVariantList DataStore::getPageConflicts() {
+    QVariantList out;
+    if (!m_ready) return out;
+
+    QSqlQuery q(m_db);
+    q.exec(R"SQL(
+        SELECT page_id, local_title, remote_title, local_updated_at, remote_updated_at, created_at
+        FROM page_conflicts
+        ORDER BY created_at DESC, page_id ASC
+    )SQL");
+
+    while (q.next()) {
+        QVariantMap row;
+        row["pageId"] = q.value(0).toString();
+        row["localTitle"] = q.value(1).toString();
+        row["remoteTitle"] = q.value(2).toString();
+        row["localUpdatedAt"] = q.value(3).toString();
+        row["remoteUpdatedAt"] = q.value(4).toString();
+        row["createdAt"] = q.value(5).toString();
+        out.append(row);
+    }
+    return out;
+}
+
+QVariantMap DataStore::getPageConflict(const QString& pageId) {
+    QVariantMap out;
+    if (!m_ready || pageId.isEmpty()) return out;
+
+    QSqlQuery q(m_db);
+    q.prepare(R"SQL(
+        SELECT page_id,
+               base_updated_at, local_updated_at, remote_updated_at,
+               base_title, local_title, remote_title,
+               base_content_markdown, local_content_markdown, remote_content_markdown,
+               created_at
+        FROM page_conflicts
+        WHERE page_id = ?
+    )SQL");
+    q.addBindValue(pageId);
+    if (!q.exec() || !q.next()) {
+        return out;
+    }
+
+    out["pageId"] = q.value(0).toString();
+    out["baseUpdatedAt"] = q.value(1).toString();
+    out["localUpdatedAt"] = q.value(2).toString();
+    out["remoteUpdatedAt"] = q.value(3).toString();
+    out["baseTitle"] = q.value(4).toString();
+    out["localTitle"] = q.value(5).toString();
+    out["remoteTitle"] = q.value(6).toString();
+    out["baseContentMarkdown"] = q.value(7).toString();
+    out["localContentMarkdown"] = q.value(8).toString();
+    out["remoteContentMarkdown"] = q.value(9).toString();
+    out["createdAt"] = q.value(10).toString();
+    return out;
+}
+
+bool DataStore::hasPageConflict(const QString& pageId) {
+    if (!m_ready || pageId.isEmpty()) return false;
+    QSqlQuery q(m_db);
+    q.prepare("SELECT 1 FROM page_conflicts WHERE page_id = ? LIMIT 1");
+    q.addBindValue(pageId);
+    return q.exec() && q.next();
+}
+
+QVariantMap DataStore::previewMergeForPageConflict(const QString& pageId) {
+    QVariantMap out;
+    const auto conflict = getPageConflict(pageId);
+    if (conflict.isEmpty()) return out;
+
+    const auto base = conflict.value(QStringLiteral("baseContentMarkdown")).toString().toUtf8();
+    const auto ours = conflict.value(QStringLiteral("localContentMarkdown")).toString().toUtf8();
+    const auto theirs = conflict.value(QStringLiteral("remoteContentMarkdown")).toString().toUtf8();
+
+    const auto result = zinc::three_way_merge_text(
+        std::string_view(base.constData(), static_cast<size_t>(base.size())),
+        std::string_view(ours.constData(), static_cast<size_t>(ours.size())),
+        std::string_view(theirs.constData(), static_cast<size_t>(theirs.size())));
+
+    out["mergedMarkdown"] = QString::fromUtf8(result.merged);
+    out["clean"] = result.clean();
+    out["kind"] = (result.kind == zinc::ThreeWayMergeResult::Kind::Clean)
+        ? QStringLiteral("clean")
+        : (result.kind == zinc::ThreeWayMergeResult::Kind::Conflict)
+            ? QStringLiteral("conflict")
+            : QStringLiteral("fallback");
+    return out;
+}
+
+void DataStore::resolvePageConflict(const QString& pageId, const QString& resolution) {
+    if (!m_ready || pageId.isEmpty()) return;
+
+    const auto conflict = getPageConflict(pageId);
+    if (conflict.isEmpty()) return;
+
+    const auto resolvedUpdatedAt = now_timestamp_utc();
+
+    const auto localTitle = conflict.value(QStringLiteral("localTitle")).toString();
+    const auto remoteTitle = conflict.value(QStringLiteral("remoteTitle")).toString();
+    const auto localMd = conflict.value(QStringLiteral("localContentMarkdown")).toString();
+    const auto remoteMd = conflict.value(QStringLiteral("remoteContentMarkdown")).toString();
+
+    QString resolvedTitle;
+    QString resolvedMd;
+
+    if (resolution == QStringLiteral("remote")) {
+        resolvedTitle = normalize_title(remoteTitle);
+        resolvedMd = remoteMd;
+    } else if (resolution == QStringLiteral("merge")) {
+        const auto preview = previewMergeForPageConflict(pageId);
+        resolvedTitle = normalize_title(localTitle.isEmpty() ? remoteTitle : localTitle);
+        resolvedMd = preview.value(QStringLiteral("mergedMarkdown")).toString();
+    } else {
+        // Default: keep local
+        resolvedTitle = normalize_title(localTitle);
+        resolvedMd = localMd;
+    }
+
+    m_db.transaction();
+
+    QSqlQuery upsert(m_db);
+    upsert.prepare(R"SQL(
+        INSERT INTO pages (
+            id, title, parent_id, content_markdown, depth, sort_order,
+            last_synced_at, last_synced_title, last_synced_content_markdown,
+            updated_at
+        )
+        VALUES (
+            ?,
+            ?,
+            COALESCE((SELECT parent_id FROM pages WHERE id = ?), ''),
+            ?,
+            COALESCE((SELECT depth FROM pages WHERE id = ?), 0),
+            COALESCE((SELECT sort_order FROM pages WHERE id = ?), 0),
+            ?,
+            ?,
+            ?,
+            ?
+        )
+        ON CONFLICT(id) DO UPDATE SET
+            title = excluded.title,
+            content_markdown = excluded.content_markdown,
+            updated_at = excluded.updated_at,
+            last_synced_at = excluded.last_synced_at,
+            last_synced_title = excluded.last_synced_title,
+            last_synced_content_markdown = excluded.last_synced_content_markdown;
+    )SQL");
+    upsert.addBindValue(pageId);
+    upsert.addBindValue(resolvedTitle);
+    upsert.addBindValue(pageId);
+    upsert.addBindValue(resolvedMd);
+    upsert.addBindValue(pageId);
+    upsert.addBindValue(pageId);
+    upsert.addBindValue(resolvedUpdatedAt);
+    upsert.addBindValue(resolvedTitle);
+    upsert.addBindValue(resolvedMd);
+    upsert.addBindValue(resolvedUpdatedAt);
+    upsert.exec();
+
+    QSqlQuery del(m_db);
+    del.prepare("DELETE FROM page_conflicts WHERE page_id = ?");
+    del.addBindValue(pageId);
+    del.exec();
+
+    m_db.commit();
+
+    emit pagesChanged();
+    emit pageContentChanged(pageId);
+    emit pageConflictsChanged();
 }
 
 QVariantList DataStore::getDeletedPagesForSync() {
@@ -999,10 +1227,17 @@ void DataStore::savePage(const QVariantMap& page) {
     if (!m_ready) return;
     
     QSqlQuery query(m_db);
-    query.prepare(R"(
-        INSERT OR REPLACE INTO pages (id, title, parent_id, content_markdown, depth, sort_order, updated_at)
+    query.prepare(R"SQL(
+        INSERT INTO pages (id, title, parent_id, content_markdown, depth, sort_order, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?)
-    )");
+        ON CONFLICT(id) DO UPDATE SET
+            title = excluded.title,
+            parent_id = excluded.parent_id,
+            content_markdown = excluded.content_markdown,
+            depth = excluded.depth,
+            sort_order = excluded.sort_order,
+            updated_at = excluded.updated_at;
+    )SQL");
     
     const QString updatedAt = now_timestamp_utc();
     query.addBindValue(page["pageId"].toString());
@@ -1209,6 +1444,7 @@ void DataStore::applyPageUpdates(const QVariantList& pages) {
     qDebug() << "DataStore: applyPageUpdates incoming count=" << pages.size();
 
     bool changed = false;
+    QSet<QString> conflictPageIds;
     m_db.transaction();
 
     QSqlQuery tombstoneSelect(m_db);
@@ -1218,22 +1454,71 @@ void DataStore::applyPageUpdates(const QVariantList& pages) {
     tombstoneDelete.prepare("DELETE FROM deleted_pages WHERE page_id = ?");
 
     QSqlQuery selectQuery(m_db);
-    selectQuery.prepare("SELECT updated_at FROM pages WHERE id = ?");
+    selectQuery.prepare(R"SQL(
+        SELECT updated_at,
+               title,
+               content_markdown,
+               COALESCE(last_synced_at, ''),
+               COALESCE(last_synced_title, ''),
+               COALESCE(last_synced_content_markdown, '')
+        FROM pages
+        WHERE id = ?
+    )SQL");
+
+    QSqlQuery conflictUpsert(m_db);
+    conflictUpsert.prepare(R"SQL(
+        INSERT INTO page_conflicts (
+            page_id,
+            base_updated_at, local_updated_at, remote_updated_at,
+            base_title, local_title, remote_title,
+            base_content_markdown, local_content_markdown, remote_content_markdown
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(page_id) DO UPDATE SET
+            base_updated_at = excluded.base_updated_at,
+            local_updated_at = excluded.local_updated_at,
+            remote_updated_at = excluded.remote_updated_at,
+            base_title = excluded.base_title,
+            local_title = excluded.local_title,
+            remote_title = excluded.remote_title,
+            base_content_markdown = excluded.base_content_markdown,
+            local_content_markdown = excluded.local_content_markdown,
+            remote_content_markdown = excluded.remote_content_markdown,
+            created_at = CURRENT_TIMESTAMP;
+    )SQL");
+
+    QSqlQuery conflictSelect(m_db);
+    conflictSelect.prepare(R"SQL(
+        SELECT local_updated_at, remote_updated_at, local_title, local_content_markdown
+        FROM page_conflicts
+        WHERE page_id = ?
+    )SQL");
+
+    QSqlQuery conflictDelete(m_db);
+    conflictDelete.prepare("DELETE FROM page_conflicts WHERE page_id = ?");
 
     QSqlQuery upsertQuery(m_db);
     upsertQuery.prepare(R"SQL(
-        INSERT INTO pages (id, title, parent_id, content_markdown, depth, sort_order, updated_at)
-        VALUES (?, ?, ?, COALESCE(?, ''), ?, ?, ?)
+        INSERT INTO pages (
+            id, title, parent_id, content_markdown, depth, sort_order,
+            last_synced_at, last_synced_title, last_synced_content_markdown,
+            updated_at
+        )
+        VALUES (?, ?, ?, COALESCE(?, ''), ?, ?, ?, ?, COALESCE(?, ''), ?)
         ON CONFLICT(id) DO UPDATE SET
             title = excluded.title,
             parent_id = excluded.parent_id,
             content_markdown = COALESCE(excluded.content_markdown, pages.content_markdown),
             depth = excluded.depth,
             sort_order = excluded.sort_order,
+            last_synced_at = excluded.last_synced_at,
+            last_synced_title = excluded.last_synced_title,
+            last_synced_content_markdown = COALESCE(excluded.last_synced_content_markdown, pages.last_synced_content_markdown),
             updated_at = excluded.updated_at;
     )SQL");
 
     QSet<QString> contentChangedPages;
+    QSet<QString> resolvedConflictPageIds;
 
     for (const auto& entry : pages) {
         auto page = entry.toMap();
@@ -1244,6 +1529,9 @@ void DataStore::applyPageUpdates(const QVariantList& pages) {
 
         const QString remoteUpdated = normalize_timestamp(page.value("updatedAt"));
         QDateTime remoteTime = parse_timestamp(remoteUpdated);
+        const QString remoteTitle = normalize_title(page.value("title"));
+        const bool hasRemoteContent = page.contains(QStringLiteral("contentMarkdown"));
+        const QString remoteMd = hasRemoteContent ? page.value("contentMarkdown").toString() : QString();
 
         tombstoneSelect.bindValue(0, pageId);
         QString deletedAt;
@@ -1266,25 +1554,120 @@ void DataStore::applyPageUpdates(const QVariantList& pages) {
 
         selectQuery.bindValue(0, pageId);
         QString localUpdated;
+        QString localTitle;
+        QString localMd;
+        QString baseUpdated;
+        QString baseTitle;
+        QString baseMd;
         if (selectQuery.exec() && selectQuery.next()) {
             localUpdated = selectQuery.value(0).toString();
+            localTitle = selectQuery.value(1).toString();
+            localMd = selectQuery.value(2).toString();
+            baseUpdated = selectQuery.value(3).toString();
+            baseTitle = selectQuery.value(4).toString();
+            baseMd = selectQuery.value(5).toString();
         }
         selectQuery.finish();
 
+        // If we already have a conflict for this page, check whether this incoming update is a
+        // "resolved" version (newer than both sides at detection time). If so, clear the conflict
+        // and apply the update, but only if the user hasn't edited locally since the conflict.
+        conflictSelect.bindValue(0, pageId);
+        QString conflictLocalUpdated;
+        QString conflictRemoteUpdated;
+        QString conflictLocalTitle;
+        QString conflictLocalMd;
+        if (conflictSelect.exec() && conflictSelect.next()) {
+            conflictLocalUpdated = conflictSelect.value(0).toString();
+            conflictRemoteUpdated = conflictSelect.value(1).toString();
+            conflictLocalTitle = conflictSelect.value(2).toString();
+            conflictLocalMd = conflictSelect.value(3).toString();
+        }
+        conflictSelect.finish();
+
+        const auto tryResolveExistingConflict = [&]() -> bool {
+            if (conflictLocalUpdated.isEmpty() || conflictRemoteUpdated.isEmpty()) return false;
+            if (!hasRemoteContent) return false;
+            if (localUpdated.isEmpty()) return false;
+
+            // Only auto-clear if the user's local content hasn't changed since the conflict
+            // was recorded (timestamps may drift due to autosave or other no-op updates).
+            if (localMd != conflictLocalMd) return false;
+            if (normalize_title(localTitle) != normalize_title(conflictLocalTitle)) return false;
+
+            const auto conflictLocalTime = parse_timestamp(conflictLocalUpdated);
+            const auto conflictRemoteTime = parse_timestamp(conflictRemoteUpdated);
+            if (!conflictLocalTime.isValid() || !conflictRemoteTime.isValid() || !remoteTime.isValid()) return false;
+
+            const auto threshold = std::max(conflictLocalTime, conflictRemoteTime);
+            if (remoteTime <= threshold) return false;
+
+            conflictDelete.bindValue(0, pageId);
+            conflictDelete.exec();
+            conflictDelete.finish();
+            resolvedConflictPageIds.insert(pageId);
+            return true;
+        };
+
+        const bool resolvedExistingConflict = tryResolveExistingConflict();
+
+        const auto maybeStoreConflict = [&]() -> bool {
+            if (resolvedExistingConflict) return false;
+            if (localUpdated.isEmpty()) return false;
+            if (baseUpdated.isEmpty()) return false;
+            if (!remoteTime.isValid()) return false;
+
+            const auto localTime = parse_timestamp(localUpdated);
+            const auto baseTime = parse_timestamp(baseUpdated);
+            if (!localTime.isValid() || !baseTime.isValid()) return false;
+
+            const bool localChangedSinceBase = localTime > baseTime;
+            const bool remoteChangedSinceBase = remoteTime > baseTime;
+            if (!localChangedSinceBase || !remoteChangedSinceBase) return false;
+
+            if (!hasRemoteContent) return false;
+
+            const bool sameTitle = normalize_title(localTitle) == remoteTitle;
+            const bool sameContent = localMd == remoteMd;
+            if (sameTitle && sameContent) {
+                // Both changed timestamps but converged to same content; treat as synced.
+                return false;
+            }
+
+            conflictUpsert.bindValue(0, pageId);
+            conflictUpsert.bindValue(1, baseUpdated);
+            conflictUpsert.bindValue(2, localUpdated);
+            conflictUpsert.bindValue(3, remoteUpdated);
+            conflictUpsert.bindValue(4, baseTitle);
+            conflictUpsert.bindValue(5, localTitle);
+            conflictUpsert.bindValue(6, remoteTitle);
+            conflictUpsert.bindValue(7, baseMd);
+            conflictUpsert.bindValue(8, localMd);
+            conflictUpsert.bindValue(9, remoteMd);
+            const bool ok = conflictUpsert.exec();
+            conflictUpsert.finish();
+            return ok;
+        };
+
+        if (maybeStoreConflict()) {
+            qInfo() << "DataStore: conflict detected pageId=" << pageId;
+            conflictPageIds.insert(pageId);
+            continue;
+        }
+
         if (!localUpdated.isEmpty()) {
             QDateTime localTime = parse_timestamp(localUpdated);
-            if (localTime.isValid() && remoteTime.isValid() &&
-                localTime > remoteTime) {
+            if (localTime.isValid() && remoteTime.isValid() && localTime > remoteTime) {
                 qDebug() << "DataStore: skip page" << pageId << "local>remote";
                 continue;
             }
         }
 
         upsertQuery.bindValue(0, pageId);
-        upsertQuery.bindValue(1, normalize_title(page.value("title")));
+        upsertQuery.bindValue(1, remoteTitle);
         upsertQuery.bindValue(2, normalize_parent_id(page.value("parentId")));
-        if (page.contains("contentMarkdown")) {
-            upsertQuery.bindValue(3, page.value("contentMarkdown").toString());
+        if (hasRemoteContent) {
+            upsertQuery.bindValue(3, remoteMd);
             contentChangedPages.insert(pageId);
         } else {
             upsertQuery.bindValue(3, QVariant());
@@ -1292,6 +1675,13 @@ void DataStore::applyPageUpdates(const QVariantList& pages) {
         upsertQuery.bindValue(4, page.value("depth").toInt());
         upsertQuery.bindValue(5, page.value("sortOrder").toInt());
         upsertQuery.bindValue(6, remoteUpdated);
+        upsertQuery.bindValue(7, remoteTitle);
+        if (hasRemoteContent) {
+            upsertQuery.bindValue(8, remoteMd);
+        } else {
+            upsertQuery.bindValue(8, QVariant());
+        }
+        upsertQuery.bindValue(9, remoteUpdated);
         if (!upsertQuery.exec()) {
             qWarning() << "DataStore: Failed to apply page update:" << upsertQuery.lastError().text();
         } else {
@@ -1307,6 +1697,18 @@ void DataStore::applyPageUpdates(const QVariantList& pages) {
         for (const auto& pageId : contentChangedPages) {
             emit pageContentChanged(pageId);
         }
+    }
+    if (!conflictPageIds.isEmpty()) {
+        emit pageConflictsChanged();
+        for (const auto& pageId : conflictPageIds) {
+            const auto conflict = getPageConflict(pageId);
+            if (!conflict.isEmpty()) {
+                emit pageConflictDetected(conflict);
+            }
+        }
+    }
+    if (!resolvedConflictPageIds.isEmpty()) {
+        emit pageConflictsChanged();
     }
 }
 
@@ -2251,6 +2653,65 @@ bool DataStore::runMigrations() {
         }
         m_db.commit();
         currentVersion = 6;
+    }
+
+    // Migration 7: Add sync-base metadata and conflict table for pages.
+    if (currentVersion < 7) {
+        qDebug() << "DataStore: Running migration to version 7";
+        m_db.transaction();
+
+        QSqlQuery migration(m_db);
+
+        // Ensure page sync-base columns exist.
+        QSet<QString> pageColumns;
+        QSqlQuery pageInfo(m_db);
+        if (pageInfo.exec("PRAGMA table_info(pages)")) {
+            while (pageInfo.next()) {
+                pageColumns.insert(pageInfo.value(1).toString());
+            }
+        }
+        pageInfo.finish();
+
+        if (!pageColumns.contains(QStringLiteral("last_synced_at"))) {
+            migration.exec("ALTER TABLE pages ADD COLUMN last_synced_at TEXT DEFAULT ''");
+        }
+        if (!pageColumns.contains(QStringLiteral("last_synced_title"))) {
+            migration.exec("ALTER TABLE pages ADD COLUMN last_synced_title TEXT DEFAULT ''");
+        }
+        if (!pageColumns.contains(QStringLiteral("last_synced_content_markdown"))) {
+            migration.exec("ALTER TABLE pages ADD COLUMN last_synced_content_markdown TEXT NOT NULL DEFAULT ''");
+        }
+
+        // Initialize base to current values so upgrade does not immediately prompt.
+        migration.exec(R"SQL(
+            UPDATE pages
+            SET last_synced_at = updated_at,
+                last_synced_title = title,
+                last_synced_content_markdown = content_markdown
+            WHERE COALESCE(last_synced_at, '') = '';
+        )SQL");
+
+        // Conflicts table.
+        migration.exec(R"SQL(
+            CREATE TABLE IF NOT EXISTS page_conflicts (
+                page_id TEXT PRIMARY KEY,
+                base_updated_at TEXT NOT NULL DEFAULT '',
+                local_updated_at TEXT NOT NULL DEFAULT '',
+                remote_updated_at TEXT NOT NULL DEFAULT '',
+                base_title TEXT NOT NULL DEFAULT '',
+                local_title TEXT NOT NULL DEFAULT '',
+                remote_title TEXT NOT NULL DEFAULT '',
+                base_content_markdown TEXT NOT NULL DEFAULT '',
+                local_content_markdown TEXT NOT NULL DEFAULT '',
+                remote_content_markdown TEXT NOT NULL DEFAULT '',
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        )SQL");
+        migration.exec("CREATE INDEX IF NOT EXISTS idx_page_conflicts_created_at ON page_conflicts(created_at, page_id)");
+
+        migration.exec("PRAGMA user_version = 7");
+        m_db.commit();
+        currentVersion = 7;
     }
     
     qDebug() << "DataStore: Migrations complete. Schema version:" << currentVersion;

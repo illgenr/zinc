@@ -210,18 +210,29 @@ void SyncManager::connectToEndpoint(const Uuid& device_id,
 
 void SyncManager::disconnectFromPeer(const Uuid& device_id) {
     auto it = peers_.find(device_id);
-    if (it != peers_.end()) {
-        if (sync_debug_enabled()) {
-            qInfo() << "SYNC: disconnectFromPeer device_id=" << QString::fromStdString(device_id.to_string());
-        }
-        if (it->second->connection) {
-            it->second->connection->disconnect();
-        }
-        peers_.erase(it);
-        emit peerDisconnected(device_id);
-        emit peersChanged();
+    if (it == peers_.end()) {
+        autoconnect_attempted_.erase(device_id);
+        return;
     }
+
+    if (sync_debug_enabled()) {
+        qInfo() << "SYNC: disconnectFromPeer device_id=" << QString::fromStdString(device_id.to_string());
+    }
+
+    // Important: remove from the map before calling Connection::disconnect(), because that may
+    // synchronously emit signals that would otherwise re-enter and erase the same map entry.
+    auto peer = std::move(it->second);
+    peers_.erase(it);
     autoconnect_attempted_.erase(device_id);
+
+    if (peer && peer->connection) {
+        peer->connection->disconnect();
+        auto* raw = peer->connection.release();
+        if (raw) raw->deleteLater();
+    }
+
+    emit peerDisconnected(device_id);
+    emit peersChanged();
 }
 
 void SyncManager::broadcastChange(const std::string& doc_id,
@@ -314,7 +325,6 @@ void SyncManager::onPeerLost(const Uuid& device_id) {
         qInfo() << "SYNC: peerLost device_id=" << QString::fromStdString(device_id.to_string());
     }
     disconnectFromPeer(device_id);
-    autoconnect_attempted_.erase(device_id);
 }
 
 void SyncManager::onNewConnection(QTcpSocket* socket) {
@@ -346,6 +356,10 @@ void SyncManager::onConnectionConnected() {
         if (peer->connection.get() == conn) {
             peer->sync_state = SyncState::Streaming;
             sendHello(*conn);
+            qInfo() << "SYNC: connection established"
+                    << "peer_id=" << QString::fromStdString(id.to_string())
+                    << "endpoint=" << conn->peerAddress().toString()
+                    << "port=" << conn->peerPort();
             if (sync_debug_enabled()) {
                 qInfo() << "SYNC: connected peer_id=" << QString::fromStdString(id.to_string());
             }
@@ -359,12 +373,17 @@ void SyncManager::onConnectionDisconnected() {
     if (!conn) return;
     if (stopping_) return;
     
-    // Find and remove the peer
+    // Find and remove the peer.
+    // Important: do not delete `conn` synchronously while handling its signal.
     for (auto it = peers_.begin(); it != peers_.end(); ++it) {
         if (it->second->connection.get() == conn) {
             Uuid id = it->first;
             if (sync_debug_enabled()) {
                 qInfo() << "SYNC: disconnected peer_id=" << QString::fromStdString(id.to_string());
+            }
+            if (it->second->connection) {
+                auto* raw = it->second->connection.release();
+                if (raw) raw->deleteLater();
             }
             peers_.erase(it);
             autoconnect_attempted_.erase(id);
@@ -385,9 +404,14 @@ void SyncManager::onConnectionStateChanged(Connection::State state) {
     if (stopping_) return;
 
     // Remove failed connections so that future presence updates can trigger retries.
+    // Important: do not delete `conn` synchronously while handling its signal.
     for (auto it = peers_.begin(); it != peers_.end(); ++it) {
         if (it->second->connection.get() == conn) {
             const auto id = it->first;
+            if (it->second->connection) {
+                auto* raw = it->second->connection.release();
+                if (raw) raw->deleteLater();
+            }
             peers_.erase(it);
             autoconnect_attempted_.erase(id);
             emit peerDisconnected(id);

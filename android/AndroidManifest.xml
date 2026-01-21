@@ -45,7 +45,7 @@
             android:label="Zinc"
             android:launchMode="singleTop"
             android:screenOrientation="unspecified"
-            android:windowSoftInputMode="adjustPan"
+            android:windowSoftInputMode="adjustPan"                     
             android:exported="true">
             
             <intent-filter>
