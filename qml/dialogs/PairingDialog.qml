@@ -39,6 +39,10 @@ Dialog {
     property string pagesCursorId: ""
     property string deletedPagesCursorAt: ""
     property string deletedPagesCursorId: ""
+    property string notebooksCursorAt: ""
+    property string notebooksCursorId: ""
+    property string deletedNotebooksCursorAt: ""
+    property string deletedNotebooksCursorId: ""
     property string attachmentsCursorAt: ""
     property string attachmentsCursorId: ""
 
@@ -280,6 +284,10 @@ Dialog {
                          : DataStore.getPagesForSyncSince(pagesCursorAt, pagesCursorId)
         var deletedPages = full ? DataStore.getDeletedPagesForSync()
                                 : DataStore.getDeletedPagesForSyncSince(deletedPagesCursorAt, deletedPagesCursorId)
+        var notebooks = full ? (DataStore.getNotebooksForSync ? DataStore.getNotebooksForSync() : [])
+                             : (DataStore.getNotebooksForSyncSince ? DataStore.getNotebooksForSyncSince(notebooksCursorAt, notebooksCursorId) : [])
+        var deletedNotebooks = full ? (DataStore.getDeletedNotebooksForSync ? DataStore.getDeletedNotebooksForSync() : [])
+                                    : (DataStore.getDeletedNotebooksForSyncSince ? DataStore.getDeletedNotebooksForSyncSince(deletedNotebooksCursorAt, deletedNotebooksCursorId) : [])
         var attachments = full ? DataStore.getAttachmentsForSync()
                                : DataStore.getAttachmentsForSyncSince(attachmentsCursorAt, attachmentsCursorId)
         if (!full && DataStore.getAttachmentsByIds) {
@@ -290,22 +298,29 @@ Dialog {
         }
         if (!full && (!pages || pages.length === 0) &&
             (!deletedPages || deletedPages.length === 0) &&
+            (!notebooks || notebooks.length === 0) &&
+            (!deletedNotebooks || deletedNotebooks.length === 0) &&
             (!attachments || attachments.length === 0)) {
             return
         }
         var payload = JSON.stringify({
-            v: 2,
+            v: 3,
             workspaceId: activeSyncController.workspaceId,
             full: full === true,
             pages: pages,
             deletedPages: deletedPages,
+            notebooks: notebooks,
+            deletedNotebooks: deletedNotebooks,
             attachments: attachments
         })
-        console.log("PairingDialog: sending snapshot full=", full === true, "pages", pages.length, "deleted", deletedPages.length, "attachments", attachments.length)
+        console.log("PairingDialog: sending snapshot full=", full === true, "pages", pages.length, "deleted", deletedPages.length,
+                    "notebooks", notebooks.length, "deletedNotebooks", deletedNotebooks.length, "attachments", attachments.length)
         activeSyncController.sendPageSnapshot(payload)
 
         advanceCursorFrom(pages, "pagesCursorAt", "pagesCursorId", "updatedAt", "pageId")
         advanceCursorFrom(deletedPages, "deletedPagesCursorAt", "deletedPagesCursorId", "deletedAt", "pageId")
+        advanceCursorFrom(notebooks, "notebooksCursorAt", "notebooksCursorId", "updatedAt", "notebookId")
+        advanceCursorFrom(deletedNotebooks, "deletedNotebooksCursorAt", "deletedNotebooksCursorId", "deletedAt", "notebookId")
         advanceCursorFrom(attachments, "attachmentsCursorAt", "attachmentsCursorId", "updatedAt", "attachmentId")
     }
     

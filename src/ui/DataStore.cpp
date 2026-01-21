@@ -33,6 +33,8 @@ constexpr const char* kSettingsLastViewedPageId = "ui/last_viewed_page_id";
 constexpr int kDefaultDeletedPagesRetention = 100;
 constexpr int kMaxDeletedPagesRetention = 10000;
 constexpr auto kDefaultPagesSeedTimestamp = "1900-01-01 00:00:00.000";
+constexpr auto kDefaultNotebookId = "00000000-0000-0000-0000-000000000001";
+constexpr auto kDefaultNotebookName = "My Notebook";
 
 QString now_timestamp_utc() {
     return QDateTime::currentDateTimeUtc().toString("yyyy-MM-dd HH:mm:ss.zzz");
@@ -249,6 +251,14 @@ QString normalize_title(const QVariant& value) {
     return raw;
 }
 
+QString normalize_notebook_name(const QVariant& value) {
+    const auto raw = value.toString().trimmed();
+    if (raw.isEmpty()) {
+        return QStringLiteral("Untitled Notebook");
+    }
+    return raw;
+}
+
 QDateTime parse_timestamp(const QString& value) {
     QDateTime dt = QDateTime::fromString(value, "yyyy-MM-dd HH:mm:ss.zzz");
     if (!dt.isValid()) {
@@ -320,6 +330,7 @@ bool DataStore::initialize() {
     createTables();
     m_ready = true;
     runMigrations();
+    ensureDefaultNotebook();
     qDebug() << "DataStore: Database initialized successfully";
     return true;
 }
@@ -331,6 +342,7 @@ void DataStore::createTables() {
     query.exec(R"(
         CREATE TABLE IF NOT EXISTS pages (
             id TEXT PRIMARY KEY,
+            notebook_id TEXT NOT NULL DEFAULT '',
             title TEXT NOT NULL DEFAULT 'Untitled',
             parent_id TEXT,
             content_markdown TEXT NOT NULL DEFAULT '',
@@ -341,6 +353,23 @@ void DataStore::createTables() {
             last_synced_content_markdown TEXT NOT NULL DEFAULT '',
             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
             updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    )");
+
+    query.exec(R"(
+        CREATE TABLE IF NOT EXISTS notebooks (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL DEFAULT 'Untitled Notebook',
+            sort_order INTEGER DEFAULT 0,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    )");
+
+    query.exec(R"(
+        CREATE TABLE IF NOT EXISTS deleted_notebooks (
+            notebook_id TEXT PRIMARY KEY,
+            deleted_at TEXT NOT NULL
         )
     )");
 
@@ -414,7 +443,9 @@ void DataStore::createTables() {
     // Create index for faster lookups
     query.exec("CREATE INDEX IF NOT EXISTS idx_blocks_page_id ON blocks(page_id)");
     query.exec("CREATE INDEX IF NOT EXISTS idx_pages_parent_id ON pages(parent_id)");
+    query.exec("CREATE INDEX IF NOT EXISTS idx_pages_notebook_id ON pages(notebook_id)");
     query.exec("CREATE INDEX IF NOT EXISTS idx_deleted_pages_deleted_at ON deleted_pages(deleted_at)");
+    query.exec("CREATE INDEX IF NOT EXISTS idx_deleted_notebooks_deleted_at ON deleted_notebooks(deleted_at)");
     query.exec("CREATE INDEX IF NOT EXISTS idx_paired_devices_workspace_id ON paired_devices(workspace_id)");
     query.exec("CREATE INDEX IF NOT EXISTS idx_attachments_updated_at ON attachments(updated_at, id)");
     query.exec("CREATE INDEX IF NOT EXISTS idx_page_conflicts_created_at ON page_conflicts(created_at, page_id)");
@@ -429,18 +460,52 @@ QVariantList DataStore::getAllPages() {
     }
     
     QSqlQuery query(m_db);
-    query.exec("SELECT id, title, parent_id, depth, sort_order FROM pages ORDER BY sort_order, created_at");
+    query.exec("SELECT id, notebook_id, title, parent_id, depth, sort_order FROM pages ORDER BY sort_order, created_at");
     
     while (query.next()) {
         QVariantMap page;
         page["pageId"] = query.value(0).toString();
-        page["title"] = query.value(1).toString();
-        page["parentId"] = query.value(2).toString();
-        page["depth"] = query.value(3).toInt();
-        page["sortOrder"] = query.value(4).toInt();
+        page["notebookId"] = query.value(1).toString();
+        page["title"] = query.value(2).toString();
+        page["parentId"] = query.value(3).toString();
+        page["depth"] = query.value(4).toInt();
+        page["sortOrder"] = query.value(5).toInt();
         pages.append(page);
     }
     
+    return pages;
+}
+
+QVariantList DataStore::getPagesForNotebook(const QString& notebookId) {
+    QVariantList pages;
+    if (!m_ready) {
+        return pages;
+    }
+
+    // Empty notebookId means "loose notes" (no notebook).
+    const auto resolvedNotebookId = notebookId;
+
+    QSqlQuery query(m_db);
+    query.prepare(R"SQL(
+        SELECT id, notebook_id, title, parent_id, depth, sort_order
+        FROM pages
+        WHERE notebook_id = ?
+        ORDER BY sort_order, created_at
+    )SQL");
+    query.addBindValue(resolvedNotebookId);
+    query.exec();
+
+    while (query.next()) {
+        QVariantMap page;
+        page["pageId"] = query.value(0).toString();
+        page["notebookId"] = query.value(1).toString();
+        page["title"] = query.value(2).toString();
+        page["parentId"] = query.value(3).toString();
+        page["depth"] = query.value(4).toInt();
+        page["sortOrder"] = query.value(5).toInt();
+        pages.append(page);
+    }
+
     return pages;
 }
 
@@ -588,17 +653,18 @@ QVariantList DataStore::getPagesForSync() {
     }
 
     QSqlQuery query(m_db);
-    query.exec("SELECT id, title, parent_id, content_markdown, depth, sort_order, updated_at FROM pages ORDER BY sort_order, created_at");
+    query.exec("SELECT id, notebook_id, title, parent_id, content_markdown, depth, sort_order, updated_at FROM pages ORDER BY sort_order, created_at");
 
     while (query.next()) {
         QVariantMap page;
         page["pageId"] = query.value(0).toString();
-        page["title"] = query.value(1).toString();
-        page["parentId"] = query.value(2).toString();
-        page["contentMarkdown"] = query.value(3).toString();
-        page["depth"] = query.value(4).toInt();
-        page["sortOrder"] = query.value(5).toInt();
-        page["updatedAt"] = query.value(6).toString();
+        page["notebookId"] = query.value(1).toString();
+        page["title"] = query.value(2).toString();
+        page["parentId"] = query.value(3).toString();
+        page["contentMarkdown"] = query.value(4).toString();
+        page["depth"] = query.value(5).toInt();
+        page["sortOrder"] = query.value(6).toInt();
+        page["updatedAt"] = query.value(7).toString();
         pages.append(page);
     }
 
@@ -620,7 +686,7 @@ QVariantList DataStore::getPagesForSyncSince(const QString& updatedAtCursor,
 
     QSqlQuery query(m_db);
     query.prepare(R"SQL(
-        SELECT id, title, parent_id, content_markdown, depth, sort_order, updated_at
+        SELECT id, notebook_id, title, parent_id, content_markdown, depth, sort_order, updated_at
         FROM pages
         WHERE updated_at > ?
            OR (updated_at = ? AND id > ?)
@@ -638,12 +704,13 @@ QVariantList DataStore::getPagesForSyncSince(const QString& updatedAtCursor,
     while (query.next()) {
         QVariantMap page;
         page["pageId"] = query.value(0).toString();
-        page["title"] = query.value(1).toString();
-        page["parentId"] = query.value(2).toString();
-        page["contentMarkdown"] = query.value(3).toString();
-        page["depth"] = query.value(4).toInt();
-        page["sortOrder"] = query.value(5).toInt();
-        page["updatedAt"] = query.value(6).toString();
+        page["notebookId"] = query.value(1).toString();
+        page["title"] = query.value(2).toString();
+        page["parentId"] = query.value(3).toString();
+        page["contentMarkdown"] = query.value(4).toString();
+        page["depth"] = query.value(5).toInt();
+        page["sortOrder"] = query.value(6).toInt();
+        page["updatedAt"] = query.value(7).toString();
         pages.append(page);
     }
 
@@ -809,12 +876,13 @@ void DataStore::resolvePageConflict(const QString& pageId, const QString& resolu
     QSqlQuery upsert(m_db);
     upsert.prepare(R"SQL(
         INSERT INTO pages (
-            id, title, parent_id, content_markdown, depth, sort_order,
+            id, notebook_id, title, parent_id, content_markdown, depth, sort_order,
             last_synced_at, last_synced_title, last_synced_content_markdown,
             updated_at
         )
         VALUES (
             ?,
+            COALESCE((SELECT notebook_id FROM pages WHERE id = ?), ?),
             ?,
             COALESCE((SELECT parent_id FROM pages WHERE id = ?), ''),
             ?,
@@ -834,6 +902,8 @@ void DataStore::resolvePageConflict(const QString& pageId, const QString& resolu
             last_synced_content_markdown = excluded.last_synced_content_markdown;
     )SQL");
     upsert.addBindValue(pageId);
+    upsert.addBindValue(pageId);
+    upsert.addBindValue(ensureDefaultNotebook());
     upsert.addBindValue(resolvedTitle);
     upsert.addBindValue(pageId);
     upsert.addBindValue(resolvedMd);
@@ -1208,16 +1278,17 @@ QVariantMap DataStore::getPage(const QString& pageId) {
     if (!m_ready) return page;
     
     QSqlQuery query(m_db);
-    query.prepare("SELECT id, title, parent_id, content_markdown, depth, sort_order FROM pages WHERE id = ?");
+    query.prepare("SELECT id, notebook_id, title, parent_id, content_markdown, depth, sort_order FROM pages WHERE id = ?");
     query.addBindValue(pageId);
     
     if (query.exec() && query.next()) {
         page["pageId"] = query.value(0).toString();
-        page["title"] = query.value(1).toString();
-        page["parentId"] = query.value(2).toString();
-        page["contentMarkdown"] = query.value(3).toString();
-        page["depth"] = query.value(4).toInt();
-        page["sortOrder"] = query.value(5).toInt();
+        page["notebookId"] = query.value(1).toString();
+        page["title"] = query.value(2).toString();
+        page["parentId"] = query.value(3).toString();
+        page["contentMarkdown"] = query.value(4).toString();
+        page["depth"] = query.value(5).toInt();
+        page["sortOrder"] = query.value(6).toInt();
     }
     
     return page;
@@ -1226,11 +1297,17 @@ QVariantMap DataStore::getPage(const QString& pageId) {
 void DataStore::savePage(const QVariantMap& page) {
     if (!m_ready) return;
     
+    const bool hasNotebookId = page.contains(QStringLiteral("notebookId"));
+    const QString notebookId = hasNotebookId
+        ? page.value(QStringLiteral("notebookId")).toString()
+        : ensureDefaultNotebook();
+
     QSqlQuery query(m_db);
     query.prepare(R"SQL(
-        INSERT INTO pages (id, title, parent_id, content_markdown, depth, sort_order, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO pages (id, notebook_id, title, parent_id, content_markdown, depth, sort_order, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
+            notebook_id = excluded.notebook_id,
             title = excluded.title,
             parent_id = excluded.parent_id,
             content_markdown = excluded.content_markdown,
@@ -1241,6 +1318,7 @@ void DataStore::savePage(const QVariantMap& page) {
     
     const QString updatedAt = now_timestamp_utc();
     query.addBindValue(page["pageId"].toString());
+    query.addBindValue(notebookId);
     query.addBindValue(normalize_title(page.value("title")));
     query.addBindValue(normalize_parent_id(page.value("parentId")));
     query.addBindValue(page.value("contentMarkdown").toString());
@@ -1344,25 +1422,198 @@ void DataStore::saveAllPages(const QVariantList& pages) {
     prune_deleted_pages(m_db, deleted_pages_retention_limit());
 
     QSqlQuery selectQuery(m_db);
-    selectQuery.prepare("SELECT title, parent_id, depth, sort_order FROM pages WHERE id = ?");
+    selectQuery.prepare("SELECT notebook_id, title, parent_id, depth, sort_order FROM pages WHERE id = ?");
 
     QSqlQuery insertQuery(m_db);
     insertQuery.prepare(R"SQL(
-        INSERT INTO pages (id, title, parent_id, content_markdown, depth, sort_order, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO pages (id, notebook_id, title, parent_id, content_markdown, depth, sort_order, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     )SQL");
 
     QSqlQuery updateContentQuery(m_db);
     updateContentQuery.prepare(R"SQL(
         UPDATE pages
-        SET title = ?, parent_id = ?, depth = ?, sort_order = ?, updated_at = ?
+        SET notebook_id = ?, title = ?, parent_id = ?, depth = ?, sort_order = ?, updated_at = ?
         WHERE id = ?
     )SQL");
 
     QSqlQuery updateOrderQuery(m_db);
     updateOrderQuery.prepare(R"SQL(
         UPDATE pages
-        SET parent_id = ?, depth = ?, sort_order = ?, updated_at = ?
+        SET notebook_id = ?, parent_id = ?, depth = ?, sort_order = ?, updated_at = ?
+        WHERE id = ?
+    )SQL");
+
+    for (int i = 0; i < pages.size(); ++i) {
+        const auto page = pages[i].toMap();
+        const QString pageId = page.value("pageId").toString();
+        if (pageId.isEmpty()) continue;
+
+        const bool hasNotebookId = page.contains(QStringLiteral("notebookId"));
+        const QString notebookId = hasNotebookId
+            ? page.value(QStringLiteral("notebookId")).toString()
+            : ensureDefaultNotebook();
+        const QString title = normalize_title(page.value("title"));
+        const QString parentId = normalize_parent_id(page.value("parentId"));
+        const int depth = page.value("depth").toInt();
+        const int sortOrder = page.contains("sortOrder") ? page.value("sortOrder").toInt() : i;
+
+        selectQuery.bindValue(0, pageId);
+        bool exists = false;
+        QString existingNotebook;
+        QString existingTitle;
+        QString existingParent;
+        int existingDepth = 0;
+        int existingOrder = 0;
+        if (selectQuery.exec() && selectQuery.next()) {
+            exists = true;
+            existingNotebook = selectQuery.value(0).toString();
+            existingTitle = selectQuery.value(1).toString();
+            existingParent = selectQuery.value(2).toString();
+            existingDepth = selectQuery.value(3).toInt();
+            existingOrder = selectQuery.value(4).toInt();
+        }
+        selectQuery.finish();
+
+        if (!exists) {
+            insertQuery.bindValue(0, pageId);
+            insertQuery.bindValue(1, notebookId);
+            insertQuery.bindValue(2, title);
+            insertQuery.bindValue(3, parentId);
+            insertQuery.bindValue(4, QStringLiteral(""));
+            insertQuery.bindValue(5, depth);
+            insertQuery.bindValue(6, sortOrder);
+            insertQuery.bindValue(7, updatedAt);
+            if (!insertQuery.exec()) {
+                qWarning() << "DataStore: Failed to insert page:" << insertQuery.lastError().text();
+            }
+            insertQuery.finish();
+            continue;
+        }
+
+        const bool notebookChanged = (existingNotebook != notebookId);
+        const bool contentChanged = notebookChanged ||
+                                    (existingTitle != title) ||
+                                    (existingParent != parentId) ||
+                                    (existingDepth != depth);
+        const bool orderChanged = (existingOrder != sortOrder);
+
+        if (contentChanged) {
+            updateContentQuery.bindValue(0, notebookId);
+            updateContentQuery.bindValue(1, title);
+            updateContentQuery.bindValue(2, parentId);
+            updateContentQuery.bindValue(3, depth);
+            updateContentQuery.bindValue(4, sortOrder);
+            updateContentQuery.bindValue(5, updatedAt);
+            updateContentQuery.bindValue(6, pageId);
+            if (!updateContentQuery.exec()) {
+                qWarning() << "DataStore: Failed to update page:" << updateContentQuery.lastError().text();
+            }
+            updateContentQuery.finish();
+        } else if (orderChanged) {
+            updateOrderQuery.bindValue(0, notebookId);
+            updateOrderQuery.bindValue(1, parentId);
+            updateOrderQuery.bindValue(2, depth);
+            updateOrderQuery.bindValue(3, sortOrder);
+            updateOrderQuery.bindValue(4, updatedAt);
+            updateOrderQuery.bindValue(5, pageId);
+            if (!updateOrderQuery.exec()) {
+                qWarning() << "DataStore: Failed to update page order:" << updateOrderQuery.lastError().text();
+            }
+            updateOrderQuery.finish();
+        }
+    }
+    
+    m_db.commit();
+    emit pagesChanged();
+}
+
+void DataStore::savePagesForNotebook(const QString& notebookId, const QVariantList& pages) {
+    if (!m_ready) return;
+
+    // Empty notebookId means "loose notes" (no notebook).
+    const auto resolvedNotebookId = notebookId;
+
+    m_db.transaction();
+    const QString updatedAt = now_timestamp_utc();
+    const QString deletedAt = updatedAt;
+
+    QStringList ids;
+    ids.reserve(pages.size());
+    for (int i = 0; i < pages.size(); ++i) {
+        const auto page = pages[i].toMap();
+        const auto id = page.value("pageId").toString();
+        if (!id.isEmpty()) {
+            ids.push_back(id);
+        }
+    }
+
+    QString placeholders;
+    if (!ids.isEmpty()) {
+        placeholders.reserve(ids.size() * 2);
+        for (int i = 0; i < ids.size(); ++i) {
+            placeholders += (i == 0) ? "?" : ",?";
+        }
+
+        QSqlQuery removedQuery(m_db);
+        removedQuery.prepare("SELECT id FROM pages WHERE notebook_id = ? AND id NOT IN (" + placeholders + ")");
+        removedQuery.addBindValue(resolvedNotebookId);
+        for (int i = 0; i < ids.size(); ++i) {
+            removedQuery.addBindValue(ids[i]);
+        }
+        if (removedQuery.exec()) {
+            while (removedQuery.next()) {
+                const QString pageId = removedQuery.value(0).toString();
+                deleteBlocksForPage(pageId);
+                upsert_deleted_page(m_db, pageId, deletedAt);
+            }
+        }
+
+        QSqlQuery deleteQuery(m_db);
+        deleteQuery.prepare("DELETE FROM pages WHERE notebook_id = ? AND id NOT IN (" + placeholders + ")");
+        deleteQuery.addBindValue(resolvedNotebookId);
+        for (int i = 0; i < ids.size(); ++i) {
+            deleteQuery.addBindValue(ids[i]);
+        }
+        deleteQuery.exec();
+    } else {
+        QSqlQuery allIds(m_db);
+        allIds.prepare("SELECT id FROM pages WHERE notebook_id = ?");
+        allIds.addBindValue(resolvedNotebookId);
+        allIds.exec();
+        while (allIds.next()) {
+            const QString pageId = allIds.value(0).toString();
+            deleteBlocksForPage(pageId);
+            upsert_deleted_page(m_db, pageId, deletedAt);
+        }
+        QSqlQuery deleteAll(m_db);
+        deleteAll.prepare("DELETE FROM pages WHERE notebook_id = ?");
+        deleteAll.addBindValue(resolvedNotebookId);
+        deleteAll.exec();
+    }
+
+    prune_deleted_pages(m_db, deleted_pages_retention_limit());
+
+    QSqlQuery selectQuery(m_db);
+    selectQuery.prepare("SELECT title, parent_id, depth, sort_order FROM pages WHERE id = ?");
+
+    QSqlQuery insertQuery(m_db);
+    insertQuery.prepare(R"SQL(
+        INSERT INTO pages (id, notebook_id, title, parent_id, content_markdown, depth, sort_order, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    )SQL");
+
+    QSqlQuery updateContentQuery(m_db);
+    updateContentQuery.prepare(R"SQL(
+        UPDATE pages
+        SET notebook_id = ?, title = ?, parent_id = ?, depth = ?, sort_order = ?, updated_at = ?
+        WHERE id = ?
+    )SQL");
+
+    QSqlQuery updateOrderQuery(m_db);
+    updateOrderQuery.prepare(R"SQL(
+        UPDATE pages
+        SET notebook_id = ?, parent_id = ?, depth = ?, sort_order = ?, updated_at = ?
         WHERE id = ?
     )SQL");
 
@@ -1393,12 +1644,13 @@ void DataStore::saveAllPages(const QVariantList& pages) {
 
         if (!exists) {
             insertQuery.bindValue(0, pageId);
-            insertQuery.bindValue(1, title);
-            insertQuery.bindValue(2, parentId);
-            insertQuery.bindValue(3, QStringLiteral(""));
-            insertQuery.bindValue(4, depth);
-            insertQuery.bindValue(5, sortOrder);
-            insertQuery.bindValue(6, updatedAt);
+            insertQuery.bindValue(1, resolvedNotebookId);
+            insertQuery.bindValue(2, title);
+            insertQuery.bindValue(3, parentId);
+            insertQuery.bindValue(4, QStringLiteral(""));
+            insertQuery.bindValue(5, depth);
+            insertQuery.bindValue(6, sortOrder);
+            insertQuery.bindValue(7, updatedAt);
             if (!insertQuery.exec()) {
                 qWarning() << "DataStore: Failed to insert page:" << insertQuery.lastError().text();
             }
@@ -1412,29 +1664,31 @@ void DataStore::saveAllPages(const QVariantList& pages) {
         const bool orderChanged = (existingOrder != sortOrder);
 
         if (contentChanged) {
-            updateContentQuery.bindValue(0, title);
-            updateContentQuery.bindValue(1, parentId);
-            updateContentQuery.bindValue(2, depth);
-            updateContentQuery.bindValue(3, sortOrder);
-            updateContentQuery.bindValue(4, updatedAt);
-            updateContentQuery.bindValue(5, pageId);
+            updateContentQuery.bindValue(0, resolvedNotebookId);
+            updateContentQuery.bindValue(1, title);
+            updateContentQuery.bindValue(2, parentId);
+            updateContentQuery.bindValue(3, depth);
+            updateContentQuery.bindValue(4, sortOrder);
+            updateContentQuery.bindValue(5, updatedAt);
+            updateContentQuery.bindValue(6, pageId);
             if (!updateContentQuery.exec()) {
                 qWarning() << "DataStore: Failed to update page:" << updateContentQuery.lastError().text();
             }
             updateContentQuery.finish();
         } else if (orderChanged) {
-            updateOrderQuery.bindValue(0, parentId);
-            updateOrderQuery.bindValue(1, depth);
-            updateOrderQuery.bindValue(2, sortOrder);
-            updateOrderQuery.bindValue(3, updatedAt);
-            updateOrderQuery.bindValue(4, pageId);
+            updateOrderQuery.bindValue(0, resolvedNotebookId);
+            updateOrderQuery.bindValue(1, parentId);
+            updateOrderQuery.bindValue(2, depth);
+            updateOrderQuery.bindValue(3, sortOrder);
+            updateOrderQuery.bindValue(4, updatedAt);
+            updateOrderQuery.bindValue(5, pageId);
             if (!updateOrderQuery.exec()) {
                 qWarning() << "DataStore: Failed to update page order:" << updateOrderQuery.lastError().text();
             }
             updateOrderQuery.finish();
         }
     }
-    
+
     m_db.commit();
     emit pagesChanged();
 }
@@ -1500,12 +1754,13 @@ void DataStore::applyPageUpdates(const QVariantList& pages) {
     QSqlQuery upsertQuery(m_db);
     upsertQuery.prepare(R"SQL(
         INSERT INTO pages (
-            id, title, parent_id, content_markdown, depth, sort_order,
+            id, notebook_id, title, parent_id, content_markdown, depth, sort_order,
             last_synced_at, last_synced_title, last_synced_content_markdown,
             updated_at
         )
-        VALUES (?, ?, ?, COALESCE(?, ''), ?, ?, ?, ?, COALESCE(?, ''), ?)
+        VALUES (?, ?, ?, ?, COALESCE(?, ''), ?, ?, ?, ?, COALESCE(?, ''), ?)
         ON CONFLICT(id) DO UPDATE SET
+            notebook_id = excluded.notebook_id,
             title = excluded.title,
             parent_id = excluded.parent_id,
             content_markdown = COALESCE(excluded.content_markdown, pages.content_markdown),
@@ -1527,6 +1782,10 @@ void DataStore::applyPageUpdates(const QVariantList& pages) {
             continue;
         }
 
+        const bool hasNotebookId = page.contains(QStringLiteral("notebookId"));
+        const QString remoteNotebook = hasNotebookId
+            ? page.value(QStringLiteral("notebookId")).toString()
+            : ensureDefaultNotebook();
         const QString remoteUpdated = normalize_timestamp(page.value("updatedAt"));
         QDateTime remoteTime = parse_timestamp(remoteUpdated);
         const QString remoteTitle = normalize_title(page.value("title"));
@@ -1664,24 +1923,25 @@ void DataStore::applyPageUpdates(const QVariantList& pages) {
         }
 
         upsertQuery.bindValue(0, pageId);
-        upsertQuery.bindValue(1, remoteTitle);
-        upsertQuery.bindValue(2, normalize_parent_id(page.value("parentId")));
+        upsertQuery.bindValue(1, remoteNotebook);
+        upsertQuery.bindValue(2, remoteTitle);
+        upsertQuery.bindValue(3, normalize_parent_id(page.value("parentId")));
         if (hasRemoteContent) {
-            upsertQuery.bindValue(3, remoteMd);
+            upsertQuery.bindValue(4, remoteMd);
             contentChangedPages.insert(pageId);
         } else {
-            upsertQuery.bindValue(3, QVariant());
+            upsertQuery.bindValue(4, QVariant());
         }
-        upsertQuery.bindValue(4, page.value("depth").toInt());
-        upsertQuery.bindValue(5, page.value("sortOrder").toInt());
-        upsertQuery.bindValue(6, remoteUpdated);
-        upsertQuery.bindValue(7, remoteTitle);
+        upsertQuery.bindValue(5, page.value("depth").toInt());
+        upsertQuery.bindValue(6, page.value("sortOrder").toInt());
+        upsertQuery.bindValue(7, remoteUpdated);
+        upsertQuery.bindValue(8, remoteTitle);
         if (hasRemoteContent) {
-            upsertQuery.bindValue(8, remoteMd);
+            upsertQuery.bindValue(9, remoteMd);
         } else {
-            upsertQuery.bindValue(8, QVariant());
+            upsertQuery.bindValue(9, QVariant());
         }
-        upsertQuery.bindValue(9, remoteUpdated);
+        upsertQuery.bindValue(10, remoteUpdated);
         if (!upsertQuery.exec()) {
             qWarning() << "DataStore: Failed to apply page update:" << upsertQuery.lastError().text();
         } else {
@@ -1734,8 +1994,9 @@ void DataStore::savePageContentMarkdown(const QString& pageId, const QString& ma
 
     QSqlQuery query(m_db);
     query.prepare(R"SQL(
-        INSERT INTO pages (id, title, parent_id, content_markdown, depth, sort_order, updated_at)
-        VALUES (?, COALESCE((SELECT title FROM pages WHERE id = ?), 'Untitled'),
+        INSERT INTO pages (id, notebook_id, title, parent_id, content_markdown, depth, sort_order, updated_at)
+        VALUES (?, COALESCE((SELECT notebook_id FROM pages WHERE id = ?), ?),
+                COALESCE((SELECT title FROM pages WHERE id = ?), 'Untitled'),
                 COALESCE((SELECT parent_id FROM pages WHERE id = ?), ''),
                 ?, COALESCE((SELECT depth FROM pages WHERE id = ?), 0),
                 COALESCE((SELECT sort_order FROM pages WHERE id = ?), 0),
@@ -1745,6 +2006,8 @@ void DataStore::savePageContentMarkdown(const QString& pageId, const QString& ma
             updated_at = excluded.updated_at;
     )SQL");
     query.addBindValue(pageId);
+    query.addBindValue(pageId);
+    query.addBindValue(ensureDefaultNotebook());
     query.addBindValue(pageId);
     query.addBindValue(pageId);
     query.addBindValue(markdown);
@@ -2262,20 +2525,22 @@ bool DataStore::seedDefaultPages() {
 
     QSqlQuery insert(m_db);
     insert.prepare(R"SQL(
-        INSERT INTO pages (id, title, parent_id, content_markdown, depth, sort_order, created_at, updated_at)
-        VALUES (?, ?, ?, '', ?, ?, ?, ?)
+        INSERT INTO pages (id, notebook_id, title, parent_id, content_markdown, depth, sort_order, created_at, updated_at)
+        VALUES (?, ?, ?, ?, '', ?, ?, ?, ?)
         ON CONFLICT(id) DO NOTHING;
     )SQL");
 
+    const auto notebookId = ensureDefaultNotebook();
     const auto seedTs = QString::fromLatin1(kDefaultPagesSeedTimestamp);
     for (const auto& page : defaults) {
         insert.bindValue(0, QString::fromLatin1(page.id));
-        insert.bindValue(1, QString::fromLatin1(page.title));
-        insert.bindValue(2, QString::fromLatin1(page.parent));
-        insert.bindValue(3, page.depth);
-        insert.bindValue(4, page.sortOrder);
-        insert.bindValue(5, seedTs);
+        insert.bindValue(1, notebookId);
+        insert.bindValue(2, QString::fromLatin1(page.title));
+        insert.bindValue(3, QString::fromLatin1(page.parent));
+        insert.bindValue(4, page.depth);
+        insert.bindValue(5, page.sortOrder);
         insert.bindValue(6, seedTs);
+        insert.bindValue(7, seedTs);
         if (!insert.exec()) {
             qWarning() << "DataStore: seedDefaultPages failed:" << insert.lastError().text();
         } else if (insert.numRowsAffected() > 0) {
@@ -2289,6 +2554,364 @@ bool DataStore::seedDefaultPages() {
         emit pagesChanged();
     }
     return insertedAny;
+}
+
+QString DataStore::defaultNotebookId() const {
+    return QString::fromLatin1(kDefaultNotebookId);
+}
+
+QVariantList DataStore::getAllNotebooks() {
+    QVariantList notebooks;
+    if (!m_ready) return notebooks;
+
+    ensureDefaultNotebook();
+
+    QSqlQuery q(m_db);
+    q.exec(R"SQL(
+        SELECT id, name, sort_order
+        FROM notebooks
+        ORDER BY sort_order, created_at
+    )SQL");
+    while (q.next()) {
+        QVariantMap nb;
+        nb["notebookId"] = q.value(0).toString();
+        nb["name"] = q.value(1).toString();
+        nb["sortOrder"] = q.value(2).toInt();
+        notebooks.append(nb);
+    }
+    return notebooks;
+}
+
+QVariantMap DataStore::getNotebook(const QString& notebookId) {
+    QVariantMap nb;
+    if (!m_ready) return nb;
+    if (notebookId.isEmpty()) return nb;
+
+    QSqlQuery q(m_db);
+    q.prepare("SELECT id, name, sort_order FROM notebooks WHERE id = ?");
+    q.addBindValue(notebookId);
+    if (q.exec() && q.next()) {
+        nb["notebookId"] = q.value(0).toString();
+        nb["name"] = q.value(1).toString();
+        nb["sortOrder"] = q.value(2).toInt();
+    }
+    return nb;
+}
+
+QString DataStore::createNotebook(const QString& name) {
+    if (!m_ready) return {};
+
+    const auto notebookId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    const auto now = now_timestamp_utc();
+    const auto nbName = normalize_notebook_name(name);
+
+    QSqlQuery q(m_db);
+    q.prepare(R"SQL(
+        INSERT INTO notebooks (id, name, sort_order, created_at, updated_at)
+        VALUES (?, ?, 0, ?, ?)
+        ON CONFLICT(id) DO NOTHING;
+    )SQL");
+    q.addBindValue(notebookId);
+    q.addBindValue(nbName);
+    q.addBindValue(now);
+    q.addBindValue(now);
+    if (!q.exec()) {
+        qWarning() << "DataStore: Failed to create notebook:" << q.lastError().text();
+        return {};
+    }
+
+    emit notebooksChanged();
+    return notebookId;
+}
+
+void DataStore::renameNotebook(const QString& notebookId, const QString& name) {
+    if (!m_ready) return;
+    if (notebookId.isEmpty()) return;
+    if (notebookId == QString::fromLatin1(kDefaultNotebookId)) return;
+
+    const auto nbName = normalize_notebook_name(name);
+    const auto now = now_timestamp_utc();
+
+    QSqlQuery q(m_db);
+    q.prepare("UPDATE notebooks SET name = ?, updated_at = ? WHERE id = ?");
+    q.addBindValue(nbName);
+    q.addBindValue(now);
+    q.addBindValue(notebookId);
+    if (!q.exec()) {
+        qWarning() << "DataStore: Failed to rename notebook:" << q.lastError().text();
+        return;
+    }
+    emit notebooksChanged();
+}
+
+void DataStore::deleteNotebook(const QString& notebookId) {
+    if (!m_ready) return;
+    if (notebookId.isEmpty()) return;
+    if (notebookId == QString::fromLatin1(kDefaultNotebookId)) return;
+
+    const auto deletedAt = now_timestamp_utc();
+    m_db.transaction();
+
+    QSqlQuery move(m_db);
+    move.prepare("UPDATE pages SET notebook_id = '' WHERE notebook_id = ?");
+    move.addBindValue(notebookId);
+    move.exec();
+
+    QSqlQuery tombstone(m_db);
+    tombstone.prepare(R"SQL(
+        INSERT INTO deleted_notebooks (notebook_id, deleted_at)
+        VALUES (?, ?)
+        ON CONFLICT(notebook_id) DO UPDATE SET
+            deleted_at = excluded.deleted_at;
+    )SQL");
+    tombstone.addBindValue(notebookId);
+    tombstone.addBindValue(deletedAt);
+    tombstone.exec();
+
+    QSqlQuery del(m_db);
+    del.prepare("DELETE FROM notebooks WHERE id = ?");
+    del.addBindValue(notebookId);
+    del.exec();
+
+    m_db.commit();
+    emit notebooksChanged();
+    emit pagesChanged();
+}
+
+QVariantList DataStore::getNotebooksForSync() {
+    QVariantList out;
+    if (!m_ready) return out;
+
+    ensureDefaultNotebook();
+
+    QSqlQuery q(m_db);
+    q.exec(R"SQL(
+        SELECT id, name, sort_order, updated_at
+        FROM notebooks
+        ORDER BY updated_at, id
+    )SQL");
+    while (q.next()) {
+        QVariantMap nb;
+        nb["notebookId"] = q.value(0).toString();
+        nb["name"] = q.value(1).toString();
+        nb["sortOrder"] = q.value(2).toInt();
+        nb["updatedAt"] = q.value(3).toString();
+        out.append(nb);
+    }
+    return out;
+}
+
+QVariantList DataStore::getNotebooksForSyncSince(const QString& updatedAtCursor,
+                                                 const QString& notebookIdCursor) {
+    if (updatedAtCursor.isEmpty()) {
+        return getNotebooksForSync();
+    }
+
+    QVariantList out;
+    if (!m_ready) return out;
+
+    ensureDefaultNotebook();
+
+    QSqlQuery q(m_db);
+    q.prepare(R"SQL(
+        SELECT id, name, sort_order, updated_at
+        FROM notebooks
+        WHERE updated_at > ?
+           OR (updated_at = ? AND id > ?)
+        ORDER BY updated_at, id
+    )SQL");
+    q.addBindValue(updatedAtCursor);
+    q.addBindValue(updatedAtCursor);
+    q.addBindValue(notebookIdCursor);
+    if (!q.exec()) {
+        return out;
+    }
+    while (q.next()) {
+        QVariantMap nb;
+        nb["notebookId"] = q.value(0).toString();
+        nb["name"] = q.value(1).toString();
+        nb["sortOrder"] = q.value(2).toInt();
+        nb["updatedAt"] = q.value(3).toString();
+        out.append(nb);
+    }
+    return out;
+}
+
+void DataStore::applyNotebookUpdates(const QVariantList& notebooks) {
+    if (!m_ready) return;
+    if (notebooks.isEmpty()) return;
+
+    bool changed = false;
+    m_db.transaction();
+
+    QSqlQuery select(m_db);
+    select.prepare("SELECT updated_at FROM notebooks WHERE id = ?");
+
+    QSqlQuery upsert(m_db);
+    upsert.prepare(R"SQL(
+        INSERT INTO notebooks (id, name, sort_order, updated_at)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+            name = excluded.name,
+            sort_order = excluded.sort_order,
+            updated_at = excluded.updated_at;
+    )SQL");
+
+    for (const auto& entry : notebooks) {
+        const auto nb = entry.toMap();
+        const auto id = nb.value(QStringLiteral("notebookId")).toString();
+        if (id.isEmpty()) continue;
+
+        const auto remoteUpdated = normalize_timestamp(nb.value(QStringLiteral("updatedAt")));
+        const auto remoteTime = parse_timestamp(remoteUpdated);
+
+        select.bindValue(0, id);
+        QString localUpdated;
+        if (select.exec() && select.next()) {
+            localUpdated = select.value(0).toString();
+        }
+        select.finish();
+
+        if (!localUpdated.isEmpty()) {
+            const auto localTime = parse_timestamp(localUpdated);
+            if (localTime.isValid() && remoteTime.isValid() && localTime > remoteTime) {
+                continue;
+            }
+        }
+
+        upsert.bindValue(0, id);
+        upsert.bindValue(1, normalize_notebook_name(nb.value(QStringLiteral("name"))));
+        upsert.bindValue(2, nb.value(QStringLiteral("sortOrder")).toInt());
+        upsert.bindValue(3, remoteUpdated);
+        if (upsert.exec()) {
+            changed = true;
+        }
+        upsert.finish();
+    }
+
+    m_db.commit();
+    if (changed) {
+        emit notebooksChanged();
+    }
+}
+
+QVariantList DataStore::getDeletedNotebooksForSync() {
+    QVariantList out;
+    if (!m_ready) return out;
+
+    QSqlQuery q(m_db);
+    q.exec(R"SQL(
+        SELECT notebook_id, deleted_at
+        FROM deleted_notebooks
+        ORDER BY deleted_at, notebook_id
+    )SQL");
+    while (q.next()) {
+        QVariantMap row;
+        row["notebookId"] = q.value(0).toString();
+        row["deletedAt"] = q.value(1).toString();
+        out.append(row);
+    }
+    return out;
+}
+
+QVariantList DataStore::getDeletedNotebooksForSyncSince(const QString& deletedAtCursor,
+                                                        const QString& notebookIdCursor) {
+    if (deletedAtCursor.isEmpty()) {
+        return getDeletedNotebooksForSync();
+    }
+    QVariantList out;
+    if (!m_ready) return out;
+
+    QSqlQuery q(m_db);
+    q.prepare(R"SQL(
+        SELECT notebook_id, deleted_at
+        FROM deleted_notebooks
+        WHERE deleted_at > ?
+           OR (deleted_at = ? AND notebook_id > ?)
+        ORDER BY deleted_at, notebook_id
+    )SQL");
+    q.addBindValue(deletedAtCursor);
+    q.addBindValue(deletedAtCursor);
+    q.addBindValue(notebookIdCursor);
+    if (!q.exec()) return out;
+    while (q.next()) {
+        QVariantMap row;
+        row["notebookId"] = q.value(0).toString();
+        row["deletedAt"] = q.value(1).toString();
+        out.append(row);
+    }
+    return out;
+}
+
+void DataStore::applyDeletedNotebookUpdates(const QVariantList& deletedNotebooks) {
+    if (!m_ready) return;
+    if (deletedNotebooks.isEmpty()) return;
+
+    bool notebooksChangedAny = false;
+    bool pagesChangedAny = false;
+    m_db.transaction();
+
+    QSqlQuery select(m_db);
+    select.prepare("SELECT updated_at FROM notebooks WHERE id = ?");
+
+    QSqlQuery move(m_db);
+    move.prepare("UPDATE pages SET notebook_id = '' WHERE notebook_id = ?");
+
+    QSqlQuery del(m_db);
+    del.prepare("DELETE FROM notebooks WHERE id = ?");
+
+    QSqlQuery tombstone(m_db);
+    tombstone.prepare(R"SQL(
+        INSERT INTO deleted_notebooks (notebook_id, deleted_at)
+        VALUES (?, ?)
+        ON CONFLICT(notebook_id) DO UPDATE SET
+            deleted_at = excluded.deleted_at;
+    )SQL");
+
+    for (const auto& entry : deletedNotebooks) {
+        const auto row = entry.toMap();
+        const auto id = row.value(QStringLiteral("notebookId")).toString();
+        if (id.isEmpty()) continue;
+        if (id == QString::fromLatin1(kDefaultNotebookId)) continue;
+
+        const auto remoteDeleted = normalize_timestamp(row.value(QStringLiteral("deletedAt")));
+        const auto remoteTime = parse_timestamp(remoteDeleted);
+
+        select.bindValue(0, id);
+        QString localUpdated;
+        if (select.exec() && select.next()) {
+            localUpdated = select.value(0).toString();
+        }
+        select.finish();
+
+        if (!localUpdated.isEmpty()) {
+            const auto localTime = parse_timestamp(localUpdated);
+            if (localTime.isValid() && remoteTime.isValid() && localTime > remoteTime) {
+                continue;
+            }
+        }
+
+        move.bindValue(0, id);
+        if (move.exec()) {
+            pagesChangedAny = true;
+        }
+        move.finish();
+
+        del.bindValue(0, id);
+        if (del.exec()) {
+            notebooksChangedAny = true;
+        }
+        del.finish();
+
+        tombstone.bindValue(0, id);
+        tombstone.bindValue(1, remoteDeleted);
+        tombstone.exec();
+        tombstone.finish();
+    }
+
+    m_db.commit();
+    if (notebooksChangedAny) emit notebooksChanged();
+    if (pagesChangedAny) emit pagesChanged();
 }
 
 QString DataStore::databasePath() const {
@@ -2713,9 +3336,109 @@ bool DataStore::runMigrations() {
         m_db.commit();
         currentVersion = 7;
     }
+
+    // Migration 8: Notebooks and page.notebook_id.
+    if (currentVersion < 8) {
+        qDebug() << "DataStore: Running migration to version 8";
+        m_db.transaction();
+
+        QSqlQuery migration(m_db);
+
+        migration.exec(R"SQL(
+            CREATE TABLE IF NOT EXISTS notebooks (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL DEFAULT 'Untitled Notebook',
+                sort_order INTEGER DEFAULT 0,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        )SQL");
+
+        QSet<QString> pageColumns;
+        QSqlQuery pageInfo(m_db);
+        if (pageInfo.exec("PRAGMA table_info(pages)")) {
+            while (pageInfo.next()) {
+                pageColumns.insert(pageInfo.value(1).toString());
+            }
+        }
+        pageInfo.finish();
+
+        if (!pageColumns.contains(QStringLiteral("notebook_id"))) {
+            migration.exec("ALTER TABLE pages ADD COLUMN notebook_id TEXT NOT NULL DEFAULT ''");
+        }
+
+        const auto now = now_timestamp_utc();
+        QSqlQuery upsertDefault(m_db);
+        upsertDefault.prepare(R"SQL(
+            INSERT INTO notebooks (id, name, sort_order, created_at, updated_at)
+            VALUES (?, ?, 0, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                name = excluded.name,
+                updated_at = excluded.updated_at;
+        )SQL");
+        upsertDefault.addBindValue(QString::fromLatin1(kDefaultNotebookId));
+        upsertDefault.addBindValue(QString::fromLatin1(kDefaultNotebookName));
+        upsertDefault.addBindValue(now);
+        upsertDefault.addBindValue(now);
+        upsertDefault.exec();
+
+        QSqlQuery backfill(m_db);
+        backfill.prepare(R"SQL(
+            UPDATE pages
+            SET notebook_id = ?
+            WHERE COALESCE(notebook_id, '') = '';
+        )SQL");
+        backfill.addBindValue(QString::fromLatin1(kDefaultNotebookId));
+        backfill.exec();
+
+        migration.exec("CREATE INDEX IF NOT EXISTS idx_pages_notebook_id ON pages(notebook_id)");
+
+        migration.exec("PRAGMA user_version = 8");
+        m_db.commit();
+        currentVersion = 8;
+    }
+
+    // Migration 9: deleted_notebooks table.
+    if (currentVersion < 9) {
+        qDebug() << "DataStore: Running migration to version 9";
+        m_db.transaction();
+
+        QSqlQuery migration(m_db);
+        migration.exec(R"SQL(
+            CREATE TABLE IF NOT EXISTS deleted_notebooks (
+                notebook_id TEXT PRIMARY KEY,
+                deleted_at TEXT NOT NULL
+            )
+        )SQL");
+        migration.exec("CREATE INDEX IF NOT EXISTS idx_deleted_notebooks_deleted_at ON deleted_notebooks(deleted_at)");
+
+        migration.exec("PRAGMA user_version = 9");
+        m_db.commit();
+        currentVersion = 9;
+    }
     
     qDebug() << "DataStore: Migrations complete. Schema version:" << currentVersion;
     return true;
+}
+
+QString DataStore::ensureDefaultNotebook() {
+    if (!m_ready) return QString::fromLatin1(kDefaultNotebookId);
+
+    QSqlQuery ensure(m_db);
+    ensure.prepare(R"SQL(
+        INSERT INTO notebooks (id, name, sort_order, created_at, updated_at)
+        VALUES (?, ?, 0, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+            name = excluded.name;
+    )SQL");
+    const auto now = now_timestamp_utc();
+    ensure.addBindValue(QString::fromLatin1(kDefaultNotebookId));
+    ensure.addBindValue(QString::fromLatin1(kDefaultNotebookName));
+    ensure.addBindValue(now);
+    ensure.addBindValue(now);
+    ensure.exec();
+
+    return QString::fromLatin1(kDefaultNotebookId);
 }
 
 int DataStore::schemaVersion() const {

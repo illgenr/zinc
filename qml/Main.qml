@@ -28,6 +28,10 @@ ApplicationWindow {
     property string pagesCursorId: ""
     property string deletedPagesCursorAt: ""
     property string deletedPagesCursorId: ""
+    property string notebooksCursorAt: ""
+    property string notebooksCursorId: ""
+    property string deletedNotebooksCursorAt: ""
+    property string deletedNotebooksCursorId: ""
     property string attachmentsCursorAt: ""
     property string attachmentsCursorId: ""
 
@@ -43,6 +47,10 @@ ApplicationWindow {
     
     // Detect mobile (Android) vs desktop
     readonly property bool isMobile: Qt.platform.os === "android" || Qt.platform.os === "ios" || width < 600
+
+    Connections {
+        target: DataStore
+    }
     
     // Keyboard shortcuts (desktop)
     Shortcut {
@@ -147,6 +155,22 @@ ApplicationWindow {
                         font.weight: Font.Medium
                         anchors.verticalCenter: parent.verticalCenter
                     }
+
+                    ToolButton {
+                        anchors.verticalCenter: parent.verticalCenter
+                        contentItem: Text {
+                            text: "+"
+                            color: ThemeManager.text
+                            font.pixelSize: 20
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                        background: Rectangle {
+                            radius: ThemeManager.radiusSmall
+                            color: parent.pressed ? ThemeManager.surfaceActive : "transparent"
+                        }
+                        onClicked: newNotebookDialog.open()
+                    }
                     
                     ToolButton {
                         icon.name: "settings"                        
@@ -234,6 +258,31 @@ ApplicationWindow {
                             mobilePageTree.createPage("")
                         }
                     }
+
+                    Button {
+                        Layout.margins: ThemeManager.spacingSmall
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "New Notebook"
+
+                        background: Rectangle {
+                            implicitHeight: 44
+                            radius: ThemeManager.radiusSmall
+                            color: parent.pressed ? ThemeManager.surfaceActive : ThemeManager.surfaceHover
+                            border.width: 1
+                            border.color: ThemeManager.border
+                        }
+
+                        contentItem: Text {
+                            text: parent.text
+                            color: ThemeManager.text
+                            font.pixelSize: ThemeManager.fontSizeNormal
+                            font.weight: Font.Medium
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
+
+                        onClicked: newNotebookDialog.open()
+                    }
                 }
 
                 // Notes list
@@ -247,6 +296,8 @@ ApplicationWindow {
                     actionsAlwaysVisible: true
                     actionButtonSize: 44
                     activateOnSingleTap: false
+
+                    onNewNotebookRequested: newNotebookDialog.open()
 
                     onPageSelected: function(pageId, title) {
                         if (DataStore) DataStore.setLastViewedPageId(pageId)
@@ -499,6 +550,27 @@ ApplicationWindow {
                         
                         onClicked: settingsDialog.open()
                     }
+
+                    ToolButton {
+                        width: 24
+                        height: 24
+                        visible: !sidebarCollapsed
+
+                        contentItem: Text {
+                            text: "+"
+                            color: ThemeManager.textSecondary
+                            font.pixelSize: ThemeManager.fontSizeNormal
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
+
+                        background: Rectangle {
+                            radius: ThemeManager.radiusSmall
+                            color: parent.hovered ? ThemeManager.surfaceHover : "transparent"
+                        }
+
+                        onClicked: newNotebookDialog.open()
+                    }
                 }
                 
                 // Search button
@@ -539,7 +611,7 @@ ApplicationWindow {
                         onClicked: searchDialog.open()
                     }
                 }
-                
+
                 // Page tree
                 PageTree {
                     id: pageTree
@@ -547,6 +619,8 @@ ApplicationWindow {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     visible: !sidebarCollapsed
+
+                    onNewNotebookRequested: newNotebookDialog.open()
 
                     onPageActivatedByKeyboard: function(pageId, title) {
                         Qt.callLater(() => blockEditor.focusContent())
@@ -703,6 +777,46 @@ ApplicationWindow {
             pairingDialog.open()
         }
     }
+
+    Dialog {
+        id: newNotebookDialog
+        title: "New Notebook"
+        modal: true
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        parent: Overlay.overlay
+
+        property string _name: ""
+
+        contentItem: Item {
+            implicitWidth: 360
+            implicitHeight: 120
+
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.margins: ThemeManager.spacingMedium
+                spacing: ThemeManager.spacingSmall
+
+                TextField {
+                    id: newNotebookNameField
+                    Layout.fillWidth: true
+                    placeholderText: "Notebook name"
+                    text: ""
+                    onTextChanged: newNotebookDialog._name = text
+                }
+            }
+        }
+
+        onOpened: {
+            newNotebookDialog._name = ""
+            newNotebookNameField.text = ""
+            newNotebookNameField.forceActiveFocus()
+        }
+
+        onAccepted: {
+            if (!DataStore || !DataStore.createNotebook) return
+            DataStore.createNotebook(newNotebookDialog._name)
+        }
+    }
     
     // UUID generator
     function generateUuid() {
@@ -797,6 +911,13 @@ ApplicationWindow {
             }
             root.scheduleOutgoingSnapshot()
         }
+
+        function onNotebooksChanged() {
+            if (pairingDialog && pairingDialog.visible) {
+                return
+            }
+            root.scheduleOutgoingSnapshot()
+        }
     }
 
     Connections {
@@ -818,6 +939,10 @@ ApplicationWindow {
             pagesCursorId = ""
             deletedPagesCursorAt = ""
             deletedPagesCursorId = ""
+            notebooksCursorAt = ""
+            notebooksCursorId = ""
+            deletedNotebooksCursorAt = ""
+            deletedNotebooksCursorId = ""
             attachmentsCursorAt = ""
             attachmentsCursorId = ""
             root.sendLocalSnapshot(true)
@@ -848,6 +973,28 @@ ApplicationWindow {
             if (!DataStore || !deletedPages) return
             console.log("SYNC: received deleted pages", deletedPages.length)
             DataStore.applyDeletedPageUpdates(deletedPages)
+        }
+
+        function onNotebookSnapshotReceivedNotebooks(notebooks) {
+            if (pairingDialog && pairingDialog.visible) {
+                return
+            }
+            if (!DataStore || !notebooks) return
+            console.log("SYNC: received notebooks", notebooks.length)
+            if (DataStore.applyNotebookUpdates) {
+                DataStore.applyNotebookUpdates(notebooks)
+            }
+        }
+
+        function onDeletedNotebookSnapshotReceivedNotebooks(deletedNotebooks) {
+            if (pairingDialog && pairingDialog.visible) {
+                return
+            }
+            if (!DataStore || !deletedNotebooks) return
+            console.log("SYNC: received deleted notebooks", deletedNotebooks.length)
+            if (DataStore.applyDeletedNotebookUpdates) {
+                DataStore.applyDeletedNotebookUpdates(deletedNotebooks)
+            }
         }
 
         function onBlockSnapshotReceivedBlocks(blocks) {
@@ -934,6 +1081,10 @@ ApplicationWindow {
                          : DataStore.getPagesForSyncSince(pagesCursorAt, pagesCursorId)
         var deletedPages = full ? DataStore.getDeletedPagesForSync()
                                 : DataStore.getDeletedPagesForSyncSince(deletedPagesCursorAt, deletedPagesCursorId)
+        var notebooks = full ? (DataStore.getNotebooksForSync ? DataStore.getNotebooksForSync() : [])
+                             : (DataStore.getNotebooksForSyncSince ? DataStore.getNotebooksForSyncSince(notebooksCursorAt, notebooksCursorId) : [])
+        var deletedNotebooks = full ? (DataStore.getDeletedNotebooksForSync ? DataStore.getDeletedNotebooksForSync() : [])
+                                    : (DataStore.getDeletedNotebooksForSyncSince ? DataStore.getDeletedNotebooksForSyncSince(deletedNotebooksCursorAt, deletedNotebooksCursorId) : [])
         var attachments = full ? DataStore.getAttachmentsForSync()
                                : DataStore.getAttachmentsForSyncSince(attachmentsCursorAt, attachmentsCursorId)
         if (!full && DataStore.getAttachmentsByIds) {
@@ -944,23 +1095,30 @@ ApplicationWindow {
         }
         if (!full && (!pages || pages.length === 0) &&
             (!deletedPages || deletedPages.length === 0) &&
+            (!notebooks || notebooks.length === 0) &&
+            (!deletedNotebooks || deletedNotebooks.length === 0) &&
             (!attachments || attachments.length === 0)) {
             return
         }
 
         var payload = JSON.stringify({
-            v: 2,
+            v: 3,
             workspaceId: appSyncController.workspaceId,
             full: full === true,
             pages: pages,
             deletedPages: deletedPages,
+            notebooks: notebooks,
+            deletedNotebooks: deletedNotebooks,
             attachments: attachments
         })
-        console.log("SYNC: sending snapshot full=", full === true, "pages", pages.length, "deleted", deletedPages.length, "attachments", attachments.length)
+        console.log("SYNC: sending snapshot full=", full === true, "pages", pages.length, "deleted", deletedPages.length,
+                    "notebooks", notebooks.length, "deletedNotebooks", deletedNotebooks.length, "attachments", attachments.length)
         appSyncController.sendPageSnapshot(payload)
 
         advanceCursorFrom(pages, "pagesCursorAt", "pagesCursorId", "updatedAt", "pageId")
         advanceCursorFrom(deletedPages, "deletedPagesCursorAt", "deletedPagesCursorId", "deletedAt", "pageId")
+        advanceCursorFrom(notebooks, "notebooksCursorAt", "notebooksCursorId", "updatedAt", "notebookId")
+        advanceCursorFrom(deletedNotebooks, "deletedNotebooksCursorAt", "deletedNotebooksCursorId", "deletedAt", "notebookId")
         advanceCursorFrom(attachments, "attachmentsCursorAt", "attachmentsCursorId", "updatedAt", "attachmentId")
     }
 

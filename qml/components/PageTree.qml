@@ -18,11 +18,165 @@ Item {
     signal pageSelected(string pageId, string title)
     signal pagesChanged()
     signal pageActivatedByKeyboard(string pageId, string title)
+    signal newNotebookRequested()
+
+    property bool _dragActive: false
+    property real _dragY: 0
+    readonly property bool _isMobile: Qt.platform.os === "android" || Qt.platform.os === "ios"
+
+    Timer {
+        id: dragAutoScrollTimer
+        interval: 16
+        repeat: true
+        running: root._dragActive
+        onTriggered: {
+            if (!pageList) return
+            const localY = root._dragY - pageList.contentY
+            const threshold = 56
+            const step = 18
+            if (localY < threshold) {
+                pageList.contentY = Math.max(0, pageList.contentY - step)
+            } else if (localY > pageList.height - threshold) {
+                const maxY = Math.max(0, pageList.contentHeight - pageList.height)
+                pageList.contentY = Math.min(maxY, pageList.contentY + step)
+            }
+        }
+    }
+
+    function movePageTo(parentKind, targetPageId, targetNotebookId, draggedPageId) {
+        if (!DataStore) return
+        if (!draggedPageId || draggedPageId === "") return
+
+        const pages = getAllPages()
+        const byId = {}
+        const children = {}
+        for (let i = 0; i < pages.length; i++) {
+            const p = pages[i]
+            byId[p.pageId] = p
+            const parent = p.parentId || ""
+            if (!children[parent]) children[parent] = []
+            children[parent].push(p.pageId)
+        }
+
+        function descendantsOf(rootId) {
+            const out = {}
+            const stack = [rootId]
+            out[rootId] = true
+            while (stack.length > 0) {
+                const cur = stack.pop()
+                const kids = children[cur] || []
+                for (let i = 0; i < kids.length; i++) {
+                    const kid = kids[i]
+                    if (out[kid]) continue
+                    out[kid] = true
+                    stack.push(kid)
+                }
+            }
+            return out
+        }
+
+        function isDescendant(targetId, rootId) {
+            let cur = byId[targetId]
+            while (cur && cur.parentId && cur.parentId !== "") {
+                if (cur.parentId === rootId) return true
+                cur = byId[cur.parentId]
+            }
+            return false
+        }
+
+        const dragged = byId[draggedPageId]
+        if (!dragged) return
+
+        let newParentId = ""
+        let newNotebookId = ""
+
+        if (parentKind === "page") {
+            if (!targetPageId || targetPageId === "") return
+            if (targetPageId === draggedPageId) return
+            if (isDescendant(targetPageId, draggedPageId)) return
+            const target = byId[targetPageId]
+            if (!target) return
+            newParentId = targetPageId
+            newNotebookId = target.notebookId || ""
+        } else if (parentKind === "notebook") {
+            newParentId = ""
+            newNotebookId = targetNotebookId || ""
+        } else {
+            // Root drop => loose note
+            newParentId = ""
+            newNotebookId = ""
+        }
+
+        let maxOrder = 0
+        for (const id in byId) {
+            if (id === draggedPageId) continue
+            const p = byId[id]
+            if (!p) continue
+            if ((p.notebookId || "") !== newNotebookId) continue
+            if ((p.parentId || "") !== newParentId) continue
+            maxOrder = Math.max(maxOrder, p.sortOrder || 0)
+        }
+
+        const movedSet = descendantsOf(draggedPageId)
+        for (const id in movedSet) {
+            if (!byId[id]) continue
+            byId[id].notebookId = newNotebookId
+        }
+        byId[draggedPageId].parentId = newParentId
+        byId[draggedPageId].notebookId = newNotebookId
+        byId[draggedPageId].sortOrder = maxOrder + 1
+
+        const depthMemo = {}
+        function depthOf(id) {
+            if (depthMemo[id] !== undefined) return depthMemo[id]
+            const p = byId[id]
+            if (!p) return 0
+            if (!p.parentId || p.parentId === "") {
+                depthMemo[id] = (p.notebookId && p.notebookId !== "") ? 1 : 0
+                return depthMemo[id]
+            }
+            depthMemo[id] = depthOf(p.parentId) + 1
+            return depthMemo[id]
+        }
+
+        const updated = []
+        for (const id in byId) {
+            const p = byId[id]
+            updated.push({
+                pageId: p.pageId,
+                notebookId: p.notebookId || "",
+                title: p.title,
+                parentId: p.parentId || "",
+                depth: depthOf(p.pageId),
+                sortOrder: p.sortOrder || 0
+            })
+        }
+
+        DataStore.saveAllPages(updated)
+    }
 
     function indexOfPageId(pageId) {
         if (!pageId || pageId === "") return -1
         for (let i = 0; i < pageModel.count; i++) {
-            if (pageModel.get(i).pageId === pageId) return i
+            const row = pageModel.get(i)
+            if (row && row.kind === "page" && row.pageId === pageId) return i
+        }
+        return -1
+    }
+
+    function indexOfNotebookId(notebookId) {
+        if (!notebookId || notebookId === "") return -1
+        for (let i = 0; i < pageModel.count; i++) {
+            const row = pageModel.get(i)
+            if (row && row.kind === "notebook" && row.notebookId === notebookId) return i
+        }
+        return -1
+    }
+
+    function indexOfFirstNotebookRow() {
+        for (let i = 0; i < pageModel.count; i++) {
+            const row = pageModel.get(i)
+            if (row && row.kind === "notebook") return i
         }
         return -1
     }
@@ -61,9 +215,9 @@ Item {
         if (idx < 0 || idx >= pageModel.count) return false
         if (!rowVisible(idx)) return false
         pageList.currentIndex = idx
-        const page = pageModel.get(idx)
-        if (!page) return false
-        root.handleRowTap(page.pageId, page.title)
+        const row = pageModel.get(idx)
+        if (!row) return false
+        root.handleRowTap(row.kind || "page", row.pageId || "", row.notebookId || "", row.title || "")
         return true
     }
 
@@ -87,6 +241,18 @@ Item {
         if (!row || !row.parentId || row.parentId === "") return -1
         return indexOfPageId(row.parentId)
     }
+
+    function parentIndexForRow(childIndex) {
+        if (childIndex < 0 || childIndex >= pageModel.count) return -1
+        const row = pageModel.get(childIndex)
+        if (!row) return -1
+        if (row.depth <= 0) return -1
+        if (row.kind === "page") {
+            if (row.parentId && row.parentId !== "") return indexOfPageId(row.parentId)
+            if (row.depth === 1 && row.notebookId && row.notebookId !== "") return indexOfNotebookId(row.notebookId)
+        }
+        return -1
+    }
     
     // Auto-load pages on component creation
     Component.onCompleted: {
@@ -108,6 +274,11 @@ Item {
             loadPagesFromStorage()
             pagesChanged()
         }
+
+        function onNotebooksChanged() {
+            loadPagesFromStorage()
+            pagesChanged()
+        }
     }
     
     // UUID generator
@@ -119,39 +290,65 @@ Item {
     }
     
     function createPage(parentId) {
+        return createPageWithNotebook(parentId, "")
+    }
+
+    function createPageWithNotebook(parentId, notebookId) {
         let id = generateUuid()
         let depth = 0
         let insertIndex = pageModel.count
-        
-        // Calculate depth based on parent
+        let resolvedNotebookId = notebookId || ""
+
+        // Calculate depth and notebook based on parent page (if any).
         if (parentId && parentId !== "") {
             for (let i = 0; i < pageModel.count; i++) {
-                let page = pageModel.get(i)
-                if (page.pageId === parentId) {
-                    depth = page.depth + 1
+                let row = pageModel.get(i)
+                if (row && row.kind === "page" && row.pageId === parentId) {
+                    resolvedNotebookId = row.notebookId || ""
+                    depth = row.depth + 1
                     // Find insert position (after parent and its children)
                     insertIndex = i + 1
-                    while (insertIndex < pageModel.count && 
-                           pageModel.get(insertIndex).depth > page.depth) {
+                    while (insertIndex < pageModel.count &&
+                           pageModel.get(insertIndex).depth > row.depth) {
                         insertIndex++
                     }
                     break
                 }
             }
+        } else if (resolvedNotebookId !== "") {
+            // Root page inside a notebook.
+            depth = 1
+            const nbIndex = indexOfNotebookId(resolvedNotebookId)
+            if (nbIndex >= 0) {
+                insertIndex = nbIndex + 1
+                while (insertIndex < pageModel.count &&
+                       pageModel.get(insertIndex).depth > 0) {
+                    insertIndex++
+                }
+            }
+        } else {
+            // Root page not in a notebook: insert before first notebook folder.
+            const firstNotebook = indexOfFirstNotebookRow()
+            if (firstNotebook >= 0) {
+                insertIndex = firstNotebook
+            }
         }
-        
+
         pageModel.insert(insertIndex, {
+            kind: "page",
             pageId: id,
+            notebookId: resolvedNotebookId,
             title: "Untitled",
             parentId: parentId || "",
             expanded: true,
-            depth: depth
+            depth: depth,
+            sortOrder: insertIndex
         })
-        
+
         // Save to storage
         savePagesToStorage()
         pagesChanged()
-        
+
         root.selectedPageId = id
         pageSelected(id, "Untitled")
         return id
@@ -162,7 +359,15 @@ Item {
         let pages = []
         for (let i = 0; i < pageModel.count; i++) {
             let p = pageModel.get(i)
-            pages.push({ pageId: p.pageId, title: p.title, depth: p.depth, parentId: p.parentId })
+            if (!p || p.kind !== "page") continue
+            pages.push({
+                pageId: p.pageId,
+                notebookId: p.notebookId || "",
+                title: p.title,
+                depth: p.depth,
+                parentId: p.parentId,
+                sortOrder: p.sortOrder || 0
+            })
         }
         return pages
     }
@@ -170,7 +375,8 @@ Item {
     // Update page title
     function updatePageTitle(pageId, newTitle) {
         for (let i = 0; i < pageModel.count; i++) {
-            if (pageModel.get(i).pageId === pageId) {
+            const row = pageModel.get(i)
+            if (row && row.kind === "page" && row.pageId === pageId) {
                 pageModel.setProperty(i, "title", newTitle)
                 savePagesToStorage()
                 pagesChanged()
@@ -188,7 +394,7 @@ Item {
         
         for (let i = 0; i < pageModel.count; i++) {
             let page = pageModel.get(i)
-            if (page.pageId === pageId) {
+            if (page && page.kind === "page" && page.pageId === pageId) {
                 foundPage = true
                 pageDepth = page.depth
                 toDelete.push(i)
@@ -219,19 +425,9 @@ Item {
     function loadPagesFromStorage() {
         try {
             let pages = DataStore ? DataStore.getAllPages() : []
+            let notebooks = (DataStore && DataStore.getAllNotebooks) ? DataStore.getAllNotebooks() : []
             if (pages && pages.length > 0) {
-                pageModel.clear()
-                for (let p of pages) {
-                    pageModel.append({
-                        pageId: p.pageId,
-                        title: p.title,
-                        parentId: p.parentId || "",
-                        expanded: true,
-                        depth: p.depth || 0
-                    })
-                }
-                // Recalculate depths based on parentId to fix any corruption
-                recalculateDepths()
+                rebuildModel(pages, notebooks)
                 return true
             }
         } catch (e) {
@@ -239,35 +435,85 @@ Item {
         }
         return false
     }
-    
-    // Recalculate depths based on parentId relationships
-    function recalculateDepths() {
-        function getDepth(pageId) {
-            if (!pageId || pageId === "") return 0
-            for (let i = 0; i < pageModel.count; i++) {
-                let p = pageModel.get(i)
-                if (p.pageId === pageId) {
-                    return getDepth(p.parentId) + 1
-                }
-            }
-            return 0
+
+    function rebuildModel(pages, notebooks) {
+        const byNotebook = {}
+        for (let i = 0; i < pages.length; i++) {
+            const p = pages[i] || {}
+            const nb = p.notebookId || ""
+            if (!byNotebook[nb]) byNotebook[nb] = []
+            byNotebook[nb].push(p)
         }
-        
-        for (let i = 0; i < pageModel.count; i++) {
-            let page = pageModel.get(i)
-            let correctDepth = getDepth(page.parentId)
-            if (page.depth !== correctDepth) {
-                pageModel.setProperty(i, "depth", correctDepth)
+
+        function toChildrenMap(list) {
+            const m = {}
+            for (let i = 0; i < list.length; i++) {
+                const p = list[i] || {}
+                const parent = p.parentId || ""
+                if (!m[parent]) m[parent] = []
+                m[parent].push(p)
+            }
+            for (const key in m) {
+                m[key].sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0))
+            }
+            return m
+        }
+
+        function appendTree(childrenMap, parentId, depthBase, notebookId) {
+            const kids = childrenMap[parentId] || []
+            for (let i = 0; i < kids.length; i++) {
+                const p = kids[i] || {}
+                pageModel.append({
+                    kind: "page",
+                    pageId: p.pageId,
+                    notebookId: notebookId || "",
+                    title: p.title,
+                    parentId: p.parentId || "",
+                    expanded: true,
+                    depth: depthBase,
+                    sortOrder: p.sortOrder || 0
+                })
+                appendTree(childrenMap, p.pageId, depthBase + 1, notebookId)
+            }
+        }
+
+        pageModel.clear()
+
+        // 1) Loose notes (no notebook) at root.
+        const loosePages = byNotebook[""] || []
+        appendTree(toChildrenMap(loosePages), "", 0, "")
+
+        // 2) Notebook folders + their notes.
+        if (notebooks && notebooks.length > 0) {
+            for (let i = 0; i < notebooks.length; i++) {
+                const nb = notebooks[i] || {}
+                const notebookId = nb.notebookId || ""
+                if (notebookId === "") continue
+                pageModel.append({
+                    kind: "notebook",
+                    pageId: "",
+                    notebookId: notebookId,
+                    title: nb.name || "Untitled Notebook",
+                    parentId: "",
+                    expanded: true,
+                    depth: 0
+                })
+                const notebookPages = byNotebook[notebookId] || []
+                appendTree(toChildrenMap(notebookPages), "", 1, notebookId)
             }
         }
     }
     
-    // Check if a page has children
-    function hasChildren(pageId) {
-        for (let i = 0; i < pageModel.count; i++) {
-            if (pageModel.get(i).parentId === pageId) {
-                return true
-            }
+    function hasChildrenAtIndex(rowIndex) {
+        if (rowIndex < 0 || rowIndex >= pageModel.count) return false
+        const row = pageModel.get(rowIndex)
+        if (!row) return false
+        const baseDepth = row.depth
+        for (let i = rowIndex + 1; i < pageModel.count; i++) {
+            const next = pageModel.get(i)
+            if (!next) continue
+            if (next.depth <= baseDepth) break
+            if (next.depth === baseDepth + 1) return true
         }
         return false
     }
@@ -291,7 +537,20 @@ Item {
         return neededDepth < 0
     }
 
-    function handleRowTap(pageId, title) {
+    function toggleExpandedAtIndex(rowIndex) {
+        if (rowIndex < 0 || rowIndex >= pageModel.count) return
+        const row = pageModel.get(rowIndex)
+        if (!row) return
+        if (!hasChildrenAtIndex(rowIndex)) return
+        pageModel.setProperty(rowIndex, "expanded", !row.expanded)
+    }
+
+    function handleRowTap(kind, pageId, notebookId, title) {
+        if (kind === "notebook") {
+            handleNotebookTap(notebookId)
+            return
+        }
+
         if (root.activateOnSingleTap || root.selectedPageId === pageId) {
             root.selectedPageId = pageId
             root.pageSelected(pageId, title)
@@ -300,12 +559,20 @@ Item {
         root.selectedPageId = pageId
     }
 
-    function openContextMenu(pageId, title) {
+    function handleNotebookTap(notebookId) {
+        const idx = indexOfNotebookId(notebookId)
+        if (idx < 0) return
+        toggleExpandedAtIndex(idx)
+    }
+
+    function openContextMenu(kind, pageId, notebookId, title) {
         if (!root.enableContextMenu) return
         const menu = pageContextMenuLoader.item
         if (!menu) return
+        menu.targetKind = kind
         menu.targetPageId = pageId
-        menu.targetPageTitle = title
+        menu.targetNotebookId = notebookId
+        menu.targetTitle = title
         menu.popup()
     }
 
@@ -313,7 +580,7 @@ Item {
         if (!pageId || pageId === "") return false
         for (let i = 0; i < pageModel.count; i++) {
             const page = pageModel.get(i)
-            if (page.pageId === pageId) {
+            if (page && page.kind === "page" && page.pageId === pageId) {
                 root.selectedPageId = pageId
                 pageSelected(pageId, page.title)
                 return true
@@ -327,10 +594,13 @@ Item {
         if (preferredPageId && preferredPageId !== "" && selectPage(preferredPageId)) {
             return
         }
-        if (pageModel.count > 0) {
-            const first = pageModel.get(0)
-            root.selectedPageId = first.pageId
-            pageSelected(first.pageId, first.title)
+        for (let i = 0; i < pageModel.count; i++) {
+            const row = pageModel.get(i)
+            if (row && row.kind === "page") {
+                root.selectedPageId = row.pageId
+                pageSelected(row.pageId, row.title)
+                return
+            }
         }
     }
     
@@ -341,57 +611,100 @@ Item {
             return
         }
         pageModel.clear()
-        pageModel.append({ pageId: "1", title: "Getting Started", parentId: "", expanded: true, depth: 0 })
-        pageModel.append({ pageId: "2", title: "Projects", parentId: "", expanded: true, depth: 0 })
-        pageModel.append({ pageId: "3", title: "Work Project", parentId: "2", expanded: true, depth: 1 })
-        pageModel.append({ pageId: "4", title: "Personal", parentId: "", expanded: true, depth: 0 })
+        pageModel.append({ kind: "page", pageId: "1", notebookId: "", title: "Getting Started", parentId: "", expanded: true, depth: 0 })
+        pageModel.append({ kind: "page", pageId: "2", notebookId: "", title: "Projects", parentId: "", expanded: true, depth: 0 })
+        pageModel.append({ kind: "page", pageId: "3", notebookId: "", title: "Work Project", parentId: "2", expanded: true, depth: 1 })
+        pageModel.append({ kind: "page", pageId: "4", notebookId: "", title: "Personal", parentId: "", expanded: true, depth: 0 })
         savePagesToStorage()
     }
     
     ListModel {
         id: pageModel
     }
-    
+
     ColumnLayout {
         anchors.fill: parent
         spacing: ThemeManager.spacingSmall
         
         // New Page button at top
-        Rectangle {
+        RowLayout {
             Layout.fillWidth: true
             Layout.preferredHeight: 36
             visible: root.showNewPageButton
-            radius: ThemeManager.radiusSmall
-            color: newPageMouse.containsMouse || newPageMouse.pressed ? ThemeManager.surfaceHover : ThemeManager.surface
-            border.width: 1
-            border.color: ThemeManager.border
+            spacing: ThemeManager.spacingSmall
             
-            RowLayout {
-                anchors.fill: parent
-                anchors.margins: ThemeManager.spacingSmall
-                spacing: ThemeManager.spacingSmall
-                
-                Text {
-                    text: "+"
-                    color: ThemeManager.accent
-                    font.pixelSize: ThemeManager.fontSizeLarge
-                    font.bold: true
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 36
+                radius: ThemeManager.radiusSmall
+                color: newPageMouse.containsMouse || newPageMouse.pressed ? ThemeManager.surfaceHover : ThemeManager.surface
+                border.width: 1
+                border.color: ThemeManager.border
+
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.margins: ThemeManager.spacingSmall
+                    spacing: ThemeManager.spacingSmall
+
+                    Text {
+                        text: "+"
+                        color: ThemeManager.accent
+                        font.pixelSize: ThemeManager.fontSizeLarge
+                        font.bold: true
+                    }
+
+                    Text {
+                        Layout.fillWidth: true
+                        text: "New Page"
+                        color: ThemeManager.text
+                        font.pixelSize: ThemeManager.fontSizeNormal
+                    }
                 }
-                
-                Text {
-                    Layout.fillWidth: true
-                    text: "New Page"
-                    color: ThemeManager.text
-                    font.pixelSize: ThemeManager.fontSizeNormal
+
+                MouseArea {
+                    id: newPageMouse
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.createPage("")
                 }
             }
-            
-            MouseArea {
-                id: newPageMouse
-                anchors.fill: parent
-                hoverEnabled: true
-                cursorShape: Qt.PointingHandCursor
-                onClicked: root.createPage("")
+
+            Rectangle {
+                Layout.preferredWidth: 132
+                Layout.preferredHeight: 36
+                radius: ThemeManager.radiusSmall
+                color: newNotebookMouse.containsMouse || newNotebookMouse.pressed ? ThemeManager.surfaceHover : ThemeManager.surface
+                border.width: 1
+                border.color: ThemeManager.border
+
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.margins: ThemeManager.spacingSmall
+                    spacing: ThemeManager.spacingSmall
+
+                    Text {
+                        text: "📁"
+                        color: ThemeManager.text
+                        font.pixelSize: ThemeManager.fontSizeNormal
+                    }
+
+                    Text {
+                        Layout.fillWidth: true
+                        text: "New Notebook"
+                        color: ThemeManager.text
+                        font.pixelSize: ThemeManager.fontSizeNormal
+                        elide: Text.ElideRight
+                    }
+                }
+
+                MouseArea {
+                    id: newNotebookMouse
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.newNotebookRequested()
+                }
             }
         }
         
@@ -404,6 +717,19 @@ Item {
             model: pageModel
             clip: true
             spacing: 2
+
+            DropArea {
+                anchors.fill: parent
+                keys: ["application/x-zinc-page"]
+                onDropped: function(drop) {
+                    if (!drop || !drop.mimeData) return
+                    const idx = pageList.indexAt(drop.x, drop.y)
+                    if (idx >= 0) return
+                    const draggedId = drop.mimeData.getDataAsString("application/x-zinc-page")
+                    if (!draggedId || draggedId === "") return
+                    root.movePageTo("root", "", "", draggedId)
+                }
+            }
 
             Keys.onPressed: function(event) {
                 if (event.key === Qt.Key_Down) {
@@ -432,7 +758,7 @@ Item {
                     if (idx < 0) return
                     const row = pageModel.get(idx)
                     if (!row) return
-                    const hasKids = root.hasChildren(row.pageId)
+                    const hasKids = root.hasChildrenAtIndex(idx)
                     if (!hasKids) return
                     if (!row.expanded) {
                         pageModel.setProperty(idx, "expanded", true)
@@ -447,12 +773,12 @@ Item {
                     if (idx < 0) return
                     const row = pageModel.get(idx)
                     if (!row) return
-                    const hasKids = root.hasChildren(row.pageId)
+                    const hasKids = root.hasChildrenAtIndex(idx)
                     if (hasKids && row.expanded) {
                         pageModel.setProperty(idx, "expanded", false)
                         return
                     }
-                    selectIndex(parentIndex(idx))
+                    selectIndex(parentIndexForRow(idx))
                     return
                 }
                 if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
@@ -462,8 +788,10 @@ Item {
                     if (!rowVisible(idx)) return
                     const page = pageModel.get(idx)
                     if (!page) return
-                    root.handleRowTap(page.pageId, page.title)
-                    root.pageActivatedByKeyboard(page.pageId, page.title)
+                    root.handleRowTap(page.kind || "page", page.pageId || "", page.notebookId || "", page.title || "")
+                    if (page.kind === "page") {
+                        root.pageActivatedByKeyboard(page.pageId, page.title)
+                    }
                     return
                 }
             }
@@ -480,6 +808,44 @@ Item {
             color: selected
                 ? ThemeManager.surfaceActive
                 : (delegateMouseArea.containsMouse || delegateMouseArea.pressed ? ThemeManager.surfaceHover : "transparent")
+
+            Drag.active: root._isMobile ? mobileDragHandler.active : desktopDragHandler.active
+            Drag.supportedActions: Qt.MoveAction
+            Drag.hotSpot.x: width / 2
+            Drag.hotSpot.y: height / 2
+            Drag.mimeData: (model.kind === "page" && model.pageId)
+                ? ({ "application/x-zinc-page": model.pageId })
+                : ({})
+
+            DragHandler {
+                id: desktopDragHandler
+                enabled: !root._isMobile && model.kind === "page"
+                target: null
+
+                onActiveChanged: {
+                    root._dragActive = desktopDragHandler.active
+                    if (!desktopDragHandler.active) {
+                        root._dragY = 0
+                    }
+                }
+
+                onCentroidChanged: {
+                    if (!desktopDragHandler.active) return
+                    root._dragY = delegateItem.y + desktopDragHandler.centroid.position.y
+                }
+            }
+
+            DropArea {
+                anchors.fill: parent
+                keys: ["application/x-zinc-page"]
+                onDropped: function(drop) {
+                    if (!drop || !drop.mimeData) return
+                    const draggedId = drop.mimeData.getDataAsString("application/x-zinc-page")
+                    if (!draggedId || draggedId === "") return
+                    root.movePageTo(model.kind || "page", model.pageId || "", model.notebookId || "", draggedId)
+                    drop.accepted = true
+                }
+            }
             
             // Background MouseArea for hover and page selection (z = 0)
             MouseArea {
@@ -489,9 +855,16 @@ Item {
                 acceptedButtons: Qt.LeftButton | Qt.RightButton
                 z: 0
                 
+                onPressed: function(mouse) {
+                    if (mouse.button === Qt.RightButton) {
+                        root.openContextMenu(model.kind || "page", model.pageId || "", model.notebookId || "", model.title || "")
+                        mouse.accepted = true
+                    }
+                }
+
                 onClicked: function(mouse) {
                     if (mouse.button === Qt.LeftButton) {
-                        root.handleRowTap(model.pageId, model.title)
+                        root.handleRowTap(model.kind || "page", model.pageId || "", model.notebookId || "", model.title || "")
                     }
                 }
             }
@@ -508,7 +881,7 @@ Item {
                     width: 18
                     height: 18
 
-                    readonly property bool hasKids: root.hasChildren(model.pageId)
+                    readonly property bool hasKids: root.hasChildrenAtIndex(index)
                     readonly property bool showArrow: !collapsed && hasKids &&
                                                      (root.showExpandArrowsAlways || delegateMouseArea.containsMouse)
 
@@ -527,7 +900,7 @@ Item {
 
                     Text {
                         anchors.centerIn: parent
-                        text: "📄"
+                        text: model.kind === "notebook" ? "📁" : "📄"
                         font.pixelSize: collapsed ? 14 : 12
                         visible: !parent.showArrow
                     }
@@ -551,6 +924,38 @@ Item {
                     font.pixelSize: ThemeManager.fontSizeSmall
                     elide: Text.ElideRight
                     visible: !collapsed
+                }
+
+                // Mobile drag handle (prevents interfering with scroll flick).
+                Item {
+                    width: 18
+                    height: 18
+                    visible: root._isMobile && (model.kind === "page") && !collapsed
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: "≡"
+                        color: ThemeManager.textMuted
+                        font.pixelSize: 12
+                    }
+
+                    DragHandler {
+                        id: mobileDragHandler
+                        enabled: root._isMobile && model.kind === "page"
+                        target: null
+
+                        onActiveChanged: {
+                            root._dragActive = mobileDragHandler.active
+                            if (!mobileDragHandler.active) {
+                                root._dragY = 0
+                            }
+                        }
+
+                        onCentroidChanged: {
+                            if (!mobileDragHandler.active) return
+                            root._dragY = delegateItem.y + mobileDragHandler.centroid.position.y
+                        }
+                    }
                 }
                 
                 // Actions (appear on hover)
@@ -582,7 +987,11 @@ Item {
                             preventStealing: true
                             onPressed: function(mouse) { mouse.accepted = true }
                             onClicked: function(mouse) {
-                                root.createPage(model.pageId)
+                                if (model.kind === "notebook") {
+                                    root.createPageWithNotebook("", model.notebookId || "")
+                                } else {
+                                    root.createPage(model.pageId)
+                                }
                                 mouse.accepted = true
                             }
                         }
@@ -612,7 +1021,7 @@ Item {
                             preventStealing: true
                             onPressed: function(mouse) { mouse.accepted = true }
                             onClicked: function(mouse) {
-                                root.openContextMenu(model.pageId, model.title)
+                                root.openContextMenu(model.kind || "page", model.pageId || "", model.notebookId || "", model.title || "")
                                 mouse.accepted = true
                             }
                         }
@@ -629,19 +1038,43 @@ Item {
 
         sourceComponent: Menu {
             id: pageContextMenu
+            property string targetKind: "page"
             property string targetPageId: ""
-            property string targetPageTitle: ""
+            property string targetNotebookId: ""
+            property string targetTitle: ""
 
             MenuItem {
-                text: "Add sub-page"
-                onTriggered: root.createPage(pageContextMenu.targetPageId)
+                text: "New notebook"
+                onTriggered: root.newNotebookRequested()
             }
 
             MenuSeparator {}
 
             MenuItem {
-                text: "Delete"
+                text: pageContextMenu.targetKind === "notebook" ? "New page in notebook" : "Add sub-page"
                 onTriggered: {
+                    if (pageContextMenu.targetKind === "notebook") {
+                        root.createPageWithNotebook("", pageContextMenu.targetNotebookId)
+                    } else {
+                        root.createPage(pageContextMenu.targetPageId)
+                    }
+                }
+            }
+
+            MenuSeparator {}
+
+            MenuItem {
+                text: pageContextMenu.targetKind === "notebook" ? "Delete notebook" : "Delete"
+                onTriggered: {
+                    if (pageContextMenu.targetKind === "notebook") {
+                        if (DataStore && DataStore.deleteNotebook) {
+                            DataStore.deleteNotebook(pageContextMenu.targetNotebookId)
+                            loadPagesFromStorage()
+                            pagesChanged()
+                        }
+                        return
+                    }
+
                     if (pageModel.count > 1) {
                         root.deletePage(pageContextMenu.targetPageId)
                     }
@@ -655,8 +1088,7 @@ Item {
                 onTriggered: {
                     root.createDefaultPages()
                     if (pageModel.count > 0) {
-                        let first = pageModel.get(0)
-                        root.pageSelected(first.pageId, first.title)
+                        root.ensureInitialPage("")
                     }
                 }
             }
@@ -668,8 +1100,7 @@ Item {
     function resetToDefaults() {
         createDefaultPages()
         if (pageModel.count > 0) {
-            let first = pageModel.get(0)
-            pageSelected(first.pageId, first.title)
+            ensureInitialPage("")
         }
     }
 }

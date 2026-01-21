@@ -107,6 +107,16 @@ SyncController::SyncController(QObject* parent)
                 if (deletedPagesValue.isArray()) {
                     emit deletedPageSnapshotReceivedPages(deletedPagesValue.toArray().toVariantList());
                 }
+
+                auto notebooksValue = obj.value("notebooks");
+                if (notebooksValue.isArray()) {
+                    emit notebookSnapshotReceivedNotebooks(notebooksValue.toArray().toVariantList());
+                }
+
+                auto deletedNotebooksValue = obj.value("deletedNotebooks");
+                if (deletedNotebooksValue.isArray()) {
+                    emit deletedNotebookSnapshotReceivedNotebooks(deletedNotebooksValue.toArray().toVariantList());
+                }
             });
     connect(sync_manager_.get(), &network::SyncManager::error,
             this, &SyncController::error);

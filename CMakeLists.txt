@@ -528,6 +528,7 @@ if(ZINC_BUILD_TESTS)
 		        tests/qml/test_main.cpp
 		        tests/qml/test_feature_flags.cpp
 		        tests/qml/test_datastore_sync.cpp
+		        tests/qml/test_datastore_notebooks.cpp
 		        tests/qml/test_attachments_disk_storage.cpp
 		        tests/qml/test_block_editor_cursor_visibility_qml.cpp
 		        tests/qml/test_markdown_blocks.cpp

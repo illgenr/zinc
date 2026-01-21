@@ -32,6 +32,7 @@ public:
     
     // Page operations
     Q_INVOKABLE QVariantList getAllPages();
+    Q_INVOKABLE QVariantList getPagesForNotebook(const QString& notebookId);
     Q_INVOKABLE QVariantList getPagesForSync();
     Q_INVOKABLE QVariantList getPagesForSyncSince(const QString& updatedAtCursor,
                                                   const QString& pageIdCursor);
@@ -54,6 +55,7 @@ public:
     Q_INVOKABLE void savePage(const QVariantMap& page);
     Q_INVOKABLE void deletePage(const QString& pageId);
     Q_INVOKABLE void saveAllPages(const QVariantList& pages);
+    Q_INVOKABLE void savePagesForNotebook(const QString& notebookId, const QVariantList& pages);
     Q_INVOKABLE void applyPageUpdates(const QVariantList& pages);
     Q_INVOKABLE void applyDeletedPageUpdates(const QVariantList& deletedPages);
     Q_INVOKABLE QVariantList searchPages(const QString& query, int limit = 50);
@@ -109,6 +111,22 @@ public:
     // Seed the initial "Getting Started" style pages using a sentinel old timestamp so
     // they never win sync conflicts against real user edits from other clients.
     Q_INVOKABLE bool seedDefaultPages();
+
+    // Notebooks
+    Q_INVOKABLE QString defaultNotebookId() const;
+    Q_INVOKABLE QVariantList getAllNotebooks();
+    Q_INVOKABLE QVariantMap getNotebook(const QString& notebookId);
+    Q_INVOKABLE QString createNotebook(const QString& name);
+    Q_INVOKABLE void renameNotebook(const QString& notebookId, const QString& name);
+    Q_INVOKABLE void deleteNotebook(const QString& notebookId);
+    Q_INVOKABLE QVariantList getNotebooksForSync();
+    Q_INVOKABLE QVariantList getNotebooksForSyncSince(const QString& updatedAtCursor,
+                                                      const QString& notebookIdCursor);
+    Q_INVOKABLE void applyNotebookUpdates(const QVariantList& notebooks);
+    Q_INVOKABLE QVariantList getDeletedNotebooksForSync();
+    Q_INVOKABLE QVariantList getDeletedNotebooksForSyncSince(const QString& deletedAtCursor,
+                                                             const QString& notebookIdCursor);
+    Q_INVOKABLE void applyDeletedNotebookUpdates(const QVariantList& deletedNotebooks);
     
     // Initialize database
     Q_INVOKABLE bool initialize();
@@ -127,11 +145,13 @@ signals:
     void pairedDevicesChanged();
     void pageConflictsChanged();
     void pageConflictDetected(const QVariantMap& conflict);
+    void notebooksChanged();
     void error(const QString& message);
 
 private:
     void createTables();
     QString getDatabasePath();
+    QString ensureDefaultNotebook();
     
     QSqlDatabase m_db;
     bool m_ready = false;
