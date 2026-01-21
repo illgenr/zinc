@@ -30,6 +30,10 @@ constexpr const char* kSettingsDeletedPagesRetention = "sync/deleted_pages_reten
 constexpr const char* kSettingsStartupMode = "ui/startup_mode";
 constexpr const char* kSettingsStartupFixedPageId = "ui/startup_fixed_page_id";
 constexpr const char* kSettingsLastViewedPageId = "ui/last_viewed_page_id";
+constexpr const char* kSettingsEditorMode = "ui/editor_mode";
+constexpr const char* kSettingsLastViewedCursorPageId = "ui/last_viewed_cursor_page_id";
+constexpr const char* kSettingsLastViewedCursorBlockIndex = "ui/last_viewed_cursor_block_index";
+constexpr const char* kSettingsLastViewedCursorPos = "ui/last_viewed_cursor_pos";
 constexpr int kDefaultDeletedPagesRetention = 100;
 constexpr int kMaxDeletedPagesRetention = 10000;
 constexpr auto kDefaultPagesSeedTimestamp = "1900-01-01 00:00:00.000";
@@ -41,6 +45,10 @@ QString now_timestamp_utc() {
 }
 
 int normalize_startup_mode(int mode) {
+    return (mode == 1) ? 1 : 0;
+}
+
+int normalize_editor_mode(int mode) {
     return (mode == 1) ? 1 : 0;
 }
 
@@ -62,6 +70,11 @@ int startup_page_mode() {
     return normalize_startup_mode(settings.value(QString::fromLatin1(kSettingsStartupMode), 0).toInt());
 }
 
+int editor_mode() {
+    QSettings settings;
+    return normalize_editor_mode(settings.value(QString::fromLatin1(kSettingsEditorMode), 0).toInt());
+}
+
 QString startup_fixed_page_id() {
     QSettings settings;
     return settings.value(QString::fromLatin1(kSettingsStartupFixedPageId), QString{}).toString();
@@ -70,6 +83,56 @@ QString startup_fixed_page_id() {
 QString last_viewed_page_id() {
     QSettings settings;
     return settings.value(QString::fromLatin1(kSettingsLastViewedPageId), QString{}).toString();
+}
+
+QString last_viewed_cursor_page_id() {
+    QSettings settings;
+    return settings.value(QString::fromLatin1(kSettingsLastViewedCursorPageId), QString{}).toString();
+}
+
+int last_viewed_cursor_block_index() {
+    QSettings settings;
+    return settings.value(QString::fromLatin1(kSettingsLastViewedCursorBlockIndex), -1).toInt();
+}
+
+int last_viewed_cursor_pos() {
+    QSettings settings;
+    return settings.value(QString::fromLatin1(kSettingsLastViewedCursorPos), -1).toInt();
+}
+
+int normalize_cursor_int(int value) {
+    return (value < 0) ? -1 : value;
+}
+
+QVariantMap startup_cursor_hint(int mode,
+                                const QString& startupPageId,
+                                const QString& cursorPageId,
+                                int blockIndex,
+                                int cursorPos) {
+    QVariantMap hint;
+    if (startupPageId.isEmpty()) {
+        return hint;
+    }
+
+    hint.insert(QStringLiteral("pageId"), startupPageId);
+
+    if (mode == 1) {
+        hint.insert(QStringLiteral("blockIndex"), 0);
+        hint.insert(QStringLiteral("cursorPos"), 0);
+        return hint;
+    }
+
+    const bool cursorMatches =
+        !cursorPageId.isEmpty() && cursorPageId == startupPageId && blockIndex >= 0 && cursorPos >= 0;
+    if (cursorMatches) {
+        hint.insert(QStringLiteral("blockIndex"), blockIndex);
+        hint.insert(QStringLiteral("cursorPos"), cursorPos);
+        return hint;
+    }
+
+    hint.insert(QStringLiteral("blockIndex"), 0);
+    hint.insert(QStringLiteral("cursorPos"), 0);
+    return hint;
 }
 
 QString page_id_from_variant_map(const QVariantMap& page) {
@@ -2159,6 +2222,40 @@ QString DataStore::resolveStartupPageId(const QVariantList& pages) const {
                                   last_viewed_page_id(),
                                   startup_fixed_page_id(),
                                   pages);
+}
+
+int DataStore::editorMode() const {
+    return editor_mode();
+}
+
+void DataStore::setEditorMode(int mode) {
+    QSettings settings;
+    settings.setValue(QString::fromLatin1(kSettingsEditorMode), normalize_editor_mode(mode));
+}
+
+QVariantMap DataStore::lastViewedCursor() const {
+    QVariantMap cursor;
+    cursor.insert(QStringLiteral("pageId"), last_viewed_cursor_page_id());
+    cursor.insert(QStringLiteral("blockIndex"), last_viewed_cursor_block_index());
+    cursor.insert(QStringLiteral("cursorPos"), last_viewed_cursor_pos());
+    return cursor;
+}
+
+void DataStore::setLastViewedCursor(const QString& pageId, int blockIndex, int cursorPos) {
+    QSettings settings;
+    settings.setValue(QString::fromLatin1(kSettingsLastViewedCursorPageId), pageId);
+    settings.setValue(QString::fromLatin1(kSettingsLastViewedCursorBlockIndex),
+                      normalize_cursor_int(blockIndex));
+    settings.setValue(QString::fromLatin1(kSettingsLastViewedCursorPos),
+                      normalize_cursor_int(cursorPos));
+}
+
+QVariantMap DataStore::resolveStartupCursorHint(const QString& startupPageId) const {
+    return startup_cursor_hint(startup_page_mode(),
+                               startupPageId,
+                               last_viewed_cursor_page_id(),
+                               last_viewed_cursor_block_index(),
+                               last_viewed_cursor_pos());
 }
 
 QVariantList DataStore::getBlocksForSync() {

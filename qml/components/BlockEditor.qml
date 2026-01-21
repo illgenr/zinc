@@ -362,6 +362,8 @@ FocusScope {
         scheduleAutosave()
         clearCrossBlockSelection()
         focusTimer.targetIndex = target >= 0 ? target : 0
+        focusTimer.targetCursorPos = -1
+        focusTimer.attemptsRemaining = 10
         focusTimer.start()
         return true
     }
@@ -404,6 +406,8 @@ FocusScope {
         scheduleAutosave()
         clearCrossBlockSelection()
         focusTimer.targetIndex = Math.max(0, target)
+        focusTimer.targetCursorPos = -1
+        focusTimer.attemptsRemaining = 10
         focusTimer.start()
         return true
     }
@@ -456,6 +460,8 @@ FocusScope {
         scheduleAutosave()
         const next = Math.max(0, Math.min(blockIndex - 1, blockModel.count - 1))
         focusTimer.targetIndex = next
+        focusTimer.targetCursorPos = -1
+        focusTimer.attemptsRemaining = 10
         focusTimer.start()
     }
     
@@ -853,6 +859,14 @@ FocusScope {
         root.searchHighlightBlockIndex = idx
         searchHighlightClearTimer.restart()
     }
+
+    function focusDocumentEnd() {
+        if (blockRepeater.count <= 0) return
+        const idx = blockRepeater.count - 1
+        scrollToBlockIndex(idx)
+        focusBlockAtDeferred(idx, -1)
+        scheduleEnsureFocusedCursorVisible()
+    }
     
     Flickable {
         id: flickable
@@ -1006,6 +1020,8 @@ FocusScope {
                         
                         // Focus the new block after a brief delay
                         focusTimer.targetIndex = index + 1
+                        focusTimer.targetCursorPos = -1
+                        focusTimer.attemptsRemaining = 10
                         focusTimer.start()
                     }
                     
@@ -1115,6 +1131,8 @@ FocusScope {
                             })
                             // Focus the new block
                             focusTimer.targetIndex = newIdx
+                            focusTimer.targetCursorPos = -1
+                            focusTimer.attemptsRemaining = 10
                             focusTimer.start()
                         }
                     }
@@ -1283,12 +1301,24 @@ FocusScope {
     Timer {
         id: focusTimer
         property int targetIndex: -1
+        property int targetCursorPos: -1
+        property int attemptsRemaining: 0
         interval: 50
         onTriggered: {
             if (targetIndex >= 0 && targetIndex < blockRepeater.count) {
-                let item = blockRepeater.itemAt(targetIndex)
-                root.focusBlock(targetIndex)
+                const item = blockRepeater.itemAt(targetIndex)
+                if (item) {
+                    root.focusBlockAt(targetIndex, targetCursorPos)
+                    attemptsRemaining = 0
+                } else if (attemptsRemaining > 0) {
+                    attemptsRemaining = attemptsRemaining - 1
+                    focusTimer.start()
+                }
+            } else if (attemptsRemaining > 0) {
+                attemptsRemaining = attemptsRemaining - 1
+                focusTimer.start()
             }
+            targetCursorPos = -1
         }
     }
     
@@ -1331,9 +1361,15 @@ FocusScope {
         focusBlockAtEnd(idx)
     }
 
+    function focusBlockAtDeferred(idx, cursorPos) {
+        focusTimer.targetIndex = idx
+        focusTimer.targetCursorPos = cursorPos === undefined ? -1 : cursorPos
+        focusTimer.attemptsRemaining = 20
+        focusTimer.start()
+    }
+
     function focusContent() {
         if (blockModel.count <= 0) return
-        focusTimer.targetIndex = 0
-        focusTimer.start()
+        focusBlockAtDeferred(0, -1)
     }
 }

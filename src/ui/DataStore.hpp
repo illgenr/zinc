@@ -73,6 +73,20 @@ public:
     Q_INVOKABLE QString lastViewedPageId() const;
     Q_INVOKABLE void setLastViewedPageId(const QString& pageId);
     Q_INVOKABLE QString resolveStartupPageId(const QVariantList& pages) const;
+
+    // Editor mode:
+    // - mode=0: hybrid block editor (default)
+    // - mode=1: plaintext markdown editor
+    Q_INVOKABLE int editorMode() const;
+    Q_INVOKABLE void setEditorMode(int mode);
+
+    // Cursor position to restore when opening the last viewed page.
+    // Stored in settings so app startup can restore it.
+    // Values are block-based (BlockEditor), where cursorPos is within the block's text.
+    Q_INVOKABLE QVariantMap lastViewedCursor() const;
+    Q_INVOKABLE void setLastViewedCursor(const QString& pageId, int blockIndex, int cursorPos);
+    // Returns { pageId, blockIndex, cursorPos } for a given startup page id, based on startup mode.
+    Q_INVOKABLE QVariantMap resolveStartupCursorHint(const QString& startupPageId) const;
     
     // Block operations  
     Q_INVOKABLE QVariantList getBlocksForPage(const QString& pageId);

@@ -83,6 +83,16 @@ Item {
         }
     }
 
+    function focusContentAt(pos) {
+        editor.forceActiveFocus()
+        const p = pos === undefined ? 0 : Math.max(0, Math.min(pos, (editor.text || "").length))
+        editor.cursorPosition = p
+    }
+
+    function focusContent() {
+        focusContentAt(0)
+    }
+
     Timer {
         id: saveTimer
         interval: 750
@@ -229,6 +239,8 @@ Item {
                     id: editor
                     objectName: "markdownEditorTextArea"
                     anchors.fill: parent
+                    implicitWidth: 0
+                    implicitHeight: 0
 
                     wrapMode: TextArea.Wrap
                     selectByMouse: true

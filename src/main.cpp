@@ -3,6 +3,7 @@
 #include <QLoggingCategory>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
+#include <QStyleHints>
 
 #include "ui/qml_types.hpp"
 #include "ui/AttachmentImageProvider.hpp"
@@ -11,6 +12,7 @@
 int main(int argc, char *argv[])
 {
     QGuiApplication app(argc, argv);
+    app.styleHints()->setCursorFlashTime(500);
 
     const auto args = QCoreApplication::arguments();
     if (args.contains(QStringLiteral("--debug-attachments"))) {

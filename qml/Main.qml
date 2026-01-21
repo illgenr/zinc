@@ -22,9 +22,12 @@ ApplicationWindow {
     property var mobilePagesList: []  // Reactive list for mobile
     property bool startupPageAppliedDesktop: false
     property bool startupPageAppliedMobile: false
+    property var pendingStartupCursorHint: null
     property int pendingSearchBlockIndex: -1
     readonly property bool debugSyncUi: Qt.application.arguments.indexOf("--debug-sync-ui") !== -1
     property int suppressOutgoingSnapshots: 0
+    property var pendingCursorPersist: null
+    property int editorMode: 0 // 0=hybrid, 1=plaintext markdown
 
     property string pagesCursorAt: ""
     property string pagesCursorId: ""
@@ -49,6 +52,7 @@ ApplicationWindow {
     
     // Detect mobile (Android) vs desktop
     readonly property bool isMobile: Qt.platform.os === "android" || Qt.platform.os === "ios" || width < 600
+    readonly property bool syncDisabled: Qt.application.arguments.indexOf("--no-sync") !== -1
 
     Connections {
         target: DataStore
@@ -93,6 +97,17 @@ ApplicationWindow {
         sequences: ["Ctrl+Shift+?", "Ctrl+Shift+/"]
         onActivated: shortcutsDialog.open()
     }
+
+    Shortcut {
+        enabled: !isMobile
+        context: Qt.ApplicationShortcut
+        sequence: "Ctrl+End"
+        onActivated: {
+            if (blockEditor && blockEditor.focusDocumentEnd) {
+                blockEditor.focusDocumentEnd()
+            }
+        }
+    }
     
     // Mobile layout using StackView
     StackView {
@@ -136,7 +151,7 @@ ApplicationWindow {
                     Rectangle {
                         width: 32
                         height: 32
-                        anchors.verticalCenter: parent.verticalCenter
+                        Layout.alignment: Qt.AlignVCenter
                         radius: ThemeManager.radiusSmall
                         color: ThemeManager.accent
                         
@@ -155,11 +170,11 @@ ApplicationWindow {
                         color: ThemeManager.text
                         font.pixelSize: ThemeManager.fontSizeXLarge
                         font.weight: Font.Medium
-                        anchors.verticalCenter: parent.verticalCenter
+                        Layout.alignment: Qt.AlignVCenter
                     }
 
                     ToolButton {
-                        anchors.verticalCenter: parent.verticalCenter
+                        Layout.alignment: Qt.AlignVCenter
                         contentItem: Text {
                             text: "+"
                             color: ThemeManager.text
@@ -175,7 +190,7 @@ ApplicationWindow {
                     }
 
                     SyncButtons {
-                        anchors.verticalCenter: parent.verticalCenter
+                        Layout.alignment: Qt.AlignVCenter
                         autoSyncEnabled: SyncPreferences.autoSyncEnabled
                         compact: false
                         onManualSyncRequested: root.requestManualSync()
@@ -188,16 +203,16 @@ ApplicationWindow {
                 anchors.fill: parent                                
                 spacing: ThemeManager.spacingSmall
 
-                RowLayout {                         
-                    anchors.top: parent.top
-                    anchors.margins: ThemeManager.spacingSmall                    
-                    height: 48                                    
+                RowLayout {
+                    Layout.fillWidth: true
+                    Layout.margins: ThemeManager.spacingSmall
+                    Layout.preferredHeight: 48
                     // Search bar
                     Rectangle {
                         Layout.fillWidth: true
                         Layout.preferredHeight: 48
                         Layout.preferredWidth: 96
-                        anchors.verticalCenter: parent.verticalCenter
+                        Layout.alignment: Qt.AlignVCenter
                         Layout.margins: ThemeManager.spacingMedium
                         radius: ThemeManager.radiusMedium
                         color: ThemeManager.surfaceHover
@@ -228,7 +243,7 @@ ApplicationWindow {
                     Button {
                         Layout.fillWidth: true
                         Layout.margins: ThemeManager.spacingSmall
-                        anchors.verticalCenter: parent.verticalCenter
+                        Layout.alignment: Qt.AlignVCenter
                         text: "+ New Page"
 
                         background: Rectangle {
@@ -253,7 +268,7 @@ ApplicationWindow {
 
                     Button {
                         Layout.margins: ThemeManager.spacingSmall
-                        anchors.verticalCenter: parent.verticalCenter
+                        Layout.alignment: Qt.AlignVCenter
                         text: "New Notebook"
 
                         background: Rectangle {
@@ -422,6 +437,7 @@ ApplicationWindow {
                                 mobileBlockEditor.revealSearchBlockIndex(root.pendingSearchBlockIndex)
                                 root.pendingSearchBlockIndex = -1
                             }
+                            root.applyPendingStartupFocusIfAny(mobileBlockEditor, root.currentPage.id)
                         })
                     }
                 }
@@ -465,6 +481,7 @@ ApplicationWindow {
                     root.localCursorPageId = pageId
                     root.localCursorBlockIndex = blockIndex
                     root.localCursorPos = cursorPos
+                    root.scheduleCursorPersist(pageId, blockIndex, cursorPos)
                     presenceTimer.restart()
                 }
 
@@ -635,7 +652,7 @@ ApplicationWindow {
                         if (isMobile) {
                             mobileStack.push(mobileEditorComponent)
                         } else {
-                            blockEditor.loadPage(pageId)
+                            root.loadCurrentPageInActiveEditor(pageId)
                         }
                     }
                     
@@ -663,65 +680,101 @@ ApplicationWindow {
         Rectangle {
             SplitView.fillWidth: true
             color: ThemeManager.background
-            
-            BlockEditor {
-                id: blockEditor
+
+            Item {
                 anchors.fill: parent
-                pageTitle: currentPage ? currentPage.title : ""
-                availablePages: pageTree.getAllPages()
-                realtimeSyncEnabled: root.bothAutoSyncEnabled
-                debugSyncUi: root.debugSyncUi
-                showRemoteCursor: root.bothAutoSyncEnabled
-                remoteCursorPageId: appSyncController ? appSyncController.remoteCursorPageId : ""
-                remoteCursorBlockIndex: appSyncController ? appSyncController.remoteCursorBlockIndex : -1
-                remoteCursorPos: appSyncController ? appSyncController.remoteCursorPos : -1
 
-                onTitleEdited: function(newTitle) {
-                    if (currentPage) {
-                        currentPage.title = newTitle
-                        pageTree.updatePageTitle(currentPage.id, newTitle)
+                StackLayout {
+                    id: editorStack
+                    anchors.fill: parent
+                    currentIndex: root.editorMode === 1 ? 1 : 0
+
+                    BlockEditor {
+                        id: blockEditor
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        pageTitle: currentPage ? currentPage.title : ""
+                        availablePages: pageTree.getAllPages()
+                        realtimeSyncEnabled: root.bothAutoSyncEnabled
+                        debugSyncUi: root.debugSyncUi
+                        showRemoteCursor: root.bothAutoSyncEnabled
+                        remoteCursorPageId: appSyncController ? appSyncController.remoteCursorPageId : ""
+                        remoteCursorBlockIndex: appSyncController ? appSyncController.remoteCursorBlockIndex : -1
+                        remoteCursorPos: appSyncController ? appSyncController.remoteCursorPos : -1
+
+                        onTitleEdited: function(newTitle) {
+                            if (currentPage) {
+                                currentPage.title = newTitle
+                                pageTree.updatePageTitle(currentPage.id, newTitle)
+                            }
+                        }
+
+                        onShowPagePicker: function(blockIndex) {
+                            pagePickerDialog.pages = pageTree.getAllPages()
+                            pagePickerDialog.open()
+                            pagePickerDialog._targetEditor = blockEditor
+                        }
+
+                        onNavigateToPage: function(targetPageId) {
+                            if (!targetPageId || targetPageId === "") return
+                            var page = DataStore ? DataStore.getPage(targetPageId) : null
+                            var title = page && page.title ? page.title : "Untitled"
+                            if (DataStore) DataStore.setLastViewedPageId(targetPageId)
+                            root.currentPage = { id: targetPageId, title: title }
+                            root.loadCurrentPageInActiveEditor(targetPageId)
+                        }
+
+                        onCreateChildPageRequested: function(title, blockIndex) {
+                            if (!title || title === "") return
+                            var newId = pageTree.createPage(blockEditor.pageId)
+                            if (!newId || newId === "") return
+                            pageTree.updatePageTitle(newId, title)
+                            blockEditor.setLinkAtIndex(blockIndex, newId, title)
+                        }
+
+                        onCursorMoved: function(blockIndex, cursorPos) {
+                            const pageId = blockEditor.pageId
+                            if (root.localCursorPageId === pageId &&
+                                root.localCursorBlockIndex === blockIndex &&
+                                root.localCursorPos === cursorPos) {
+                                return
+                            }
+                            root.localCursorPageId = pageId
+                            root.localCursorBlockIndex = blockIndex
+                            root.localCursorPos = cursorPos
+                            root.scheduleCursorPersist(pageId, blockIndex, cursorPos)
+                            presenceTimer.restart()
+                        }
+
+                        onContentSaved: function(pageId) {
+                            if (root.debugSyncUi) console.log("SYNCUI: blockEditor contentSaved -> scheduleOutgoingSnapshot pageId=", pageId)
+                            root.scheduleOutgoingSnapshot()
+                        }
+                    }
+
+                    MarkdownEditor {
+                        id: markdownEditor
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        pageTitle: currentPage ? currentPage.title : ""
+                        availablePages: pageTree.getAllPages()
+
+                        onTitleEdited: function(newTitle) {
+                            if (currentPage) {
+                                currentPage.title = newTitle
+                                pageTree.updatePageTitle(currentPage.id, newTitle)
+                            }
+                        }
                     }
                 }
 
-                onShowPagePicker: function(blockIndex) {
-                    pagePickerDialog.pages = pageTree.getAllPages()
-                    pagePickerDialog.open()
-                    pagePickerDialog._targetEditor = blockEditor
-                }
-
-                onNavigateToPage: function(targetPageId) {
-                    if (!targetPageId || targetPageId === "") return
-                    var page = DataStore ? DataStore.getPage(targetPageId) : null
-                    var title = page && page.title ? page.title : "Untitled"
-                    if (DataStore) DataStore.setLastViewedPageId(targetPageId)
-                    root.currentPage = { id: targetPageId, title: title }
-                    blockEditor.loadPage(targetPageId)
-                }
-
-                onCreateChildPageRequested: function(title, blockIndex) {
-                    if (!title || title === "") return
-                    var newId = pageTree.createPage(blockEditor.pageId)
-                    if (!newId || newId === "") return
-                    pageTree.updatePageTitle(newId, title)
-                    blockEditor.setLinkAtIndex(blockIndex, newId, title)
-                }
-
-                onCursorMoved: function(blockIndex, cursorPos) {
-                    const pageId = blockEditor.pageId
-                    if (root.localCursorPageId === pageId &&
-                        root.localCursorBlockIndex === blockIndex &&
-                        root.localCursorPos === cursorPos) {
-                        return
-                    }
-                    root.localCursorPageId = pageId
-                    root.localCursorBlockIndex = blockIndex
-                    root.localCursorPos = cursorPos
-                    presenceTimer.restart()
-                }
-
-                onContentSaved: function(pageId) {
-                    if (root.debugSyncUi) console.log("SYNCUI: blockEditor contentSaved -> scheduleOutgoingSnapshot pageId=", pageId)
-                    root.scheduleOutgoingSnapshot()
+                ToolButton {
+                    id: editorModeToggleButton
+                    anchors.top: parent.top
+                    anchors.right: parent.right
+                    anchors.margins: ThemeManager.spacingSmall
+                    text: root.editorModeToggleLabel()
+                    onClicked: root.switchEditorMode()
                 }
             }
         }
@@ -738,12 +791,14 @@ ApplicationWindow {
                 root.currentPage = { id: pageId, title: "Note" }
                 mobileStack.push(mobileEditorComponent)
             } else {
-                blockEditor.loadPage(pageId)
+                root.loadCurrentPageInActiveEditor(pageId)
                 Qt.callLater(function() {
-                    if (blockIndex >= 0) {
-                        blockEditor.revealSearchBlockIndex(blockIndex)
-                    } else if (blockId) {
-                        blockEditor.scrollToBlock(blockId)
+                    if (root.editorMode === 0 && blockEditor) {
+                        if (blockIndex >= 0) {
+                            blockEditor.revealSearchBlockIndex(blockIndex)
+                        } else if (blockId) {
+                            blockEditor.scrollToBlock(blockId)
+                        }
                     }
                     root.pendingSearchBlockIndex = -1
                 })
@@ -862,7 +917,12 @@ ApplicationWindow {
         if (DataStore) {
             DataStore.initialize()
         }
-        tryStartSync()
+        if (DataStore && DataStore.editorMode) {
+            root.editorMode = DataStore.editorMode()
+        }
+        if (!syncDisabled) {
+            tryStartSync()
+        }
         if (isMobile && DataStore) {
             root.mobilePagesList = DataStore.getAllPages()
         }
@@ -876,12 +936,99 @@ ApplicationWindow {
         }
     }
 
+    Timer {
+        id: cursorPersistTimer
+        interval: 250
+        repeat: false
+        onTriggered: {
+            const payload = root.pendingCursorPersist
+            root.pendingCursorPersist = null
+            if (!payload || !DataStore) return
+            if (!DataStore.setLastViewedCursor) return
+            if (!payload.pageId || payload.pageId === "") return
+            DataStore.setLastViewedCursor(payload.pageId, payload.blockIndex, payload.cursorPos)
+        }
+    }
+
+    function scheduleCursorPersist(pageId, blockIndex, cursorPos) {
+        if (!DataStore || !DataStore.setLastViewedCursor) return
+        if (!pageId || pageId === "") return
+        root.pendingCursorPersist = { pageId: pageId, blockIndex: blockIndex, cursorPos: cursorPos }
+        cursorPersistTimer.restart()
+    }
+
+    function applyPendingStartupFocusIfAny(editor, pageId) {
+        const hint = root.pendingStartupCursorHint
+        if (!hint) return
+        if (!hint.pageId || hint.pageId !== pageId) return
+        root.pendingStartupCursorHint = null
+        if (!editor) return
+        const idx = Math.max(0, hint.blockIndex === undefined ? 0 : hint.blockIndex)
+        const pos = Math.max(0, hint.cursorPos === undefined ? 0 : hint.cursorPos)
+        if (editor.focusBlockAtDeferred) {
+            editor.focusBlockAtDeferred(idx, pos)
+            return
+        }
+        if (editor.focusBlockAt) {
+            editor.focusBlockAt(idx, pos)
+        }
+    }
+
+    function persistEditorMode(mode) {
+        root.editorMode = mode === 1 ? 1 : 0
+        if (DataStore && DataStore.setEditorMode) {
+            DataStore.setEditorMode(root.editorMode)
+        }
+    }
+
+    function editorModeToggleLabel() {
+        return root.editorMode === 1 ? "Hybrid" : "Markdown"
+    }
+
+    function switchEditorMode() {
+        const pageId = root.currentPage ? root.currentPage.id : ""
+        if (root.editorMode === 0) {
+            if (blockEditor && blockEditor.flushIfDirty) blockEditor.flushIfDirty()
+            persistEditorMode(1)
+            if (pageId && markdownEditor && markdownEditor.loadPage) {
+                markdownEditor.loadPage(pageId)
+                Qt.callLater(() => markdownEditor.focusContent && markdownEditor.focusContent())
+            }
+            return
+        }
+
+        if (markdownEditor && markdownEditor.saveBlocks) markdownEditor.saveBlocks()
+        persistEditorMode(0)
+        if (pageId && blockEditor && blockEditor.loadPage) {
+            blockEditor.loadPage(pageId)
+            Qt.callLater(() => root.applyPendingStartupFocusIfAny(blockEditor, pageId))
+        }
+    }
+
+    function loadCurrentPageInActiveEditor(pageId) {
+        if (!pageId || pageId === "") return
+        if (root.editorMode === 1) {
+            if (markdownEditor && markdownEditor.loadPage) {
+                markdownEditor.loadPage(pageId)
+                Qt.callLater(() => markdownEditor.focusContent && markdownEditor.focusContent())
+            }
+            return
+        }
+        if (blockEditor && blockEditor.loadPage) {
+            blockEditor.loadPage(pageId)
+            Qt.callLater(() => root.applyPendingStartupFocusIfAny(blockEditor, pageId))
+        }
+    }
+
     function applyStartupPageDesktop() {
         if (startupPageAppliedDesktop || isMobile) return
         const pages = pageTree ? pageTree.getAllPages() : []
         if (!pages || pages.length === 0) return
         startupPageAppliedDesktop = true
         const startupId = DataStore ? DataStore.resolveStartupPageId(pages) : ""
+        if (DataStore && DataStore.resolveStartupCursorHint) {
+            root.pendingStartupCursorHint = DataStore.resolveStartupCursorHint(startupId)
+        }
         if (pageTree) {
             pageTree.ensureInitialPage(startupId)
         }
@@ -894,6 +1041,9 @@ ApplicationWindow {
         if (!pages || pages.length === 0) return
         const startupId = DataStore.resolveStartupPageId(pages)
         if (!startupId || startupId === "") return
+        if (DataStore.resolveStartupCursorHint) {
+            root.pendingStartupCursorHint = DataStore.resolveStartupCursorHint(startupId)
+        }
         const page = DataStore.getPage(startupId)
         const title = page && page.title ? page.title : "Note"
         startupPageAppliedMobile = true
@@ -1271,6 +1421,7 @@ ApplicationWindow {
     }
 
     function tryStartSync() {
+        if (root.syncDisabled) return
         if (!appSyncController) return
         if (appSyncController.syncing) return
 
@@ -1300,7 +1451,7 @@ ApplicationWindow {
         id: syncReconnectTimer
         interval: 5000
         repeat: true
-        running: true
+        running: !root.syncDisabled
         onTriggered: {
             tryStartSync()
             if (!DataStore || !appSyncController) return

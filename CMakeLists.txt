@@ -544,6 +544,8 @@ if(ZINC_BUILD_TESTS)
 		        tests/qml/test_sync_buttons_qml.cpp
 		        tests/qml/test_sync_presence_parse.cpp
 		        tests/qml/test_startup_page_settings.cpp
+		        tests/qml/test_startup_cursor_settings.cpp
+		        tests/qml/test_editor_mode_settings.cpp
 		        tests/qml/test_pairing_dialog_qml.cpp
 		        tests/qml/test_search_dialog_qml.cpp
 		        tests/qml/test_markdown_editor_qml.cpp

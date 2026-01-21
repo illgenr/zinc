@@ -171,7 +171,7 @@ Popup {
                     Rectangle {
                         width: 28
                         height: 28
-                        anchors.verticalCenter: parent.verticalCenter
+                        Layout.alignment: Qt.AlignVCenter
                         radius: ThemeManager.radiusSmall
                         color: ThemeManager.background
 
@@ -186,7 +186,7 @@ Popup {
                     ColumnLayout {
                         Layout.fillWidth: true
                         spacing: 2
-                        anchors.verticalCenter: parent.verticalCenter
+                        Layout.alignment: Qt.AlignVCenter
 
                         Text {
                             text: modelData.label
