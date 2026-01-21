@@ -319,10 +319,12 @@ qt_add_executable(appzinc
 
 set(ZINC_QML_FILES
     qml/Main.qml
+    qml/sync/SyncPreferences.qml
     qml/components/MarkdownEditor.qml
     qml/components/BlockEditor.qml
     qml/components/ScrollMath.js
     qml/components/Block.qml
+    qml/components/SyncButtons.qml
     qml/components/blocks/ParagraphBlock.qml
     qml/components/blocks/HeadingBlock.qml
     qml/components/blocks/TodoBlock.qml
@@ -358,6 +360,7 @@ endif()
 
 # Mark ThemeManager as a singleton BEFORE qt_add_qml_module
 set_source_files_properties(qml/theme/ThemeManager.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
+set_source_files_properties(qml/sync/SyncPreferences.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
 
 qt_add_qml_module(appzinc
     URI zinc
@@ -534,6 +537,7 @@ if(ZINC_BUILD_TESTS)
 		        tests/qml/test_markdown_blocks.cpp
 		        tests/qml/test_cmark.cpp
 		        tests/qml/test_sync_controller_settings.cpp
+		        tests/qml/test_sync_buttons_qml.cpp
 		        tests/qml/test_startup_page_settings.cpp
 		        tests/qml/test_pairing_dialog_qml.cpp
 		        tests/qml/test_search_dialog_qml.cpp

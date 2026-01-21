@@ -171,23 +171,13 @@ ApplicationWindow {
                         }
                         onClicked: newNotebookDialog.open()
                     }
-                    
-                    ToolButton {
-                        icon.name: "settings"                        
+
+                    SyncButtons {
                         anchors.verticalCenter: parent.verticalCenter
-                        contentItem: Text {
-                            text: "⚙"
-                            color: ThemeManager.text
-                            font.pixelSize: 20
-                            horizontalAlignment: Text.AlignHCenter
-                            verticalAlignment: Text.AlignVCenter
-                            
-                        }
-                        background: Rectangle {
-                            radius: ThemeManager.radiusSmall
-                            color: parent.pressed ? ThemeManager.surfaceActive : "transparent"
-                        }
-                        onClicked: settingsDialog.open()
+                        autoSyncEnabled: SyncPreferences.autoSyncEnabled
+                        compact: false
+                        onManualSyncRequested: root.requestManualSync()
+                        onSettingsRequested: settingsDialog.open()
                     }
                 }
             }
@@ -530,25 +520,12 @@ ApplicationWindow {
                         visible: !sidebarCollapsed
                     }
                     
-                    ToolButton {
-                        width: 24
-                        height: 24
+                    SyncButtons {
                         visible: !sidebarCollapsed
-                        
-                        contentItem: Text {
-                            text: "⚙"
-                            color: ThemeManager.textSecondary
-                            font.pixelSize: ThemeManager.fontSizeNormal
-                            horizontalAlignment: Text.AlignHCenter
-                            verticalAlignment: Text.AlignVCenter
-                        }
-                        
-                        background: Rectangle {
-                            radius: ThemeManager.radiusSmall
-                            color: parent.hovered ? ThemeManager.surfaceHover : "transparent"
-                        }
-                        
-                        onClicked: settingsDialog.open()
+                        autoSyncEnabled: SyncPreferences.autoSyncEnabled
+                        compact: true
+                        onManualSyncRequested: root.requestManualSync()
+                        onSettingsRequested: settingsDialog.open()
                     }
 
                     ToolButton {
@@ -1015,7 +992,25 @@ ApplicationWindow {
     }
 
     function scheduleOutgoingSnapshot() {
+        if (!SyncPreferences.autoSyncEnabled) return
         outgoingSnapshotTimer.restart()
+    }
+
+    function requestManualSync() {
+        tryStartSync()
+        outgoingSnapshotTimer.restart()
+    }
+
+    Connections {
+        target: SyncPreferences
+
+        function onAutoSyncEnabledChanged() {
+            if (!SyncPreferences.autoSyncEnabled) {
+                outgoingSnapshotTimer.stop()
+                return
+            }
+            scheduleOutgoingSnapshot()
+        }
     }
 
     function advanceCursorFrom(items, cursorAtKey, cursorIdKey, cursorAtField, idField) {

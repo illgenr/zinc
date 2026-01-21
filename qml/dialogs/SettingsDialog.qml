@@ -605,8 +605,12 @@ Dialog {
             }
             
             SettingsRow {
-                label: "Auto-connect"
-                Switch { checked: true }
+                label: "Auto sync"
+
+                Switch {
+                    checked: SyncPreferences.autoSyncEnabled
+                    onToggled: SyncPreferences.autoSyncEnabled = checked
+                }
             }
 
             SettingsRow {
