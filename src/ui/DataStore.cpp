@@ -1990,6 +1990,18 @@ void DataStore::savePageContentMarkdown(const QString& pageId, const QString& ma
         return;
     }
 
+    {
+        QSqlQuery existing(m_db);
+        existing.prepare(QStringLiteral("SELECT content_markdown FROM pages WHERE id = ?"));
+        existing.addBindValue(pageId);
+        if (existing.exec() && existing.next()) {
+            const auto current = existing.value(0).toString();
+            if (current == markdown) {
+                return;
+            }
+        }
+    }
+
     const QString updatedAt = now_timestamp_utc();
 
     QSqlQuery query(m_db);

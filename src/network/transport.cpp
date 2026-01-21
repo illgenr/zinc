@@ -38,6 +38,7 @@ QString type_name(MessageType type) {
         case MessageType::Pong: return QStringLiteral("Pong");
         case MessageType::Disconnect: return QStringLiteral("Disconnect");
         case MessageType::PagesSnapshot: return QStringLiteral("PagesSnapshot");
+        case MessageType::PresenceUpdate: return QStringLiteral("PresenceUpdate");
     }
     return QStringLiteral("Unknown");
 }

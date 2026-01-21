@@ -450,6 +450,16 @@ void SyncManager::onMessageReceived(MessageType type,
             emit pageSnapshotReceived(data);
             break;
         }
+        case MessageType::PresenceUpdate: {
+            if (sync_debug_enabled()) {
+                qInfo() << "SYNC: msg PresenceUpdate bytes=" << payload.size();
+            }
+            QByteArray data(
+                reinterpret_cast<const char*>(payload.data()),
+                static_cast<int>(payload.size()));
+            emit presenceReceived(peer_id, data);
+            break;
+        }
         case MessageType::SyncRequest:
             handleSyncRequest(peer_id, payload);
             break;
@@ -616,9 +626,27 @@ void SyncManager::sendPageSnapshot(const std::vector<uint8_t>& payload) {
             targets.push_back(peer->connection.get());
         }
     }
+    if (sync_debug_enabled() && targets.empty()) {
+        qInfo() << "SYNC: sendPageSnapshot no connected peers; skipping send";
+    }
     for (const auto& conn : targets) {
         if (conn && conn->isConnected()) {
             conn->send(MessageType::PagesSnapshot, payload);
+        }
+    }
+}
+
+void SyncManager::sendPresenceUpdate(const std::vector<uint8_t>& payload) {
+    std::vector<QPointer<Connection>> targets;
+    targets.reserve(peers_.size());
+    for (const auto& [id, peer] : peers_) {
+        if (peer && peer->connection && peer->connection->isConnected()) {
+            targets.push_back(peer->connection.get());
+        }
+    }
+    for (const auto& conn : targets) {
+        if (conn && conn->isConnected()) {
+            conn->send(MessageType::PresenceUpdate, payload);
         }
     }
 }

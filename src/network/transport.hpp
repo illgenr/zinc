@@ -39,7 +39,8 @@ enum class MessageType : uint8_t {
     Disconnect = 0x3F,
 
     // Pages sync
-    PagesSnapshot = 0x40
+    PagesSnapshot = 0x40,
+    PresenceUpdate = 0x41
 };
 
 /**

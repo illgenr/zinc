@@ -118,6 +118,7 @@ Item {
     readonly property color accent: "#2383e2"
     readonly property color accentHover: "#0077db"
     readonly property color accentLight: "#2383e220"
+    readonly property color remoteCursor: isDark ? "#ff5ca8" : "#b0005c"
     
     readonly property color success: "#2ea043"
     readonly property color warning: "#e69c00"

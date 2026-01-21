@@ -5,6 +5,7 @@
 #include <QSettings>
 #include <QSqlDatabase>
 #include <QSqlQuery>
+#include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QVariantList>
 #include <QVariantMap>
@@ -179,6 +180,29 @@ TEST_CASE("DataStore: applyPageUpdates allows equal updatedAt to overwrite conte
     pages2.append(makePage("p5", QStringLiteral("Page"), timestamp, QStringLiteral("World")));
     store.applyPageUpdates(pages2);
     REQUIRE(store.getPageContentMarkdown(QStringLiteral("p5")) == QStringLiteral("World"));
+}
+
+TEST_CASE("DataStore: savePageContentMarkdown is a no-op when content unchanged", "[qml][datastore]") {
+    zinc::ui::DataStore store;
+    REQUIRE(store.initialize());
+    REQUIRE(store.resetDatabase());
+
+    const auto t0 = QStringLiteral("2026-01-11 00:00:00.000");
+    QVariantList pages;
+    pages.append(makePage("p_noop", QStringLiteral("Page"), t0, QStringLiteral("Hello")));
+    store.applyPageUpdates(pages);
+
+    QSignalSpy spy(&store, &zinc::ui::DataStore::pageContentChanged);
+    REQUIRE(spy.isValid());
+
+    const auto before = updatedAtForPage(store, QStringLiteral("p_noop"));
+    REQUIRE(before == t0);
+
+    store.savePageContentMarkdown(QStringLiteral("p_noop"), QStringLiteral("Hello"));
+
+    REQUIRE(spy.count() == 0);
+    const auto after = updatedAtForPage(store, QStringLiteral("p_noop"));
+    REQUIRE(after == before);
 }
 
 TEST_CASE("DataStore: applyPageUpdates records a conflict when both sides changed since last sync", "[qml][datastore]") {

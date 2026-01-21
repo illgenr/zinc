@@ -1,6 +1,7 @@
 #include "ui/controllers/SyncController.hpp"
 #include "core/types.hpp"
 #include "crypto/keys.hpp"
+#include "ui/controllers/sync_presence.hpp"
 #include <QCryptographicHash>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -41,6 +42,10 @@ SyncController::SyncController(QObject* parent)
                 emit peerDisconnected(QString::fromStdString(device_id.to_string()));
                 emit peerCountChanged();
                 emit peersChanged();
+                if (remote_presence_.has_value()) {
+                    remote_presence_.reset();
+                    emit remotePresenceChanged();
+                }
             });
     connect(sync_manager_.get(), &network::SyncManager::peerDiscovered,
             this, [this](const network::PeerInfo& peer) {
@@ -118,6 +123,31 @@ SyncController::SyncController(QObject* parent)
                     emit deletedNotebookSnapshotReceivedNotebooks(deletedNotebooksValue.toArray().toVariantList());
                 }
             });
+    connect(sync_manager_.get(), &network::SyncManager::presenceReceived,
+            this, [this](const Uuid& peer_id, const QByteArray& payload) {
+                Q_UNUSED(peer_id);
+                const auto parsed = parseSyncPresence(payload);
+                if (!parsed) {
+                    return;
+                }
+                if (qEnvironmentVariableIsSet("ZINC_DEBUG_SYNC")) {
+                    qInfo() << "SYNC: presenceReceived autoSyncEnabled=" << parsed->auto_sync_enabled
+                            << "pageId=" << parsed->page_id
+                            << "blockIndex=" << parsed->block_index
+                            << "cursorPos=" << parsed->cursor_pos;
+                }
+                const auto changed =
+                    (!remote_presence_.has_value()) ||
+                    (remote_presence_->auto_sync_enabled != parsed->auto_sync_enabled) ||
+                    (remote_presence_->page_id != parsed->page_id) ||
+                    (remote_presence_->block_index != parsed->block_index) ||
+                    (remote_presence_->cursor_pos != parsed->cursor_pos);
+                if (!changed) {
+                    return;
+                }
+                remote_presence_ = *parsed;
+                emit remotePresenceChanged();
+            });
     connect(sync_manager_.get(), &network::SyncManager::error,
             this, &SyncController::error);
 }
@@ -146,6 +176,22 @@ QString SyncController::workspaceId() const {
 
 QVariantList SyncController::discoveredPeers() const {
     return discovered_peers_;
+}
+
+bool SyncController::remoteAutoSyncEnabled() const {
+    return remote_presence_.has_value() ? remote_presence_->auto_sync_enabled : false;
+}
+
+QString SyncController::remoteCursorPageId() const {
+    return remote_presence_.has_value() ? remote_presence_->page_id : QString{};
+}
+
+int SyncController::remoteCursorBlockIndex() const {
+    return remote_presence_.has_value() ? remote_presence_->block_index : -1;
+}
+
+int SyncController::remoteCursorPos() const {
+    return remote_presence_.has_value() ? remote_presence_->cursor_pos : -1;
 }
 
 bool SyncController::configure(const QString& workspaceId, const QString& deviceName) {
@@ -181,6 +227,8 @@ bool SyncController::configure(const QString& workspaceId, const QString& device
     discovered_peers_.clear();
     emit discoveredPeersChanged();
     emit configuredChanged();
+    remote_presence_.reset();
+    emit remotePresenceChanged();
     return true;
 }
 
@@ -255,6 +303,23 @@ void SyncController::sendPageSnapshot(const QString& jsonPayload) {
              << "hash=" << hash;
     std::vector<uint8_t> payload(bytes.begin(), bytes.end());
     sync_manager_->sendPageSnapshot(payload);
+}
+
+void SyncController::sendPresence(const QString& pageId, int blockIndex, int cursorPos, bool autoSyncEnabled) {
+    SyncPresence presence;
+    presence.auto_sync_enabled = autoSyncEnabled;
+    presence.page_id = pageId;
+    presence.block_index = blockIndex;
+    presence.cursor_pos = cursorPos;
+    const auto bytes = serializeSyncPresence(presence);
+    if (qEnvironmentVariableIsSet("ZINC_DEBUG_SYNC")) {
+        qInfo() << "SYNC: sendPresence pageId=" << pageId
+                << "blockIndex=" << blockIndex
+                << "cursorPos=" << cursorPos
+                << "autoSyncEnabled=" << autoSyncEnabled;
+    }
+    const std::vector<uint8_t> payload(bytes.begin(), bytes.end());
+    sync_manager_->sendPresenceUpdate(payload);
 }
 
 } // namespace zinc::ui

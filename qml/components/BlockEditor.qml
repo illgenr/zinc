@@ -66,12 +66,24 @@ FocusScope {
     property bool pendingRemoteRefresh: false
     property bool renderBlocksWhenNotFocused: true
     property int blockSelectDelayMs: AndroidUtils.isAndroid() ? 250 : 0
+    property bool realtimeSyncEnabled: false
+    property bool dirty: false
+    property bool debugSyncUi: false
+    property string lastSavedMarkdown: ""
+    property double lastSavedAtMs: 0
     
     signal blockFocused(int index)
+    signal cursorMoved(int blockIndex, int cursorPos)
+    signal contentSaved(string pageId)
     signal titleEdited(string newTitle)
     signal navigateToPage(string targetPageId)
     signal showPagePicker(int blockIndex)
     signal createChildPageRequested(string title, int blockIndex)
+
+    property bool showRemoteCursor: false
+    property string remoteCursorPageId: ""
+    property int remoteCursorBlockIndex: -1
+    property int remoteCursorPos: -1
     
     property var availablePages: []  // Set by parent to provide page list for linking
     property bool selectionDragging: false
@@ -494,7 +506,15 @@ FocusScope {
         
         try {
             const markdown = MarkdownBlocks.serializeContent(blocksForMarkdown())
-            if (DataStore) DataStore.savePageContentMarkdown(pageId, markdown)
+            lastSavedMarkdown = markdown
+            lastSavedAtMs = Date.now()
+            if (DataStore) {
+                DataStore.savePageContentMarkdown(pageId, markdown)
+                if (debugSyncUi) {
+                    console.log("SYNCUI: BlockEditor contentSaved pageId=", pageId, "ts=", Date.now())
+                }
+                root.contentSaved(pageId)
+            }
         } catch (e) {
             console.log("Error saving blocks:", e)
         }
@@ -537,12 +557,34 @@ FocusScope {
     // Auto-save timer
     Timer {
         id: saveTimer
-        interval: 1000
-        onTriggered: saveBlocks()
+        interval: root.realtimeSyncEnabled ? 150 : 1000
+        onTriggered: root.flushIfDirty()
+    }
+
+    // Ensure we still flush periodically even during continuous typing (debounce-only can starve).
+    Timer {
+        id: maxFlushTimer
+        interval: root.realtimeSyncEnabled ? 250 : 2000
+        repeat: true
+        running: root.dirty
+        onTriggered: root.flushIfDirty()
+    }
+
+    function flushIfDirty() {
+        if (!dirty) return
+        if (debugSyncUi) {
+            console.log("SYNCUI: BlockEditor flushIfDirty pageId=", pageId, "realtime=", realtimeSyncEnabled, "ts=", Date.now())
+        }
+        saveBlocks()
+        dirty = false
     }
     
     function scheduleAutosave() {
         lastLocalEditMs = Date.now()
+        dirty = true
+        if (debugSyncUi) {
+            console.log("SYNCUI: BlockEditor scheduleAutosave pageId=", pageId, "realtime=", realtimeSyncEnabled, "ts=", lastLocalEditMs)
+        }
         saveTimer.restart()
     }
 
@@ -551,7 +593,21 @@ FocusScope {
         try {
             const markdown = DataStore ? DataStore.getPageContentMarkdown(pageId) : ""
             if (!markdown) return
+            const restoreFocus = activeFocus && currentBlockIndex >= 0
+            const restoreIndex = currentBlockIndex
+            let restorePos = -1
+            if (restoreFocus) {
+                const item = blockRepeater.itemAt(restoreIndex)
+                if (item && item.textControl && ("cursorPosition" in item.textControl)) {
+                    restorePos = item.textControl.cursorPosition
+                }
+            }
             loadFromMarkdown(markdown)
+            if (restoreFocus) {
+                const idx = Math.max(0, Math.min(restoreIndex, blockModel.count - 1))
+                const pos = restorePos
+                Qt.callLater(() => root.focusBlockAt(idx, pos))
+            }
         } catch (e) {
             console.log("Error merging markdown:", e)
         }
@@ -571,11 +627,45 @@ FocusScope {
             if (!changedPageId || changedPageId === "") return
             if (changedPageId !== pageId) return
 
-            // Don't disrupt active local edits; apply when focus is lost.
-            if (activeFocus || (Date.now() - lastLocalEditMs) < 1500) {
+            const now = Date.now()
+            const echoWindowMs = root.realtimeSyncEnabled ? 800 : 2000
+            if (lastSavedAtMs > 0 && (now - lastSavedAtMs) < echoWindowMs && DataStore) {
+                const currentMarkdown = DataStore.getPageContentMarkdown(pageId) || ""
+                if (currentMarkdown === lastSavedMarkdown) {
+                    if (debugSyncUi) {
+                        console.log("SYNCUI: BlockEditor ignore local echo pageId=", pageId,
+                                    "realtime=", realtimeSyncEnabled,
+                                    "dtSinceSave=", (now - lastSavedAtMs))
+                    }
+                    return
+                }
+            }
+
+            const graceMs = root.realtimeSyncEnabled ? 350 : 1500
+            const recentlyEdited = (now - lastLocalEditMs) < graceMs
+            const shouldDeferForFocus = !root.realtimeSyncEnabled && activeFocus
+            const shouldDefer = dirty || recentlyEdited || shouldDeferForFocus
+
+            if (shouldDefer) {
                 pendingRemoteRefresh = true
+                if (debugSyncUi) {
+                    console.log("SYNCUI: BlockEditor defer remote refresh pageId=", pageId,
+                                "realtime=", realtimeSyncEnabled,
+                                "dirty=", dirty,
+                                "activeFocus=", activeFocus,
+                                "recentlyEdited=", recentlyEdited,
+                                "dt=", (now - lastLocalEditMs))
+                }
                 return
             }
+
+            if (debugSyncUi) {
+                console.log("SYNCUI: BlockEditor apply remote refresh pageId=", pageId,
+                            "realtime=", realtimeSyncEnabled,
+                            "activeFocus=", activeFocus,
+                            "dt=", (now - lastLocalEditMs))
+            }
+
             mergeBlocksFromStorage()
         }
     }
@@ -964,6 +1054,10 @@ FocusScope {
                         currentBlockIndex = index
                         root.blockFocused(index)
                         root.scheduleEnsureFocusedCursorVisible()
+                    }
+
+                    onCursorMoved: function(pos) {
+                        root.cursorMoved(index, pos)
                     }
                     
                     onLinkClicked: function(linkedPageId) {

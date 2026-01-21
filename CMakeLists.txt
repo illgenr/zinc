@@ -311,6 +311,10 @@ target_link_libraries(zinc_ui PUBLIC
     Qt6::Multimedia
 )
 
+target_sources(zinc_ui PRIVATE
+    src/ui/controllers/sync_presence.cpp
+)
+
 
 # Main executable
 qt_add_executable(appzinc
@@ -538,6 +542,7 @@ if(ZINC_BUILD_TESTS)
 		        tests/qml/test_cmark.cpp
 		        tests/qml/test_sync_controller_settings.cpp
 		        tests/qml/test_sync_buttons_qml.cpp
+		        tests/qml/test_sync_presence_parse.cpp
 		        tests/qml/test_startup_page_settings.cpp
 		        tests/qml/test_pairing_dialog_qml.cpp
 		        tests/qml/test_search_dialog_qml.cpp

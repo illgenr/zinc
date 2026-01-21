@@ -4,6 +4,9 @@
 #include <QObject>
 #include <QQmlEngine>
 #include <QVariantList>
+#include <optional>
+
+#include "ui/controllers/sync_presence.hpp"
 
 namespace zinc::ui {
 
@@ -20,6 +23,10 @@ class SyncController : public QObject {
     Q_PROPERTY(bool configured READ isConfigured NOTIFY configuredChanged)
     Q_PROPERTY(QString workspaceId READ workspaceId NOTIFY configuredChanged)
     Q_PROPERTY(QVariantList discoveredPeers READ discoveredPeers NOTIFY discoveredPeersChanged)
+    Q_PROPERTY(bool remoteAutoSyncEnabled READ remoteAutoSyncEnabled NOTIFY remotePresenceChanged)
+    Q_PROPERTY(QString remoteCursorPageId READ remoteCursorPageId NOTIFY remotePresenceChanged)
+    Q_PROPERTY(int remoteCursorBlockIndex READ remoteCursorBlockIndex NOTIFY remotePresenceChanged)
+    Q_PROPERTY(int remoteCursorPos READ remoteCursorPos NOTIFY remotePresenceChanged)
     
 public:
     explicit SyncController(QObject* parent = nullptr);
@@ -30,6 +37,10 @@ public:
     [[nodiscard]] bool isConfigured() const;
     [[nodiscard]] QString workspaceId() const;
     [[nodiscard]] QVariantList discoveredPeers() const;
+    [[nodiscard]] bool remoteAutoSyncEnabled() const;
+    [[nodiscard]] QString remoteCursorPageId() const;
+    [[nodiscard]] int remoteCursorBlockIndex() const;
+    [[nodiscard]] int remoteCursorPos() const;
     
     Q_INVOKABLE bool configure(const QString& workspaceId, const QString& deviceName);
     Q_INVOKABLE bool tryAutoStart(const QString& defaultDeviceName);
@@ -40,6 +51,7 @@ public:
                                    int port);
     Q_INVOKABLE int listeningPort() const;
     Q_INVOKABLE void sendPageSnapshot(const QString& jsonPayload);
+    Q_INVOKABLE void sendPresence(const QString& pageId, int blockIndex, int cursorPos, bool autoSyncEnabled);
 
 signals:
     void syncingChanged();
@@ -61,6 +73,7 @@ signals:
     void attachmentSnapshotReceivedAttachments(const QVariantList& attachments);
     void notebookSnapshotReceivedNotebooks(const QVariantList& notebooks);
     void deletedNotebookSnapshotReceivedNotebooks(const QVariantList& deletedNotebooks);
+    void remotePresenceChanged();
     void error(const QString& message);
 
 private:
@@ -68,6 +81,7 @@ private:
     bool configured_ = false;
     QString workspace_id_;
     QVariantList discovered_peers_;
+    std::optional<SyncPresence> remote_presence_;
 };
 
 } // namespace zinc::ui

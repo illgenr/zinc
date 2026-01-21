@@ -117,6 +117,7 @@ signals:
     void peerDisconnected(const Uuid& device_id);
     void peerDiscovered(const PeerInfo& peer);
     void pageSnapshotReceived(const QByteArray& payload);
+    void presenceReceived(const Uuid& peer_id, const QByteArray& payload);
     void changeReceived(const QString& doc_id, const QByteArray& change_bytes);
     void syncRequested(const Uuid& device_id, const QString& doc_id);
     void error(const QString& message);
@@ -156,6 +157,7 @@ private:
 
 public:
     void sendPageSnapshot(const std::vector<uint8_t>& payload);
+    void sendPresenceUpdate(const std::vector<uint8_t>& payload);
 };
 
 } // namespace zinc::network

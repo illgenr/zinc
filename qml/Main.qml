@@ -23,6 +23,8 @@ ApplicationWindow {
     property bool startupPageAppliedDesktop: false
     property bool startupPageAppliedMobile: false
     property int pendingSearchBlockIndex: -1
+    readonly property bool debugSyncUi: Qt.application.arguments.indexOf("--debug-sync-ui") !== -1
+    property int suppressOutgoingSnapshots: 0
 
     property string pagesCursorAt: ""
     property string pagesCursorId: ""
@@ -405,6 +407,12 @@ ApplicationWindow {
                 anchors.fill: parent
                 pageTitle: root.currentPage ? root.currentPage.title : ""
                 availablePages: pageTree.getAllPages()
+                realtimeSyncEnabled: root.bothAutoSyncEnabled
+                debugSyncUi: root.debugSyncUi
+                showRemoteCursor: root.bothAutoSyncEnabled
+                remoteCursorPageId: appSyncController ? appSyncController.remoteCursorPageId : ""
+                remoteCursorBlockIndex: appSyncController ? appSyncController.remoteCursorBlockIndex : -1
+                remoteCursorPos: appSyncController ? appSyncController.remoteCursorPos : -1
                 
                 Component.onCompleted: {
                     if (root.currentPage) {
@@ -445,6 +453,24 @@ ApplicationWindow {
                     if (!newId || newId === "") return
                     pageTree.updatePageTitle(newId, title)
                     mobileBlockEditor.setLinkAtIndex(blockIndex, newId, title)
+                }
+
+                onCursorMoved: function(blockIndex, cursorPos) {
+                    const pageId = mobileBlockEditor.pageId
+                    if (root.localCursorPageId === pageId &&
+                        root.localCursorBlockIndex === blockIndex &&
+                        root.localCursorPos === cursorPos) {
+                        return
+                    }
+                    root.localCursorPageId = pageId
+                    root.localCursorBlockIndex = blockIndex
+                    root.localCursorPos = cursorPos
+                    presenceTimer.restart()
+                }
+
+                onContentSaved: function(pageId) {
+                    if (root.debugSyncUi) console.log("SYNCUI: mobileBlockEditor contentSaved -> scheduleOutgoingSnapshot pageId=", pageId)
+                    root.scheduleOutgoingSnapshot()
                 }
             }
             
@@ -643,6 +669,12 @@ ApplicationWindow {
                 anchors.fill: parent
                 pageTitle: currentPage ? currentPage.title : ""
                 availablePages: pageTree.getAllPages()
+                realtimeSyncEnabled: root.bothAutoSyncEnabled
+                debugSyncUi: root.debugSyncUi
+                showRemoteCursor: root.bothAutoSyncEnabled
+                remoteCursorPageId: appSyncController ? appSyncController.remoteCursorPageId : ""
+                remoteCursorBlockIndex: appSyncController ? appSyncController.remoteCursorBlockIndex : -1
+                remoteCursorPos: appSyncController ? appSyncController.remoteCursorPos : -1
 
                 onTitleEdited: function(newTitle) {
                     if (currentPage) {
@@ -672,6 +704,24 @@ ApplicationWindow {
                     if (!newId || newId === "") return
                     pageTree.updatePageTitle(newId, title)
                     blockEditor.setLinkAtIndex(blockIndex, newId, title)
+                }
+
+                onCursorMoved: function(blockIndex, cursorPos) {
+                    const pageId = blockEditor.pageId
+                    if (root.localCursorPageId === pageId &&
+                        root.localCursorBlockIndex === blockIndex &&
+                        root.localCursorPos === cursorPos) {
+                        return
+                    }
+                    root.localCursorPageId = pageId
+                    root.localCursorBlockIndex = blockIndex
+                    root.localCursorPos = cursorPos
+                    presenceTimer.restart()
+                }
+
+                onContentSaved: function(pageId) {
+                    if (root.debugSyncUi) console.log("SYNCUI: blockEditor contentSaved -> scheduleOutgoingSnapshot pageId=", pageId)
+                    root.scheduleOutgoingSnapshot()
                 }
             }
         }
@@ -717,6 +767,10 @@ ApplicationWindow {
         syncConflictDialog.conflict = conflict
         syncConflictDialog.open()
     }
+
+    readonly property bool bothAutoSyncEnabled: SyncPreferences.autoSyncEnabled &&
+                                               appSyncController &&
+                                               appSyncController.remoteAutoSyncEnabled
 
     SyncConflictDialog {
         id: syncConflictDialog
@@ -862,6 +916,10 @@ ApplicationWindow {
             if (pairingDialog && pairingDialog.visible) {
                 return
             }
+            if (root.suppressOutgoingSnapshots > 0) {
+                if (root.debugSyncUi) console.log("SYNCUI: onPagesChanged suppressed")
+                return
+            }
             root.scheduleOutgoingSnapshot()
         }
 
@@ -886,11 +944,19 @@ ApplicationWindow {
             if (pairingDialog && pairingDialog.visible) {
                 return
             }
+            if (root.suppressOutgoingSnapshots > 0) {
+                if (root.debugSyncUi) console.log("SYNCUI: onAttachmentsChanged suppressed")
+                return
+            }
             root.scheduleOutgoingSnapshot()
         }
 
         function onNotebooksChanged() {
             if (pairingDialog && pairingDialog.visible) {
+                return
+            }
+            if (root.suppressOutgoingSnapshots > 0) {
+                if (root.debugSyncUi) console.log("SYNCUI: onNotebooksChanged suppressed")
                 return
             }
             root.scheduleOutgoingSnapshot()
@@ -931,7 +997,9 @@ ApplicationWindow {
             }
             if (!DataStore || !attachments) return
             console.log("SYNC: received attachments", attachments.length)
+            root.suppressOutgoingSnapshots++
             DataStore.applyAttachmentUpdates(attachments)
+            root.suppressOutgoingSnapshots--
         }
 
         function onPageSnapshotReceivedPages(pages) {
@@ -940,7 +1008,9 @@ ApplicationWindow {
             }
             if (!DataStore || !pages) return
             console.log("SYNC: received pages", pages.length)
+            root.suppressOutgoingSnapshots++
             DataStore.applyPageUpdates(pages)
+            root.suppressOutgoingSnapshots--
         }
 
         function onDeletedPageSnapshotReceivedPages(deletedPages) {
@@ -949,7 +1019,9 @@ ApplicationWindow {
             }
             if (!DataStore || !deletedPages) return
             console.log("SYNC: received deleted pages", deletedPages.length)
+            root.suppressOutgoingSnapshots++
             DataStore.applyDeletedPageUpdates(deletedPages)
+            root.suppressOutgoingSnapshots--
         }
 
         function onNotebookSnapshotReceivedNotebooks(notebooks) {
@@ -958,9 +1030,11 @@ ApplicationWindow {
             }
             if (!DataStore || !notebooks) return
             console.log("SYNC: received notebooks", notebooks.length)
+            root.suppressOutgoingSnapshots++
             if (DataStore.applyNotebookUpdates) {
                 DataStore.applyNotebookUpdates(notebooks)
             }
+            root.suppressOutgoingSnapshots--
         }
 
         function onDeletedNotebookSnapshotReceivedNotebooks(deletedNotebooks) {
@@ -969,9 +1043,11 @@ ApplicationWindow {
             }
             if (!DataStore || !deletedNotebooks) return
             console.log("SYNC: received deleted notebooks", deletedNotebooks.length)
+            root.suppressOutgoingSnapshots++
             if (DataStore.applyDeletedNotebookUpdates) {
                 DataStore.applyDeletedNotebookUpdates(deletedNotebooks)
             }
+            root.suppressOutgoingSnapshots--
         }
 
         function onBlockSnapshotReceivedBlocks(blocks) {
@@ -986,18 +1062,55 @@ ApplicationWindow {
 
     Timer {
         id: outgoingSnapshotTimer
-        interval: 200
+        interval: root.bothAutoSyncEnabled ? 0 : 200
         repeat: false
-        onTriggered: root.sendLocalSnapshot(false)
+        onTriggered: {
+            if (root.debugSyncUi) {
+                console.log("SYNCUI: outgoingSnapshotTimer fired bothAuto=", root.bothAutoSyncEnabled,
+                            "syncing=", appSyncController ? appSyncController.syncing : null,
+                            "peerCount=", appSyncController ? appSyncController.peerCount : null)
+            }
+            root.sendLocalSnapshot(false)
+        }
+    }
+
+    property string localCursorPageId: ""
+    property int localCursorBlockIndex: -1
+    property int localCursorPos: -1
+
+    Timer {
+        id: presenceTimer
+        interval: 50
+        repeat: false
+        onTriggered: {
+            if (!appSyncController) return
+            if (!SyncPreferences.autoSyncEnabled) return
+            if (!appSyncController.syncing) {
+                if (root.debugSyncUi) console.log("SYNCUI: sendPresence skip syncing=false")
+                return
+            }
+            if (appSyncController.peerCount <= 0) {
+                if (root.debugSyncUi) console.log("SYNCUI: sendPresence skip peerCount=0")
+                return
+            }
+            if (root.debugSyncUi) {
+                console.log("SYNCUI: sendPresence pageId=", localCursorPageId,
+                            "block=", localCursorBlockIndex, "pos=", localCursorPos,
+                            "bothAuto=", root.bothAutoSyncEnabled)
+            }
+            appSyncController.sendPresence(localCursorPageId, localCursorBlockIndex, localCursorPos, SyncPreferences.autoSyncEnabled)
+        }
     }
 
     function scheduleOutgoingSnapshot() {
         if (!SyncPreferences.autoSyncEnabled) return
+        if (root.debugSyncUi) console.log("SYNCUI: scheduleOutgoingSnapshot()")
         outgoingSnapshotTimer.restart()
     }
 
     function requestManualSync() {
         tryStartSync()
+        if (root.debugSyncUi) console.log("SYNCUI: requestManualSync()")
         outgoingSnapshotTimer.restart()
     }
 
@@ -1007,9 +1120,39 @@ ApplicationWindow {
         function onAutoSyncEnabledChanged() {
             if (!SyncPreferences.autoSyncEnabled) {
                 outgoingSnapshotTimer.stop()
+                presenceTimer.stop()
                 return
             }
             scheduleOutgoingSnapshot()
+            presenceTimer.restart()
+        }
+    }
+
+    Connections {
+        target: appSyncController
+        enabled: appSyncController !== null
+
+        function onSyncingChanged() {
+            if (root.debugSyncUi) console.log("SYNCUI: syncingChanged syncing=", appSyncController.syncing)
+            if (appSyncController.syncing) presenceTimer.restart()
+        }
+
+        function onPeerCountChanged() {
+            if (root.debugSyncUi) console.log("SYNCUI: peerCountChanged peerCount=", appSyncController.peerCount)
+            if (appSyncController.peerCount > 0) presenceTimer.restart()
+        }
+    }
+
+    Connections {
+        target: appSyncController
+
+        function onRemotePresenceChanged() {
+            if (root.debugSyncUi && appSyncController) {
+                console.log("SYNCUI: remotePresenceChanged remoteAuto=", appSyncController.remoteAutoSyncEnabled,
+                            "pageId=", appSyncController.remoteCursorPageId,
+                            "block=", appSyncController.remoteCursorBlockIndex,
+                            "pos=", appSyncController.remoteCursorPos)
+            }
         }
     }
 
@@ -1068,9 +1211,18 @@ ApplicationWindow {
     }
 
     function sendLocalSnapshot(full) {
-        if (!DataStore || !appSyncController) return
-        if (!appSyncController.syncing) return
-        if (appSyncController.peerCount <= 0) return
+        if (!DataStore || !appSyncController) {
+            if (root.debugSyncUi) console.log("SYNCUI: sendLocalSnapshot skip missing DataStore/appSyncController")
+            return
+        }
+        if (!appSyncController.syncing) {
+            if (root.debugSyncUi) console.log("SYNCUI: sendLocalSnapshot skip syncing=false")
+            return
+        }
+        if (appSyncController.peerCount <= 0) {
+            if (root.debugSyncUi) console.log("SYNCUI: sendLocalSnapshot skip peerCount=0")
+            return
+        }
 
         var pages = full ? DataStore.getPagesForSync()
                          : DataStore.getPagesForSyncSince(pagesCursorAt, pagesCursorId)
@@ -1093,6 +1245,7 @@ ApplicationWindow {
             (!notebooks || notebooks.length === 0) &&
             (!deletedNotebooks || deletedNotebooks.length === 0) &&
             (!attachments || attachments.length === 0)) {
+            if (root.debugSyncUi) console.log("SYNCUI: sendLocalSnapshot noop (no deltas)")
             return
         }
 

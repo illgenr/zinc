@@ -34,6 +34,7 @@ Item {
     signal blockCollapseToggled()
     signal blockFocused()
     signal linkClicked(string pageId)
+    signal cursorMoved(int cursorPos)
 
     implicitHeight: blockLoader.height
 
@@ -43,6 +44,53 @@ Item {
         border.width: root.searchHighlighted ? 1 : 0
         border.color: ThemeManager.accent
         radius: ThemeManager.radiusSmall
+    }
+
+    Rectangle {
+        id: remoteCursorIndicator
+        objectName: "remoteCursorIndicator"
+        visible: false
+        color: ThemeManager.remoteCursor
+        width: 2
+        height: 0
+        x: 0
+        y: 0
+    }
+
+    function refreshRemoteCursorIndicator() {
+        if (!root.editor || !root.textControl) {
+            remoteCursorIndicator.visible = false
+            return
+        }
+        if (!("showRemoteCursor" in root.editor) || !root.editor.showRemoteCursor) {
+            remoteCursorIndicator.visible = false
+            return
+        }
+        if (!("remoteCursorPageId" in root.editor) || !("pageId" in root.editor)) {
+            remoteCursorIndicator.visible = false
+            return
+        }
+        if (root.editor.remoteCursorPageId !== root.editor.pageId) {
+            remoteCursorIndicator.visible = false
+            return
+        }
+        if (!("remoteCursorBlockIndex" in root.editor) || !("remoteCursorPos" in root.editor)) {
+            remoteCursorIndicator.visible = false
+            return
+        }
+        if (root.editor.remoteCursorBlockIndex !== root.blockIndex || root.editor.remoteCursorPos < 0) {
+            remoteCursorIndicator.visible = false
+            return
+        }
+
+        remoteCursorIndicator.visible = true
+        const textLen = (root.textControl.text || "").length
+        const pos = Math.max(0, Math.min(root.editor.remoteCursorPos, textLen))
+        const rect = root.textControl.positionToRectangle(pos)
+        const p = root.textControl.mapToItem(root, rect.x, rect.y)
+        remoteCursorIndicator.x = p.x
+        remoteCursorIndicator.y = p.y
+        remoteCursorIndicator.height = rect.height > 0 ? rect.height : root.textControl.cursorRectangle.height
     }
 
     RowLayout {
@@ -167,6 +215,40 @@ Item {
         hoverEnabled: true
         acceptedButtons: Qt.NoButton
     }
+
+    Connections {
+        target: root.textControl
+        enabled: root.textControl !== null
+
+        function onCursorPositionChanged() {
+            if (!root.textControl || !root.textControl.activeFocus) return
+            root.cursorMoved(root.textControl.cursorPosition)
+        }
+
+        function onActiveFocusChanged() {
+            if (!root.textControl || !root.textControl.activeFocus) return
+            root.cursorMoved(root.textControl.cursorPosition)
+        }
+
+        function onTextChanged() {
+            root.refreshRemoteCursorIndicator()
+        }
+    }
+
+    Connections {
+        target: root.editor
+        enabled: root.editor !== null
+        ignoreUnknownSignals: true
+
+        function onShowRemoteCursorChanged() { root.refreshRemoteCursorIndicator() }
+        function onRemoteCursorPageIdChanged() { root.refreshRemoteCursorIndicator() }
+        function onRemoteCursorBlockIndexChanged() { root.refreshRemoteCursorIndicator() }
+        function onRemoteCursorPosChanged() { root.refreshRemoteCursorIndicator() }
+        function onPageIdChanged() { root.refreshRemoteCursorIndicator() }
+    }
+
+    Component.onCompleted: root.refreshRemoteCursorIndicator()
+    onBlockIndexChanged: root.refreshRemoteCursorIndicator()
 
     // Block type components
     Component {
