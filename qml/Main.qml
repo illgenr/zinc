@@ -571,27 +571,34 @@ ApplicationWindow {
                         onSettingsRequested: settingsDialog.open()
                     }
 
-                    ToolButton {
-                        width: 24
-                        height: 24
-                        visible: !sidebarCollapsed
+	                    ToolButton {
+	                        objectName: "sidebarToggleButton"
+	                        width: 24
+	                        height: 24
 
-                        contentItem: Text {
-                            text: "+"
-                            color: ThemeManager.textSecondary
-                            font.pixelSize: ThemeManager.fontSizeNormal
-                            horizontalAlignment: Text.AlignHCenter
-                            verticalAlignment: Text.AlignVCenter
-                        }
+	                        contentItem: Text {
+	                            text: sidebarCollapsed ? "⟩" : "⟨"
+	                            color: ThemeManager.textSecondary
+	                            font.pixelSize: ThemeManager.fontSizeNormal
+	                            horizontalAlignment: Text.AlignHCenter
+	                            verticalAlignment: Text.AlignVCenter
+	                        }
 
-                        background: Rectangle {
-                            radius: ThemeManager.radiusSmall
-                            color: parent.hovered ? ThemeManager.surfaceHover : "transparent"
-                        }
+	                        background: Rectangle {
+	                            radius: ThemeManager.radiusSmall
+	                            color: parent.hovered ? ThemeManager.surfaceHover : "transparent"
+	                        }
 
-                        onClicked: newNotebookDialog.open()
-                    }
-                }
+	                        ToolTip.visible: hovered
+	                        ToolTip.text: sidebarCollapsed
+	                            ? "Expand sidebar (Ctrl+\\)"
+	                            : "Collapse sidebar (Ctrl+\\)"
+
+	                        Accessible.name: sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"
+
+	                        onClicked: sidebarCollapsed = !sidebarCollapsed
+	                    }
+	                }
                 
                 // Search button
                 Rectangle {
