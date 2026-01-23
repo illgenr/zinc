@@ -63,6 +63,7 @@ public:
     Q_INVOKABLE void endUndoMacro();
     Q_INVOKABLE QString undoText() const { return undo_stack_.undoText(); }
     Q_INVOKABLE QString redoText() const { return undo_stack_.redoText(); }
+    Q_INVOKABLE int undoIndex() const { return undo_stack_.index(); }
 
     // Internal helpers for undo commands
     void setUndoSuppressed(bool suppressed) { suppress_undo_ = suppressed; }

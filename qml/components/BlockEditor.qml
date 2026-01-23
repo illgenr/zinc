@@ -362,6 +362,11 @@ FocusScope {
             return false
         }
 
+        root.finalizeTypingMacro()
+        const before = currentFocusSnapshot()
+        blockModel.beginUndoMacro("Paste")
+        let ended = false
+        try {
         const blocks = []
         for (let i = 0; i < parsed.length; i++) {
             const b = parsed[i]
@@ -379,26 +384,44 @@ FocusScope {
 
         const target = (atIndex >= 0 && atIndex < blockModel.count) ? atIndex : currentBlockIndex
         let insertAt = Math.max(0, target + 1)
+        let lastInsertedIndex = -1
         if (target >= 0 && target < blockModel.count) {
             const current = blockModel.get(target)
             if (current.blockType === "paragraph" && (current.content || "") === "") {
                 blockModel.remove(target)
                 blockModel.insert(target, blocks[0])
                 insertAt = target + 1
+                lastInsertedIndex = target
                 blocks.shift()
             }
         }
 
         for (let i = 0; i < blocks.length; i++) {
             blockModel.insert(insertAt + i, blocks[i])
+            lastInsertedIndex = insertAt + i
         }
+        blockModel.endUndoMacro()
+        ended = true
+        const undoIndex = blockModel.undoIndex ? blockModel.undoIndex() : -1
+        cursorUndoStack.push({
+            kind: "Paste",
+            undoIndexAfter: undoIndex,
+            beforeIndex: before.index,
+            beforePos: before.pos,
+            afterIndex: lastInsertedIndex,
+            afterPos: -1
+        })
+        cursorRedoStack = []
         scheduleAutosave()
         clearCrossBlockSelection()
-        focusTimer.targetIndex = target >= 0 ? target : 0
+        focusTimer.targetIndex = lastInsertedIndex >= 0 ? lastInsertedIndex : Math.max(0, target)
         focusTimer.targetCursorPos = -1
         focusTimer.attemptsRemaining = 10
         focusTimer.start()
         return true
+        } finally {
+            if (!ended) blockModel.endUndoMacro()
+        }
     }
 
     function pasteImageFromClipboard(atIndex) {
@@ -410,6 +433,11 @@ FocusScope {
         if (!attachmentId || attachmentId.length === 0) return false
         const imageContent = JSON.stringify({ src: "image://attachments/" + attachmentId, w: 0, h: 0 })
 
+        root.finalizeTypingMacro()
+        const before = currentFocusSnapshot()
+        blockModel.beginUndoMacro("Paste image")
+        let ended = false
+        try {
         const imageBlock = {
             blockId: generateUuid(),
             blockType: "image",
@@ -423,26 +451,45 @@ FocusScope {
 
         const target = (atIndex >= 0 && atIndex < blockModel.count) ? atIndex : currentBlockIndex
         let insertAt = Math.max(0, target + 1)
+        let insertedIndex = -1
         if (target >= 0 && target < blockModel.count) {
             const current = blockModel.get(target)
             if (current.blockType === "paragraph" && (current.content || "") === "") {
                 blockModel.remove(target)
                 blockModel.insert(target, imageBlock)
                 insertAt = target + 1
+                insertedIndex = target
             } else {
                 blockModel.insert(insertAt, imageBlock)
+                insertedIndex = insertAt
             }
         } else {
             blockModel.append(imageBlock)
+            insertedIndex = blockModel.count - 1
         }
 
+        blockModel.endUndoMacro()
+        ended = true
+        const undoIndex = blockModel.undoIndex ? blockModel.undoIndex() : -1
+        cursorUndoStack.push({
+            kind: "Paste image",
+            undoIndexAfter: undoIndex,
+            beforeIndex: before.index,
+            beforePos: before.pos,
+            afterIndex: insertedIndex,
+            afterPos: -1
+        })
+        cursorRedoStack = []
         scheduleAutosave()
         clearCrossBlockSelection()
-        focusTimer.targetIndex = Math.max(0, target)
+        focusTimer.targetIndex = insertedIndex >= 0 ? insertedIndex : Math.max(0, target)
         focusTimer.targetCursorPos = -1
         focusTimer.attemptsRemaining = 10
         focusTimer.start()
         return true
+        } finally {
+            if (!ended) blockModel.endUndoMacro()
+        }
     }
 
     function startReorderBlock(index) {
@@ -921,10 +968,13 @@ FocusScope {
         typingMacroActive = false
         typingMacroTimer.stop()
         blockModel.endUndoMacro()
+        const undoIndex = blockModel.undoIndex ? blockModel.undoIndex() : -1
         cursorUndoStack.push({
             kind: "Typing",
-            blockIndex: typingMacroBlockIndex,
+            undoIndexAfter: undoIndex,
+            beforeIndex: typingMacroBlockIndex,
             beforePos: typingMacroStartPos,
+            afterIndex: typingMacroBlockIndex,
             afterPos: typingMacroEndPos
         })
         cursorRedoStack = []
@@ -1064,18 +1114,31 @@ FocusScope {
     function performUndo() {
         finalizeTypingMacro()
 
+        if (focusTimer && focusTimer.running) focusTimer.stop()
         const snap = currentFocusSnapshot()
         const text = blockModel.undoText ? blockModel.undoText() : ""
+        const undoIndex = blockModel.undoIndex ? blockModel.undoIndex() : -1
 
         let cursorOp = null
-        if (text === "Typing" && cursorUndoStack.length > 0) {
+        if (undoIndex >= 0 && cursorUndoStack.length > 0) {
+            for (let i = cursorUndoStack.length - 1; i >= 0; i--) {
+                const entry = cursorUndoStack[i]
+                if (entry && entry.undoIndexAfter === undoIndex) {
+                    cursorOp = entry
+                    cursorUndoStack.splice(i, 1)
+                    cursorRedoStack.push(entry)
+                    break
+                }
+            }
+        }
+        if (!cursorOp && text && cursorUndoStack.length > 0 && cursorUndoStack[cursorUndoStack.length - 1].kind === text) {
             cursorOp = cursorUndoStack.pop()
             cursorRedoStack.push(cursorOp)
         }
 
         blockModel.undo()
 
-        const targetIndex = cursorOp ? cursorOp.blockIndex : snap.index
+        const targetIndex = cursorOp ? cursorOp.beforeIndex : snap.index
         const targetPos = cursorOp ? cursorOp.beforePos : snap.pos
         if (targetIndex >= 0) {
             Qt.callLater(() => root.focusBlockAtDeferred(targetIndex, targetPos))
@@ -1085,18 +1148,32 @@ FocusScope {
     function performRedo() {
         finalizeTypingMacro()
 
+        if (focusTimer && focusTimer.running) focusTimer.stop()
         const snap = currentFocusSnapshot()
         const text = blockModel.redoText ? blockModel.redoText() : ""
+        const undoIndex = blockModel.undoIndex ? blockModel.undoIndex() : -1
+        const redoTarget = undoIndex >= 0 ? undoIndex + 1 : -1
 
         let cursorOp = null
-        if (text === "Typing" && cursorRedoStack.length > 0) {
+        if (redoTarget >= 0 && cursorRedoStack.length > 0) {
+            for (let i = cursorRedoStack.length - 1; i >= 0; i--) {
+                const entry = cursorRedoStack[i]
+                if (entry && entry.undoIndexAfter === redoTarget) {
+                    cursorOp = entry
+                    cursorRedoStack.splice(i, 1)
+                    cursorUndoStack.push(entry)
+                    break
+                }
+            }
+        }
+        if (!cursorOp && text && cursorRedoStack.length > 0 && cursorRedoStack[cursorRedoStack.length - 1].kind === text) {
             cursorOp = cursorRedoStack.pop()
             cursorUndoStack.push(cursorOp)
         }
 
         blockModel.redo()
 
-        const targetIndex = cursorOp ? cursorOp.blockIndex : snap.index
+        const targetIndex = cursorOp ? cursorOp.afterIndex : snap.index
         const targetPos = cursorOp ? cursorOp.afterPos : snap.pos
         if (targetIndex >= 0) {
             Qt.callLater(() => root.focusBlockAtDeferred(targetIndex, targetPos))
