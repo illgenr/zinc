@@ -31,6 +31,13 @@ FocusScope {
         repeat: false
         onTriggered: root.finalizeTypingMacro()
     }
+
+    Timer {
+        id: keyboardSelectionGuardTimer
+        interval: 250
+        repeat: false
+        onTriggered: root.keyboardSelecting = false
+    }
     
     // UUID generator (Qt.uuidCreate requires Qt 6.4+)
     function generateUuid() {
@@ -113,6 +120,7 @@ FocusScope {
     property var availablePages: []  // Set by parent to provide page list for linking
     property bool selectionDragging: false
     property bool blockRangeSelecting: false
+    property bool keyboardSelecting: false
     property int selectionAnchorBlockIndex: -1
     property int selectionFocusBlockIndex: -1
     property int selectionAnchorPos: -1
@@ -956,6 +964,12 @@ FocusScope {
         const mod = event.modifiers
         const ctrl = (mod & Qt.ControlModifier) || (mod & Qt.MetaModifier)
 
+        if ((mod & Qt.ShiftModifier) && (event.key === Qt.Key_Up || event.key === Qt.Key_Down)) {
+            event.accepted = true
+            keyboardExtendSelection(event.key === Qt.Key_Up ? -1 : 1)
+            return true
+        }
+
         if (ctrl && event.key === Qt.Key_Z) {
             event.accepted = true
             if (mod & Qt.ShiftModifier) root.performRedo()
@@ -988,6 +1002,66 @@ FocusScope {
             return true
         }
         return false
+    }
+
+    function keyboardExtendSelection(direction) {
+        finalizeTypingMacro()
+
+        const count = blockRepeater.count
+        if (count <= 0) return
+
+        const caretIndex = selectionFocusBlockIndex >= 0 ? selectionFocusBlockIndex : currentBlockIndex
+        if (caretIndex < 0 || caretIndex >= count) return
+
+        const caretItem = blockRepeater.itemAt(caretIndex)
+        const tc = caretItem && caretItem.textControl ? caretItem.textControl : null
+        if (!tc || !("cursorPosition" in tc) || !("positionToRectangle" in tc) || !("positionAt" in tc)) return
+
+        const caretPos = selectionFocusPos >= 0 ? selectionFocusPos : tc.cursorPosition
+
+        if (selectionAnchorBlockIndex < 0 || selectionFocusBlockIndex < 0) {
+            selectionAnchorBlockIndex = caretIndex
+            selectionFocusBlockIndex = caretIndex
+            selectionAnchorPos = caretPos
+            selectionFocusPos = caretPos
+        }
+
+        const rect = tc.positionToRectangle(Math.max(0, caretPos))
+        const y = rect.y + rect.height * 0.5
+        const lineStart = tc.positionAt(0, y)
+        const lineEnd = tc.positionAt(Math.max(0, tc.width - 1), y)
+
+        let nextIndex = caretIndex
+        let nextPos = caretPos
+
+        if (direction < 0) {
+            if (caretPos > lineStart) {
+                nextPos = lineStart
+            } else if (caretIndex > 0) {
+                nextIndex = caretIndex - 1
+                nextPos = 0
+            } else {
+                nextPos = lineStart
+            }
+        } else {
+            if (caretPos < lineEnd) {
+                nextPos = lineEnd
+            } else if (caretIndex < (count - 1)) {
+                nextIndex = caretIndex + 1
+                nextPos = 1e9
+            } else {
+                nextPos = lineEnd
+            }
+        }
+
+        keyboardSelecting = true
+        keyboardSelectionGuardTimer.restart()
+        selectionFocusBlockIndex = nextIndex
+        selectionFocusPos = nextPos
+        applyCrossBlockSelection()
+        currentBlockIndex = nextIndex
+        focusBlockAtDeferred(nextIndex, nextPos >= 1e9 ? -1 : nextPos)
+        scheduleEnsureFocusedCursorVisible()
     }
 
     function performUndo() {
@@ -1236,7 +1310,7 @@ FocusScope {
                     
                     onBlockFocused: {
                         root.finalizeTypingMacro()
-                        if (!root.selectionDragging && !root.blockRangeSelecting && root.selectionAnchorBlockIndex >= 0) {
+                        if (!root.keyboardSelecting && !root.selectionDragging && !root.blockRangeSelecting && root.selectionAnchorBlockIndex >= 0) {
                             root.clearCrossBlockSelection()
                         }
                         currentBlockIndex = index
