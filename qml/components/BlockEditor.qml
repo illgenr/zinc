@@ -1019,38 +1019,35 @@ FocusScope {
 
         const caretPos = selectionFocusPos >= 0 ? selectionFocusPos : tc.cursorPosition
 
-        if (selectionAnchorBlockIndex < 0 || selectionFocusBlockIndex < 0) {
+        const selectionEmpty = selectionAnchorBlockIndex < 0 || selectionFocusBlockIndex < 0
+        if (selectionEmpty) {
             selectionAnchorBlockIndex = caretIndex
             selectionFocusBlockIndex = caretIndex
             selectionAnchorPos = caretPos
             selectionFocusPos = caretPos
         }
 
-        const rect = tc.positionToRectangle(Math.max(0, caretPos))
-        const y = rect.y + rect.height * 0.5
-        const lineStart = tc.positionAt(0, y)
-        const lineEnd = tc.positionAt(Math.max(0, tc.width - 1), y)
-
         let nextIndex = caretIndex
         let nextPos = caretPos
 
         if (direction < 0) {
-            if (caretPos > lineStart) {
-                nextPos = lineStart
+            if (selectionEmpty) {
+                nextPos = 0
             } else if (caretIndex > 0) {
                 nextIndex = caretIndex - 1
                 nextPos = 0
             } else {
-                nextPos = lineStart
+                nextPos = 0
             }
         } else {
-            if (caretPos < lineEnd) {
-                nextPos = lineEnd
+            const len = (tc.text || "").length
+            if (selectionEmpty) {
+                nextPos = len
             } else if (caretIndex < (count - 1)) {
                 nextIndex = caretIndex + 1
                 nextPos = 1e9
             } else {
-                nextPos = lineEnd
+                nextPos = len
             }
         }
 

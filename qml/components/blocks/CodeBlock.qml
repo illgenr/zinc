@@ -103,6 +103,14 @@ Rectangle {
                 }
             }
 
+            Keys.onShortcutOverride: function(event) {
+                if ((event.modifiers & Qt.ShiftModifier) && (event.key === Qt.Key_Up || event.key === Qt.Key_Down)) {
+                    if (root.editor && root.editor.handleEditorKeyEvent && root.editor.handleEditorKeyEvent(event)) {
+                        event.accepted = true
+                    }
+                }
+            }
+
             function insertAtCursor(s) {
                 const pos = codeEdit.cursorPosition
                 codeEdit.insert(pos, s)
@@ -125,6 +133,10 @@ Rectangle {
             }
 
             Keys.onPressed: function(event) {
+                if ((event.modifiers & Qt.ShiftModifier) && (event.key === Qt.Key_Up || event.key === Qt.Key_Down)) {
+                    // Handled via Keys.onShortcutOverride to avoid duplicate handling.
+                    return
+                }
                 if (root.editor && root.editor.handleEditorKeyEvent && root.editor.handleEditorKeyEvent(event)) {
                     return
                 }
