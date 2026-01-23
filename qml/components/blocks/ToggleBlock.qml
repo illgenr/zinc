@@ -81,23 +81,9 @@ Item {
             }
 
             Keys.onPressed: function(event) {
-                const ctrl = (event.modifiers & Qt.ControlModifier) || (event.modifiers & Qt.MetaModifier)
-                if (ctrl && root.editor && root.editor.blocksModel) {
-                    if (event.key === Qt.Key_Z) {
-                        event.accepted = true
-                        if (event.modifiers & Qt.ShiftModifier) {
-                            root.editor.blocksModel.redo()
-                        } else {
-                            root.editor.blocksModel.undo()
-                        }
-                        return
-                    } else if (event.key === Qt.Key_Y) {
-                        event.accepted = true
-                        root.editor.blocksModel.redo()
-                        return
-                    }
+                if (root.editor && root.editor.handleEditorKeyEvent && root.editor.handleEditorKeyEvent(event)) {
+                    return
                 }
-
                 if ((event.modifiers & Qt.ControlModifier) && event.key === Qt.Key_C && root.multiBlockSelectionActive && root.editor) {
                     event.accepted = true
                     root.editor.copyCrossBlockSelectionToClipboard()

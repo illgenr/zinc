@@ -8,8 +8,14 @@ import "ScrollMath.js" as ScrollMath
 FocusScope {
     id: root
 
-    Shortcut { sequences: [StandardKey.Undo]; onActivated: blockModel.undo() }
-    Shortcut { sequences: [StandardKey.Redo]; onActivated: blockModel.redo() }
+    // Keep undo/redo centralized (avoid per-TextEdit undo stacks).
+    Shortcut { sequences: ["Ctrl+Z", "Meta+Z"]; onActivated: blockModel.undo() }
+    Shortcut { sequences: ["Ctrl+Shift+Z", "Meta+Shift+Z", "Ctrl+Y", "Meta+Y"]; onActivated: blockModel.redo() }
+
+    Shortcut { sequences: ["Ctrl+Home", "Meta+Home"]; onActivated: root.focusDocumentStart() }
+    Shortcut { sequences: ["Ctrl+End", "Meta+End"]; onActivated: root.focusDocumentEnd() }
+    Shortcut { sequences: ["PgUp", "PageUp"]; onActivated: root.pageNavigate(-1) }
+    Shortcut { sequences: ["PgDown", "PageDown"]; onActivated: root.pageNavigate(1) }
     
     // UUID generator (Qt.uuidCreate requires Qt 6.4+)
     function generateUuid() {
@@ -837,6 +843,81 @@ FocusScope {
         scrollToBlockIndex(idx)
         focusBlockAtDeferred(idx, -1)
         scheduleEnsureFocusedCursorVisible()
+    }
+
+    function focusDocumentStart() {
+        if (blockRepeater.count <= 0) return
+        flickable.contentY = 0
+        focusBlockAtDeferred(0, 0)
+        scheduleEnsureFocusedCursorVisible()
+    }
+
+    function pageNavigate(direction) {
+        const viewH = flickable.height - root.keyboardInset
+        const step = Math.max(48, viewH * 0.85)
+
+        // Prefer moving the caret to a new block/position (otherwise ensureFocusedCursorVisible
+        // will "snap back" the scroll and it looks like a shake).
+        const focused = (root.currentBlockIndex >= 0 && root.currentBlockIndex < blockRepeater.count)
+            ? blockRepeater.itemAt(root.currentBlockIndex)
+            : null
+        const tc = focused && focused.textControl ? focused.textControl : null
+        if (!tc || !("cursorRectangle" in tc)) {
+            flickable.contentY = clampContentY(flickable.contentY + (direction >= 0 ? step : -step))
+            return
+        }
+
+        const rect = tc.cursorRectangle
+        const p = tc.mapToItem(root, rect.x, rect.y + rect.height * 0.5)
+        const targetY = Math.max(0, Math.min(flickable.height - root.keyboardInset - 1, p.y + (direction >= 0 ? step : -step)))
+        const hit = blockTextControlAtEditorPoint(Qt.point(p.x, targetY))
+        if (hit && hit.index >= 0) {
+            focusBlockAt(hit.index, hit.pos)
+            scheduleEnsureFocusedCursorVisible()
+        } else {
+            flickable.contentY = clampContentY(flickable.contentY + (direction >= 0 ? step : -step))
+        }
+    }
+
+    function handleEditorKeyEvent(event) {
+        const mod = event.modifiers
+        const ctrl = (mod & Qt.ControlModifier) || (mod & Qt.MetaModifier)
+
+        if (ctrl && event.key === Qt.Key_Z) {
+            event.accepted = true
+            if (mod & Qt.ShiftModifier) {
+                blockModel.redo()
+            } else {
+                blockModel.undo()
+            }
+            return true
+        }
+        if (ctrl && event.key === Qt.Key_Y) {
+            event.accepted = true
+            blockModel.redo()
+            return true
+        }
+        if (ctrl && event.key === Qt.Key_End) {
+            event.accepted = true
+            focusDocumentEnd()
+            return true
+        }
+        if (ctrl && event.key === Qt.Key_Home) {
+            event.accepted = true
+            focusDocumentStart()
+            return true
+        }
+        if (event.key === Qt.Key_PageDown) {
+            event.accepted = true
+            pageNavigate(1)
+            return true
+        }
+        if (event.key === Qt.Key_PageUp) {
+            event.accepted = true
+            pageNavigate(-1)
+            return true
+        }
+        return false
     }
     
     Flickable {
