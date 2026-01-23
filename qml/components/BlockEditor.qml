@@ -9,13 +9,28 @@ FocusScope {
     id: root
 
     // Keep undo/redo centralized (avoid per-TextEdit undo stacks).
-    Shortcut { sequences: ["Ctrl+Z", "Meta+Z"]; onActivated: blockModel.undo() }
-    Shortcut { sequences: ["Ctrl+Shift+Z", "Meta+Shift+Z", "Ctrl+Y", "Meta+Y"]; onActivated: blockModel.redo() }
+    Shortcut { sequences: ["Ctrl+Z", "Meta+Z"]; onActivated: root.performUndo() }
+    Shortcut { sequences: ["Ctrl+Shift+Z", "Meta+Shift+Z", "Ctrl+Y", "Meta+Y"]; onActivated: root.performRedo() }
 
     Shortcut { sequences: ["Ctrl+Home", "Meta+Home"]; onActivated: root.focusDocumentStart() }
     Shortcut { sequences: ["Ctrl+End", "Meta+End"]; onActivated: root.focusDocumentEnd() }
     Shortcut { sequences: ["PgUp", "PageUp"]; onActivated: root.pageNavigate(-1) }
     Shortcut { sequences: ["PgDown", "PageDown"]; onActivated: root.pageNavigate(1) }
+
+    // Cursor restore for undo/redo (best-effort, grouped typing).
+    property bool typingMacroActive: false
+    property int typingMacroBlockIndex: -1
+    property int typingMacroStartPos: -1
+    property int typingMacroEndPos: -1
+    property var cursorUndoStack: []
+    property var cursorRedoStack: []
+
+    Timer {
+        id: typingMacroTimer
+        interval: 650
+        repeat: false
+        onTriggered: root.finalizeTypingMacro()
+    }
     
     // UUID generator (Qt.uuidCreate requires Qt 6.4+)
     function generateUuid() {
@@ -852,6 +867,64 @@ FocusScope {
         scheduleEnsureFocusedCursorVisible()
     }
 
+    function currentFocusSnapshot() {
+        const idx = root.currentBlockIndex
+        if (idx < 0 || idx >= blockRepeater.count) return { index: -1, pos: -1 }
+        const item = blockRepeater.itemAt(idx)
+        if (!item || !item.textControl || !("cursorPosition" in item.textControl)) return { index: idx, pos: -1 }
+        return { index: idx, pos: item.textControl.cursorPosition }
+    }
+
+    function beginTypingMacro(blockIndex, startPos) {
+        if (typingMacroActive && typingMacroBlockIndex === blockIndex) return
+        finalizeTypingMacro()
+        typingMacroActive = true
+        typingMacroBlockIndex = blockIndex
+        typingMacroStartPos = startPos
+        typingMacroEndPos = startPos
+        blockModel.beginUndoMacro("Typing")
+        typingMacroTimer.restart()
+    }
+
+    function recordTypingEdit(blockIndex, oldContent, newContent, cursorPos, selStart, selEnd) {
+        const oldLen = (oldContent || "").length
+        const newLen = (newContent || "").length
+
+        const a = (selStart === undefined || selStart < 0) ? -1 : selStart
+        const b = (selEnd === undefined || selEnd < 0) ? -1 : selEnd
+        const hasSelection = (a >= 0 && b >= 0 && a !== b)
+        const selectionStart = hasSelection ? Math.min(a, b) : -1
+
+        let startPos = 0
+        if (hasSelection) {
+            startPos = selectionStart
+        } else {
+            const delta = Math.max(0, newLen - oldLen)
+            startPos = Math.max(0, (cursorPos || 0) - delta)
+        }
+
+        beginTypingMacro(blockIndex, startPos)
+        typingMacroEndPos = Math.max(0, cursorPos || 0)
+        typingMacroTimer.restart()
+    }
+
+    function finalizeTypingMacro() {
+        if (!typingMacroActive) return
+        typingMacroActive = false
+        typingMacroTimer.stop()
+        blockModel.endUndoMacro()
+        cursorUndoStack.push({
+            kind: "Typing",
+            blockIndex: typingMacroBlockIndex,
+            beforePos: typingMacroStartPos,
+            afterPos: typingMacroEndPos
+        })
+        cursorRedoStack = []
+        typingMacroBlockIndex = -1
+        typingMacroStartPos = -1
+        typingMacroEndPos = -1
+    }
+
     function pageNavigate(direction) {
         const viewH = flickable.height - root.keyboardInset
         const step = Math.max(48, viewH * 0.85)
@@ -885,16 +958,13 @@ FocusScope {
 
         if (ctrl && event.key === Qt.Key_Z) {
             event.accepted = true
-            if (mod & Qt.ShiftModifier) {
-                blockModel.redo()
-            } else {
-                blockModel.undo()
-            }
+            if (mod & Qt.ShiftModifier) root.performRedo()
+            else root.performUndo()
             return true
         }
         if (ctrl && event.key === Qt.Key_Y) {
             event.accepted = true
-            blockModel.redo()
+            root.performRedo()
             return true
         }
         if (ctrl && event.key === Qt.Key_End) {
@@ -918,6 +988,48 @@ FocusScope {
             return true
         }
         return false
+    }
+
+    function performUndo() {
+        finalizeTypingMacro()
+
+        const snap = currentFocusSnapshot()
+        const text = blockModel.undoText ? blockModel.undoText() : ""
+
+        let cursorOp = null
+        if (text === "Typing" && cursorUndoStack.length > 0) {
+            cursorOp = cursorUndoStack.pop()
+            cursorRedoStack.push(cursorOp)
+        }
+
+        blockModel.undo()
+
+        const targetIndex = cursorOp ? cursorOp.blockIndex : snap.index
+        const targetPos = cursorOp ? cursorOp.beforePos : snap.pos
+        if (targetIndex >= 0) {
+            Qt.callLater(() => root.focusBlockAtDeferred(targetIndex, targetPos))
+        }
+    }
+
+    function performRedo() {
+        finalizeTypingMacro()
+
+        const snap = currentFocusSnapshot()
+        const text = blockModel.redoText ? blockModel.redoText() : ""
+
+        let cursorOp = null
+        if (text === "Typing" && cursorRedoStack.length > 0) {
+            cursorOp = cursorRedoStack.pop()
+            cursorUndoStack.push(cursorOp)
+        }
+
+        blockModel.redo()
+
+        const targetIndex = cursorOp ? cursorOp.blockIndex : snap.index
+        const targetPos = cursorOp ? cursorOp.afterPos : snap.pos
+        if (targetIndex >= 0) {
+            Qt.callLater(() => root.focusBlockAtDeferred(targetIndex, targetPos))
+        }
     }
     
     Flickable {
@@ -1018,6 +1130,13 @@ FocusScope {
                     headingLevel: model.headingLevel
                     
                     onContentEdited: function(newContent) {
+                        const item = blockRepeater.itemAt(index)
+                        const tc = item && item.textControl ? item.textControl : null
+                        const curPos = (tc && ("cursorPosition" in tc)) ? tc.cursorPosition : 0
+                        const selStart = (tc && ("selectionStart" in tc)) ? tc.selectionStart : -1
+                        const selEnd = (tc && ("selectionEnd" in tc)) ? tc.selectionEnd : -1
+                        root.recordTypingEdit(index, model.content || "", newContent || "", curPos, selStart, selEnd)
+
                         model.content = newContent
                         currentBlockIndex = index
                         scheduleAutosave()
@@ -1116,6 +1235,7 @@ FocusScope {
                     }
                     
                     onBlockFocused: {
+                        root.finalizeTypingMacro()
                         if (!root.selectionDragging && !root.blockRangeSelecting && root.selectionAnchorBlockIndex >= 0) {
                             root.clearCrossBlockSelection()
                         }
@@ -1407,14 +1527,51 @@ FocusScope {
 
     function adjacentBlockNavigation(blockIndex, key, cursorPos, textLen) {
         const count = blockModel.count
+        const idx = blockIndex
         const pos = cursorPos === undefined ? -1 : cursorPos
-        const len = textLen === undefined ? 0 : textLen
-        if (key === Qt.Key_Up && blockIndex > 0) {
-            return { handled: true, targetIndex: blockIndex - 1, targetPos: -1 }
+        if (idx < 0 || idx >= count) return { handled: false, targetIndex: -1, targetPos: 0 }
+
+        const item = blockRepeater.itemAt(idx)
+        const tc = item && item.textControl ? item.textControl : null
+        if (!tc || !("positionToRectangle" in tc) || !("mapToItem" in tc)) {
+            return { handled: false, targetIndex: -1, targetPos: 0 }
         }
-        if (key === Qt.Key_Down && blockIndex < (count - 1)) {
-            return { handled: true, targetIndex: blockIndex + 1, targetPos: 0 }
+
+        const rect = tc.positionToRectangle(Math.max(0, pos))
+        const center = tc.mapToItem(root, rect.x, rect.y + rect.height * 0.5)
+        const editorX = center.x
+
+        const contentH = ("contentHeight" in tc) ? tc.contentHeight : tc.height
+        const atTopLine = rect.y <= 0.5
+        const atBottomLine = (rect.y + rect.height) >= (contentH - 0.5)
+
+        if (key === Qt.Key_Up && idx > 0 && atTopLine) {
+            const targetIndex = idx - 1
+            const targetItem = blockRepeater.itemAt(targetIndex)
+            const ttc = targetItem && targetItem.textControl ? targetItem.textControl : null
+            if (!ttc || !("positionAt" in ttc) || !("mapFromItem" in ttc)) {
+                return { handled: true, targetIndex: targetIndex, targetPos: -1 }
+            }
+            const ty = ("contentHeight" in ttc) ? Math.max(0, ttc.contentHeight - 1) : Math.max(0, ttc.height - 1)
+            const local = ttc.mapFromItem(root, editorX, targetItem.mapToItem(root, 0, 0).y + ty)
+            const targetPos = ttc.positionAt(local.x, local.y)
+            return { handled: true, targetIndex: targetIndex, targetPos: targetPos }
         }
+        if (key === Qt.Key_Down && idx < (count - 1) && atBottomLine) {
+            const targetIndex = idx + 1
+            const targetItem = blockRepeater.itemAt(targetIndex)
+            const ttc = targetItem && targetItem.textControl ? targetItem.textControl : null
+            if (!ttc || !("positionAt" in ttc) || !("mapFromItem" in ttc)) {
+                return { handled: true, targetIndex: targetIndex, targetPos: 0 }
+            }
+            const firstRect = ttc.positionToRectangle(0)
+            const firstCenterY = firstRect.y + firstRect.height * 0.5
+            const rootY = ttc.mapToItem(root, 0, firstCenterY).y
+            const local = ttc.mapFromItem(root, editorX, rootY)
+            const targetPos = ttc.positionAt(local.x, firstCenterY)
+            return { handled: true, targetIndex: targetIndex, targetPos: targetPos }
+        }
+
         return { handled: false, targetIndex: -1, targetPos: 0 }
     }
 
