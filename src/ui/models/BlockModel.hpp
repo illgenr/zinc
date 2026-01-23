@@ -1,19 +1,22 @@
 #pragma once
 
-#include "core/block_types.hpp"
 #include <QAbstractListModel>
 #include <QQmlEngine>
+#include <QVariantMap>
+#include <QUndoStack>
 #include <vector>
 
 namespace zinc::ui {
 
 /**
- * BlockModel - Qt model for blocks in a page.
- * 
- * Provides block data to QML views with roles for:
- * - id, pageId, parentId
- * - type, content, properties
- * - sortOrder, depth
+ * BlockModel - QAbstractListModel backing the QML block editor.
+ *
+ * This intentionally mimics the subset of QML ListModel APIs used by
+ * `qml/components/BlockEditor.qml` (get/append/insert/remove/move/setProperty/clear),
+ * while also being a real Qt model suitable for ListView.
+ *
+ * Each row is a "block" with fields that match the MarkdownBlocks schema:
+ * - blockId, blockType, content, depth, checked, collapsed, language, headingLevel
  */
 class BlockModel : public QAbstractListModel {
     Q_OBJECT
@@ -21,21 +24,19 @@ class BlockModel : public QAbstractListModel {
     
     Q_PROPERTY(int count READ count NOTIFY countChanged)
     Q_PROPERTY(QString pageId READ pageId WRITE setPageId NOTIFY pageIdChanged)
+    Q_PROPERTY(bool canUndo READ canUndo NOTIFY canUndoChanged)
+    Q_PROPERTY(bool canRedo READ canRedo NOTIFY canRedoChanged)
     
 public:
     enum Roles {
-        IdRole = Qt::UserRole + 1,
-        PageIdRole,
-        ParentIdRole,
-        TypeRole,
+        BlockIdRole = Qt::UserRole + 1,
+        BlockTypeRole,
         ContentRole,
-        PropertiesRole,
-        SortOrderRole,
         DepthRole,
-        CheckedRole,      // For todo blocks
-        LanguageRole,     // For code blocks
-        CollapsedRole,    // For toggle blocks
-        HeadingLevelRole  // For heading blocks
+        CheckedRole,
+        CollapsedRole,
+        LanguageRole,
+        HeadingLevelRole,
     };
     
     explicit BlockModel(QObject* parent = nullptr);
@@ -49,11 +50,43 @@ public:
     
     // Properties
     [[nodiscard]] int count() const { return static_cast<int>(blocks_.size()); }
-    [[nodiscard]] QString pageId() const;
+    [[nodiscard]] QString pageId() const { return page_id_; }
     void setPageId(const QString& pageId);
+    [[nodiscard]] bool canUndo() const { return undo_stack_.canUndo(); }
+    [[nodiscard]] bool canRedo() const { return undo_stack_.canRedo(); }
+
+    // Undo/redo (Qt's undo framework, with merge support for typing)
+    Q_INVOKABLE void undo();
+    Q_INVOKABLE void redo();
+    Q_INVOKABLE void clearUndoStack();
+    Q_INVOKABLE void beginUndoMacro(const QString& text);
+    Q_INVOKABLE void endUndoMacro();
+
+    // Internal helpers for undo commands
+    void setUndoSuppressed(bool suppressed) { suppress_undo_ = suppressed; }
+    [[nodiscard]] bool undoSuppressed() const { return suppress_undo_; }
+    [[nodiscard]] int indexForBlockId(const QString& blockId) const;
     
-    // Block operations
-    Q_INVOKABLE void loadBlocks(const QString& pageId);
+    // QML ListModel-like helpers used by BlockEditor.qml
+    Q_INVOKABLE QVariantMap get(int index) const;
+    Q_INVOKABLE void setProperty(int index, const QString& property, const QVariant& value);
+    Q_INVOKABLE void insert(int index, const QVariantMap& block);
+    Q_INVOKABLE void append(const QVariantMap& block);
+    Q_INVOKABLE void remove(int index, int count = 1);
+    Q_INVOKABLE void move(int from, int to, int count = 1);
+    Q_INVOKABLE void clear();
+
+    // Markdown (de)serialization helpers
+    Q_INVOKABLE bool loadFromMarkdown(const QString& markdown);
+    Q_INVOKABLE QString serializeContentToMarkdown() const;
+    
+    // Get block at index
+    Q_INVOKABLE QString blockId(int index) const;
+    Q_INVOKABLE QString blockType(int index) const;
+    Q_INVOKABLE QString blockContent(int index) const;
+    Q_INVOKABLE int blockDepth(int index) const;
+
+    // Higher-level operations (EditorController-friendly)
     Q_INVOKABLE void addBlock(const QString& type, int index = -1);
     Q_INVOKABLE void removeBlock(int index);
     Q_INVOKABLE void moveBlock(int fromIndex, int toIndex);
@@ -63,26 +96,37 @@ public:
     Q_INVOKABLE void outdentBlock(int index);
     Q_INVOKABLE void toggleChecked(int index);
     Q_INVOKABLE void toggleCollapsed(int index);
-    
-    // Get block at index
-    Q_INVOKABLE QString blockId(int index) const;
-    Q_INVOKABLE QString blockType(int index) const;
-    Q_INVOKABLE QString blockContent(int index) const;
-    Q_INVOKABLE int blockDepth(int index) const;
 
 signals:
     void countChanged();
     void pageIdChanged();
+    void canUndoChanged();
+    void canRedoChanged();
     void blockChanged(int index);
     void blocksLoaded();
 
 private:
-    std::vector<blocks::Block> blocks_;
-    Uuid page_id_;
-    
-    void recalculateDepths();
-    int calculateDepth(const blocks::Block& block) const;
+    struct BlockRow {
+        QString block_id;
+        QString block_type;
+        QString content;
+        int depth = 0;
+        bool checked = false;
+        bool collapsed = false;
+        QString language;
+        int heading_level = 0;
+    };
+
+    QString page_id_;
+    std::vector<BlockRow> blocks_;
+    QUndoStack undo_stack_;
+    bool suppress_undo_ = false;
+
+    static BlockRow normalize(BlockRow row);
+    static BlockRow fromVariantMap(const QVariantMap& map);
+    static QVariantMap toVariantMap(const BlockRow& row);
+    static int roleForPropertyName(const QString& property);
+    static QString ensureId(const QString& blockId);
 };
 
 } // namespace zinc::ui
-

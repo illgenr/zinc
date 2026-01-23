@@ -6,6 +6,7 @@ import "blocks"
 
 Item {
     id: root
+    objectName: "blockDelegate_" + blockIndex
 
     property int blockIndex: 0
     property string blockType: "paragraph"

@@ -2,10 +2,14 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import zinc
+import Zinc 1.0
 import "ScrollMath.js" as ScrollMath
 
 FocusScope {
     id: root
+
+    Shortcut { sequences: [StandardKey.Undo]; onActivated: blockModel.undo() }
+    Shortcut { sequences: [StandardKey.Redo]; onActivated: blockModel.redo() }
     
     // UUID generator (Qt.uuidCreate requires Qt 6.4+)
     function generateUuid() {
@@ -472,6 +476,7 @@ FocusScope {
         }
         
         pageId = id
+        blockModel.clearUndoStack()
         blockModel.clear()
         
         // Try to load markdown from storage
@@ -490,28 +495,11 @@ FocusScope {
         }
     }
     
-    function blocksForMarkdown() {
-        let blocks = []
-        for (let i = 0; i < blockModel.count; i++) {
-            let b = blockModel.get(i)
-            blocks.push({
-                blockType: b.blockType,
-                content: b.content,
-                depth: b.depth,
-                checked: b.checked,
-                collapsed: b.collapsed,
-                language: b.language,
-                headingLevel: b.headingLevel
-            })
-        }
-        return blocks
-    }
-
     function saveBlocks() {
         if (!pageId || pageId === "") return
         
         try {
-            const markdown = MarkdownBlocks.serializeContent(blocksForMarkdown())
+            const markdown = blockModel.serializeContentToMarkdown()
             lastSavedMarkdown = markdown
             lastSavedAtMs = Date.now()
             if (DataStore) {
@@ -528,24 +516,7 @@ FocusScope {
     
     function loadFromMarkdown(markdown) {
         blockModel.clear()
-        const parsed = MarkdownBlocks.parse(markdown || "")
-        if (!parsed || parsed.length === 0) {
-            return false
-        }
-        for (let i = 0; i < parsed.length; i++) {
-            const b = parsed[i]
-            blockModel.append({
-                blockId: generateUuid(),
-                blockType: b.blockType || "paragraph",
-                content: b.content || "",
-                depth: b.depth || 0,
-                checked: b.checked || false,
-                collapsed: b.collapsed || false,
-                language: b.language || "",
-                headingLevel: b.headingLevel || 0
-            })
-        }
-        return true
+        return blockModel.loadFromMarkdown(markdown || "")
     }
 
     function loadMarkdownFromStorage(id) {
@@ -686,7 +657,7 @@ FocusScope {
         }
     }
     
-    ListModel {
+    BlockModel {
         id: blockModel
         objectName: "blockModel"
     }
@@ -1172,10 +1143,17 @@ FocusScope {
     // Slash command menu
     SlashMenu {
         id: slashMenu
+        objectName: "slashMenu"
         
         onCommandSelected: function(command) {
             let idx = slashMenu.currentBlockIndex
             if (idx >= 0 && idx < blockModel.count) {
+                const needsImmediateMutation = command.type !== "date" &&
+                                              command.type !== "datetime" &&
+                                              command.type !== "image"
+                if (needsImmediateMutation) {
+                    blockModel.beginUndoMacro("Slash command")
+                }
                 if (command.type === "date") {
                     pendingDateInsertBlockIndex = idx
                     datePicker.selectedDate = new Date()
@@ -1213,7 +1191,17 @@ FocusScope {
                         blockModel.setProperty(idx, "headingLevel", command.level || 1)
                     }
                 }
+                if (needsImmediateMutation) {
+                    blockModel.endUndoMacro()
+                }
                 scheduleAutosave()
+                const shouldRefocus = command.type !== "date" &&
+                                      command.type !== "datetime" &&
+                                      command.type !== "image" &&
+                                      command.type !== "link"
+                if (shouldRefocus) {
+                    Qt.callLater(() => root.focusBlock(idx))
+                }
             }
         }
     }

@@ -538,6 +538,8 @@ if(ZINC_BUILD_TESTS)
 		        tests/qml/test_datastore_notebooks.cpp
 		        tests/qml/test_attachments_disk_storage.cpp
 		        tests/qml/test_block_editor_cursor_visibility_qml.cpp
+		        tests/qml/test_block_model.cpp
+		        tests/qml/test_block_model_undo.cpp
 		        tests/qml/test_markdown_blocks.cpp
 		        tests/qml/test_cmark.cpp
 		        tests/qml/test_sync_controller_settings.cpp
@@ -549,10 +551,10 @@ if(ZINC_BUILD_TESTS)
 		        tests/qml/test_pairing_dialog_qml.cpp
 		        tests/qml/test_search_dialog_qml.cpp
 		        tests/qml/test_markdown_editor_qml.cpp
-			        tests/qml/test_slash_menu_qml.cpp
-			        tests/qml/test_image_block_interactions.cpp
-			        tests/qml/test_page_tree_keyboard_shortcut_qml.cpp
-			        tests/qml/test_sidebar_toggle_button_qml.cpp
+		        tests/qml/test_slash_menu_qml.cpp
+		        tests/qml/test_image_block_interactions.cpp
+		        tests/qml/test_page_tree_keyboard_shortcut_qml.cpp
+		        tests/qml/test_sidebar_toggle_button_qml.cpp
 			    )
 
     qt_add_qml_module(zinc_qml_tests

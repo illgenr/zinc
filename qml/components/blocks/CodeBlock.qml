@@ -125,6 +125,23 @@ Rectangle {
             }
 
             Keys.onPressed: function(event) {
+                const ctrl = (event.modifiers & Qt.ControlModifier) || (event.modifiers & Qt.MetaModifier)
+                if (ctrl && root.editor && root.editor.blocksModel) {
+                    if (event.key === Qt.Key_Z) {
+                        event.accepted = true
+                        if (event.modifiers & Qt.ShiftModifier) {
+                            root.editor.blocksModel.redo()
+                        } else {
+                            root.editor.blocksModel.undo()
+                        }
+                        return
+                    } else if (event.key === Qt.Key_Y) {
+                        event.accepted = true
+                        root.editor.blocksModel.redo()
+                        return
+                    }
+                }
+
                 if (event.key === Qt.Key_Tab) {
                     event.accepted = true
                     insertAtCursor("\t")

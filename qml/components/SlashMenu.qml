@@ -116,6 +116,7 @@ Popup {
 
         TextField {
             id: filterInput
+            objectName: "slashMenuFilterInput"
             Layout.fillWidth: true
             placeholderText: "Type to filter..."
             selectByMouse: true
@@ -141,6 +142,7 @@ Popup {
 
         ListView {
             id: commandList
+            objectName: "slashMenuCommandList"
 
             Layout.fillWidth: true
             Layout.fillHeight: true
