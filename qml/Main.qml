@@ -188,7 +188,7 @@ ApplicationWindow {
                             radius: ThemeManager.radiusSmall
                             color: parent.pressed ? ThemeManager.surfaceActive : "transparent"
                         }
-                        onClicked: newNotebookDialog.open()
+                        onClicked: mobilePageTree.beginNewNotebook()
                     }
 
                     SyncButtons {
@@ -292,7 +292,7 @@ ApplicationWindow {
                             verticalAlignment: Text.AlignVCenter
                         }
 
-                        onClicked: newNotebookDialog.open()
+                        onClicked: mobilePageTree.beginNewNotebook()
                     }
                 }
 
@@ -308,7 +308,7 @@ ApplicationWindow {
                     actionButtonSize: 44
                     activateOnSingleTap: false
 
-                    onNewNotebookRequested: newNotebookDialog.open()
+                    onNewNotebookRequested: mobilePageTree.beginNewNotebook()
 
                     onPageSelected: function(pageId, title) {
                         if (DataStore) DataStore.setLastViewedPageId(pageId)
@@ -705,7 +705,7 @@ ApplicationWindow {
                     showNewPageButton: false
                     showNewNotebookButton: true
 
-                    onNewNotebookRequested: newNotebookDialog.open()
+                    onNewNotebookRequested: mobilePageTree.beginNewNotebook()
 
                     onPageActivatedByKeyboard: function(pageId, title) {
                         Qt.callLater(() => blockEditor.focusContent())
@@ -929,46 +929,6 @@ ApplicationWindow {
         }
     }
 
-    Dialog {
-        id: newNotebookDialog
-        title: "New Notebook"
-        modal: true
-        standardButtons: Dialog.Ok | Dialog.Cancel
-        parent: Overlay.overlay
-
-        property string _name: ""
-
-        contentItem: Item {
-            implicitWidth: 360
-            implicitHeight: 120
-
-            ColumnLayout {
-                anchors.fill: parent
-                anchors.margins: ThemeManager.spacingMedium
-                spacing: ThemeManager.spacingSmall
-
-                TextField {
-                    id: newNotebookNameField
-                    Layout.fillWidth: true
-                    placeholderText: "Notebook name"
-                    text: ""
-                    onTextChanged: newNotebookDialog._name = text
-                }
-            }
-        }
-
-        onOpened: {
-            newNotebookDialog._name = ""
-            newNotebookNameField.text = ""
-            newNotebookNameField.forceActiveFocus()
-        }
-
-        onAccepted: {
-            if (!DataStore || !DataStore.createNotebook) return
-            DataStore.createNotebook(newNotebookDialog._name)
-        }
-    }
-    
     // UUID generator
     function generateUuid() {
         function s4() {

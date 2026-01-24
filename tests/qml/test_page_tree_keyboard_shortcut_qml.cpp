@@ -400,3 +400,135 @@ TEST_CASE("QML: Ctrl+N creates a new page", "[qml][pagetree][shortcuts]") {
     QTest::keyPress(window, Qt::Key_N, Qt::ControlModifier);
     REQUIRE(waitUntil([&]() { return root->property("pageCount").toInt() == before + 1; }));
 }
+
+TEST_CASE("QML: Inline new notebook creates notebook without dialog", "[qml][pagetree][notebook]") {
+    registerTypesOnce();
+
+    QQmlEngine engine;
+    QQmlComponent component(&engine);
+    component.setData(
+        "import QtQuick\n"
+        "import QtQuick.Controls\n"
+        "import zinc\n"
+        "ApplicationWindow {\n"
+        "    width: 800\n"
+        "    height: 600\n"
+        "    visible: true\n"
+        "    property int notebookCount: 0\n"
+        "    property bool hasNewNotebook: false\n"
+        "    PageTree {\n"
+        "        id: pageTree\n"
+        "        objectName: \"pageTree\"\n"
+        "        anchors.fill: parent\n"
+        "        Component.onCompleted: {\n"
+        "            if (DataStore) DataStore.resetDatabase()\n"
+        "            resetToDefaults()\n"
+        "            notebookCount = DataStore ? DataStore.getAllNotebooks().length : 0\n"
+        "            beginNewNotebook()\n"
+        "        }\n"
+        "        Connections {\n"
+        "            target: DataStore\n"
+        "            function onNotebooksChanged() {\n"
+        "                const nbs = DataStore ? DataStore.getAllNotebooks() : []\n"
+        "                notebookCount = nbs.length\n"
+        "                for (let i = 0; i < nbs.length; i++) {\n"
+        "                    if (nbs[i].name === \"My New Notebook\") hasNewNotebook = true\n"
+        "                }\n"
+        "            }\n"
+        "        }\n"
+        "    }\n"
+        "}\n",
+        QUrl(QStringLiteral("qrc:/qt/qml/zinc/tests/PageTreeInlineNewNotebookHost.qml")));
+
+    if (component.status() == QQmlComponent::Error) {
+        FAIL(formatErrors(component.errors()).toStdString());
+    }
+    REQUIRE(component.status() == QQmlComponent::Ready);
+
+    std::unique_ptr<QObject> root(component.create());
+    REQUIRE(root);
+
+    auto* window = requireWindow(root.get());
+    window->show();
+    QTest::qWait(50);
+
+    auto* pageTree = findOrNull(root.get(), "pageTree");
+    REQUIRE(pageTree);
+
+    QObject* field = nullptr;
+    REQUIRE(waitUntil([&]() {
+        field = pageTree->findChild<QObject*>(QStringLiteral("pageTree_newNotebookField"));
+        return field != nullptr;
+    }));
+    field->setProperty("text", QStringLiteral("My New Notebook"));
+
+    const auto before = root->property("notebookCount").toInt();
+    QTest::keyClick(window, Qt::Key_Return);
+    REQUIRE(waitUntil([&]() { return root->property("notebookCount").toInt() == before + 1; }));
+    REQUIRE(waitUntil([&]() { return root->property("hasNewNotebook").toBool(); }));
+}
+
+TEST_CASE("QML: Rename notebook updates DataStore and page tree", "[qml][pagetree][notebook]") {
+    registerTypesOnce();
+
+    QQmlEngine engine;
+    QQmlComponent component(&engine);
+    component.setData(
+        "import QtQuick\n"
+        "import QtQuick.Controls\n"
+        "import zinc\n"
+        "ApplicationWindow {\n"
+        "    width: 800\n"
+        "    height: 600\n"
+        "    visible: true\n"
+        "    property string targetNotebookId: \"\"\n"
+        "    property bool renamedOk: false\n"
+        "    property bool renameStarted: false\n"
+        "    PageTree {\n"
+        "        id: pageTree\n"
+        "        objectName: \"pageTree\"\n"
+        "        anchors.fill: parent\n"
+        "        Component.onCompleted: {\n"
+        "            if (DataStore) DataStore.resetDatabase()\n"
+        "            resetToDefaults()\n"
+        "            Qt.callLater(() => {\n"
+        "                if (DataStore) targetNotebookId = DataStore.createNotebook(\"Old Name\")\n"
+        "                Qt.callLater(() => {\n"
+        "                    beginRenameNotebook(targetNotebookId, \"Old Name\")\n"
+        "                    renameStarted = true\n"
+        "                    _inlineText = \"New Name\"\n"
+        "                    commitInlineEdit()\n"
+        "                })\n"
+        "            })\n"
+        "        }\n"
+        "        Connections {\n"
+        "            target: DataStore\n"
+        "            function onNotebooksChanged() {\n"
+        "                const nbs = DataStore ? DataStore.getAllNotebooks() : []\n"
+        "                for (let i = 0; i < nbs.length; i++) {\n"
+        "                    if (nbs[i].name === \"New Name\") renamedOk = true\n"
+        "                }\n"
+        "            }\n"
+        "        }\n"
+        "    }\n"
+        "}\n",
+        QUrl(QStringLiteral("qrc:/qt/qml/zinc/tests/PageTreeRenameNotebookHost.qml")));
+
+    if (component.status() == QQmlComponent::Error) {
+        FAIL(formatErrors(component.errors()).toStdString());
+    }
+    REQUIRE(component.status() == QQmlComponent::Ready);
+
+    std::unique_ptr<QObject> root(component.create());
+    REQUIRE(root);
+
+    auto* window = requireWindow(root.get());
+    window->show();
+    QTest::qWait(50);
+
+    auto* pageTree = findOrNull(root.get(), "pageTree");
+    REQUIRE(pageTree);
+
+    REQUIRE(waitUntil([&]() { return root->property("renameStarted").toBool(); }));
+    REQUIRE(waitUntil([&]() { return root->property("renamedOk").toBool(); }));
+}

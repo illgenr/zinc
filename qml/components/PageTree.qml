@@ -26,11 +26,111 @@ Item {
     property real _dragY: 0
     property bool _componentReady: false
     readonly property bool _isMobile: Qt.platform.os === "android" || Qt.platform.os === "ios"
+    readonly property int _inlineRowHeight: root._isMobile ? 44 : 36
+
+    property string _inlineMode: "" // "" | "newNotebook" | "rename"
+    property string _inlineKind: "" // "page" | "notebook"
+    property string _inlinePageId: ""
+    property string _inlineNotebookId: ""
+    property string _inlineText: ""
+    property var _activeRenameField: null
 
     onSortModeChanged: {
         if (!root._componentReady) return
         loadPagesFromStorage()
         pagesChanged()
+    }
+
+    function beginNewNotebook() {
+        root._inlineMode = "newNotebook"
+        root._inlineKind = "notebook"
+        root._inlinePageId = ""
+        root._inlineNotebookId = ""
+        root._inlineText = ""
+        Qt.callLater(() => {
+            if (newNotebookField) newNotebookField.forceActiveFocus()
+        })
+    }
+
+    function beginRenamePage(pageId, title) {
+        if (!pageId || pageId === "") return
+        root._inlineMode = "rename"
+        root._inlineKind = "page"
+        root._inlinePageId = pageId
+        root._inlineNotebookId = ""
+        root._inlineText = title || ""
+        Qt.callLater(() => {
+            if (root._activeRenameField) {
+                root._activeRenameField.forceActiveFocus()
+                root._activeRenameField.selectAll()
+            }
+        })
+    }
+
+    function beginRenameNotebook(notebookId, title) {
+        if (!notebookId || notebookId === "") return
+        root._inlineMode = "rename"
+        root._inlineKind = "notebook"
+        root._inlinePageId = ""
+        root._inlineNotebookId = notebookId
+        root._inlineText = title || ""
+        Qt.callLater(() => {
+            if (root._activeRenameField) {
+                root._activeRenameField.forceActiveFocus()
+                root._activeRenameField.selectAll()
+            }
+        })
+    }
+
+    function cancelInlineEdit() {
+        root._inlineMode = ""
+        root._inlineKind = ""
+        root._inlinePageId = ""
+        root._inlineNotebookId = ""
+        root._inlineText = ""
+        root._activeRenameField = null
+    }
+
+    function commitInlineEdit() {
+        const text = (root._inlineText || "").trim()
+        if (root._inlineMode === "newNotebook") {
+            if (!text) {
+                cancelInlineEdit()
+                return
+            }
+            if (DataStore && DataStore.createNotebook) {
+                DataStore.createNotebook(text)
+            }
+            cancelInlineEdit()
+            loadPagesFromStorage()
+            pagesChanged()
+            return
+        }
+        if (root._inlineMode === "rename" && root._inlineKind === "page") {
+            if (!root._inlinePageId || root._inlinePageId === "") {
+                cancelInlineEdit()
+                return
+            }
+            if (text) {
+                updatePageTitle(root._inlinePageId, text)
+            }
+            cancelInlineEdit()
+            return
+        }
+        if (root._inlineMode === "rename" && root._inlineKind === "notebook") {
+            if (!root._inlineNotebookId || root._inlineNotebookId === "") {
+                cancelInlineEdit()
+                return
+            }
+            if (DataStore && DataStore.renameNotebook && text) {
+                DataStore.renameNotebook(root._inlineNotebookId, text)
+            }
+            cancelInlineEdit()
+            loadPagesFromStorage()
+            pagesChanged()
+            return
+        }
+        cancelInlineEdit()
     }
 
     Timer {
@@ -783,7 +883,7 @@ Item {
                     anchors.fill: parent
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
-                    onClicked: root.newNotebookRequested()
+                    onClicked: root.beginNewNotebook()
                 }
             }
 
@@ -849,6 +949,85 @@ Item {
                         checkable: true
                         checked: root.sortMode === "createdAt"
                         onTriggered: root.sortMode = "createdAt"
+                    }
+                }
+            }
+        }
+
+        // Inline notebook creation row (replaces dialog).
+        Item {
+            Layout.fillWidth: true
+            Layout.preferredHeight: root._inlineMode === "newNotebook" ? root._inlineRowHeight : 0
+            Layout.maximumHeight: Layout.preferredHeight
+            clip: true
+
+            Rectangle {
+                anchors.fill: parent
+                visible: root._inlineMode === "newNotebook"
+                radius: ThemeManager.radiusSmall
+                color: ThemeManager.surface
+                border.width: 1
+                border.color: ThemeManager.border
+
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.margins: ThemeManager.spacingSmall
+                    spacing: ThemeManager.spacingSmall
+
+                    Text {
+                        text: "📁"
+                        color: ThemeManager.text
+                        font.pixelSize: ThemeManager.fontSizeNormal
+                    }
+
+                    TextField {
+                        id: newNotebookField
+                        objectName: root.objectName + "_newNotebookField"
+                        Layout.fillWidth: true
+                        height: root._inlineRowHeight - ThemeManager.spacingSmall * 2
+                        placeholderText: "Notebook name"
+                        color: ThemeManager.text
+                        placeholderTextColor: ThemeManager.textMuted
+                        selectionColor: ThemeManager.accent
+                        selectedTextColor: "white"
+                        text: root._inlineText
+                        leftPadding: ThemeManager.spacingSmall
+                        rightPadding: ThemeManager.spacingSmall
+                        background: Rectangle {
+                            radius: ThemeManager.radiusSmall
+                            color: ThemeManager.surfaceHover
+                            border.width: 1
+                            border.color: ThemeManager.border
+                        }
+                        onTextChanged: root._inlineText = text
+                        onAccepted: root.commitInlineEdit()
+                        Keys.onEscapePressed: root.cancelInlineEdit()
+                    }
+
+                    ToolButton {
+                        visible: !root._isMobile
+                        text: "Create"
+                        contentItem: Text {
+                            text: parent.text
+                            color: ThemeManager.text
+                            font.pixelSize: ThemeManager.fontSizeSmall
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                        onClicked: root.commitInlineEdit()
+                    }
+
+                    ToolButton {
+                        visible: !root._isMobile
+                        text: "Cancel"
+                        contentItem: Text {
+                            text: parent.text
+                            color: ThemeManager.text
+                            font.pixelSize: ThemeManager.fontSizeSmall
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                        onClicked: root.cancelInlineEdit()
                     }
                 }
             }
@@ -1000,6 +1179,9 @@ Item {
                 hoverEnabled: true
                 acceptedButtons: Qt.LeftButton | Qt.RightButton
                 z: 0
+                enabled: !(root._inlineMode === "rename" &&
+                           ((root._inlineKind === "page" && (model.pageId || "") === root._inlinePageId) ||
+                            (root._inlineKind === "notebook" && (model.notebookId || "") === root._inlineNotebookId)))
                 
                 onPressed: function(mouse) {
                     if (mouse.button === Qt.RightButton) {
@@ -1063,14 +1245,56 @@ Item {
                 }
                 
                 // Page title
-	                Text {
-	                    Layout.fillWidth: true
-	                    text: model.title || ""
-	                    color: ThemeManager.text
-	                    font.pixelSize: ThemeManager.fontSizeSmall
-	                    elide: Text.ElideRight
-	                    visible: !collapsed
-	                }
+                Item {
+                    Layout.fillWidth: true
+                    height: 24
+                    visible: !collapsed
+
+                    readonly property bool editingThisRow: root._inlineMode === "rename" &&
+                        ((root._inlineKind === "page" && (model.pageId || "") === root._inlinePageId) ||
+                         (root._inlineKind === "notebook" && (model.notebookId || "") === root._inlineNotebookId))
+
+                    Text {
+                        anchors.fill: parent
+                        text: model.title || ""
+                        color: ThemeManager.text
+                        font.pixelSize: ThemeManager.fontSizeSmall
+                        elide: Text.ElideRight
+                        verticalAlignment: Text.AlignVCenter
+                        visible: !parent.editingThisRow
+                    }
+
+                    Loader {
+                        anchors.fill: parent
+                        active: parent.editingThisRow
+                        visible: parent.editingThisRow
+
+                        sourceComponent: TextField {
+                            objectName: root.objectName + "_renameField"
+                            color: ThemeManager.text
+                            placeholderTextColor: ThemeManager.textMuted
+                            selectionColor: ThemeManager.accent
+                            selectedTextColor: "white"
+                            text: root._inlineText
+                            leftPadding: ThemeManager.spacingSmall
+                            rightPadding: ThemeManager.spacingSmall
+                            background: Rectangle {
+                                radius: ThemeManager.radiusSmall
+                                color: ThemeManager.surfaceHover
+                                border.width: 1
+                                border.color: ThemeManager.border
+                            }
+                            onTextChanged: root._inlineText = text
+                            onAccepted: root.commitInlineEdit()
+                            Keys.onEscapePressed: root.cancelInlineEdit()
+                            Component.onCompleted: {
+                                root._activeRenameField = this
+                                forceActiveFocus()
+                                selectAll()
+                            }
+                        }
+                    }
+                }
 
                 // Mobile drag handle (prevents interfering with scroll flick).
                 Item {
@@ -1191,7 +1415,7 @@ Item {
 
             MenuItem {
                 text: "New notebook"
-                onTriggered: root.newNotebookRequested()
+                onTriggered: root.beginNewNotebook()
             }
 
             MenuSeparator {}
@@ -1203,6 +1427,19 @@ Item {
                         root.createPageWithNotebook("", pageContextMenu.targetNotebookId)
                     } else {
                         root.createPage(pageContextMenu.targetPageId)
+                    }
+                }
+            }
+
+            MenuSeparator {}
+
+            MenuItem {
+                text: "Rename"
+                onTriggered: {
+                    if (pageContextMenu.targetKind === "notebook") {
+                        root.beginRenameNotebook(pageContextMenu.targetNotebookId, pageContextMenu.targetTitle)
+                    } else {
+                        root.beginRenamePage(pageContextMenu.targetPageId, pageContextMenu.targetTitle)
                     }
                 }
             }
