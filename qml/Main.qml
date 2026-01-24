@@ -211,7 +211,7 @@ ApplicationWindow {
                     Rectangle {
                         Layout.fillWidth: true
                         Layout.preferredHeight: 48
-                        Layout.preferredWidth: 96
+                        //Layout.preferredWidth: 96
                         Layout.alignment: Qt.AlignVCenter
                         Layout.margins: ThemeManager.spacingMedium
                         radius: ThemeManager.radiusMedium
@@ -228,8 +228,8 @@ ApplicationWindow {
                             
                             Text {
                                 Layout.fillWidth: true
-                                text: "Find"
-                                color: ThemeManager.textMuted
+                                text: "Find"                                
+                                font.weight: Font.Medium
                                 font.pixelSize: ThemeManager.fontSizeNormal
                             }
                         }
@@ -244,7 +244,7 @@ ApplicationWindow {
                         Layout.fillWidth: true
                         Layout.margins: ThemeManager.spacingSmall
                         Layout.alignment: Qt.AlignVCenter
-                        text: "+ New Page"
+                        text: "+ New\nPage"
 
                         background: Rectangle {
                             implicitHeight: 44
@@ -269,7 +269,7 @@ ApplicationWindow {
                     Button {
                         Layout.margins: ThemeManager.spacingSmall
                         Layout.alignment: Qt.AlignVCenter
-                        text: "New Notebook"
+                        text: "New\nNotebook"
 
                         background: Rectangle {
                             implicitHeight: 44
