@@ -565,6 +565,15 @@ Item {
         toggleExpandedAtIndex(idx)
     }
 
+    function activateRow(kind, pageId, notebookId, title) {
+        if (kind === "notebook") {
+            handleNotebookTap(notebookId)
+            return
+        }
+        root.selectedPageId = pageId
+        root.pageSelected(pageId, title)
+    }
+
     function openContextMenu(kind, pageId, notebookId, title) {
         if (!root.enableContextMenu) return
         const menu = pageContextMenuLoader.item
@@ -788,7 +797,7 @@ Item {
                     if (!rowVisible(idx)) return
                     const page = pageModel.get(idx)
                     if (!page) return
-                    root.handleRowTap(page.kind || "page", page.pageId || "", page.notebookId || "", page.title || "")
+                    root.activateRow(page.kind || "page", page.pageId || "", page.notebookId || "", page.title || "")
                     if (page.kind === "page") {
                         root.pageActivatedByKeyboard(page.pageId, page.title)
                     }

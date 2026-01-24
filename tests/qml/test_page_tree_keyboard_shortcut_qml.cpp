@@ -105,3 +105,61 @@ TEST_CASE("QML: Enter on page triggers keyboard activation signal", "[qml][paget
     REQUIRE(waitUntil([&]() { return root->property("activatedByKeyboard").toBool(); }));
 }
 
+TEST_CASE("QML: Enter activates selected page even when single-tap activation is disabled", "[qml][pagetree][shortcuts]") {
+    registerTypesOnce();
+
+    QQmlEngine engine;
+    QQmlComponent component(&engine);
+    component.setData(
+        "import QtQuick\n"
+        "import QtQuick.Controls\n"
+        "import zinc\n"
+        "ApplicationWindow {\n"
+        "    width: 800\n"
+        "    height: 600\n"
+        "    visible: true\n"
+        "    property string activatedPageId: \"\"\n"
+        "    Shortcut {\n"
+        "        context: Qt.ApplicationShortcut\n"
+        "        sequence: \"Ctrl+E\"\n"
+        "        onActivated: pageTree.focusTree()\n"
+        "    }\n"
+        "    PageTree {\n"
+        "        id: pageTree\n"
+        "        anchors.fill: parent\n"
+        "        activateOnSingleTap: false\n"
+        "        Component.onCompleted: {\n"
+        "            if (DataStore) DataStore.resetDatabase()\n"
+        "            resetToDefaults()\n"
+        "            selectPage(\"1\")\n"
+        "        }\n"
+        "        onPageSelected: (pageId, title) => activatedPageId = pageId\n"
+        "    }\n"
+        "}\n",
+        QUrl(QStringLiteral("qrc:/qt/qml/zinc/tests/PageTreeEnterAlwaysActivatesHost.qml")));
+
+    if (component.status() == QQmlComponent::Error) {
+        FAIL(formatErrors(component.errors()).toStdString());
+    }
+    REQUIRE(component.status() == QQmlComponent::Ready);
+
+    std::unique_ptr<QObject> root(component.create());
+    REQUIRE(root);
+
+    auto* window = requireWindow(root.get());
+    window->show();
+    QTest::qWait(50);
+
+    // Focus the page tree via Ctrl+E.
+    QTest::keyPress(window, Qt::Key_E, Qt::ControlModifier);
+
+    // Move selection down to the next page; this should not activate the page yet
+    // since activateOnSingleTap is false.
+    QTest::keyClick(window, Qt::Key_Down);
+    QTest::qWait(20);
+    REQUIRE(root->property("activatedPageId").toString() == QStringLiteral("1"));
+
+    // Enter should activate the selected page.
+    QTest::keyClick(window, Qt::Key_Return);
+    REQUIRE(waitUntil([&]() { return root->property("activatedPageId").toString() == QStringLiteral("2"); }));
+}
