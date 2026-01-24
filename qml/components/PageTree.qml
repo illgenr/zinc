@@ -8,6 +8,7 @@ Item {
     
     property bool collapsed: false
     property bool showNewPageButton: true
+    property bool showNewNotebookButton: true
     property bool showExpandArrowsAlways: false
     property bool actionsAlwaysVisible: false
     property bool activateOnSingleTap: true
@@ -751,7 +752,7 @@ Item {
             Rectangle {
                 Layout.preferredWidth: 132
                 Layout.preferredHeight: 36
-                visible: root.showNewPageButton
+                visible: root.showNewNotebookButton
                 radius: ThemeManager.radiusSmall
                 color: newNotebookMouse.containsMouse || newNotebookMouse.pressed ? ThemeManager.surfaceHover : ThemeManager.surface
                 border.width: 1
@@ -947,9 +948,9 @@ Item {
             width: pageList.width
             height: rowVisible(index) ? (collapsed ? 32 : 28) : 0
             visible: rowVisible(index)
-            radius: ThemeManager.radiusSmall
-            readonly property bool selected: root.selectedPageId === model.pageId
-            readonly property string pageId: model.pageId
+	            radius: ThemeManager.radiusSmall
+	            readonly property bool selected: root.selectedPageId === model.pageId
+	            readonly property string pageId: model.pageId || ""
             color: selected
                 ? ThemeManager.surfaceActive
                 : (delegateMouseArea.containsMouse || delegateMouseArea.pressed ? ThemeManager.surfaceHover : "transparent")
@@ -1062,14 +1063,14 @@ Item {
                 }
                 
                 // Page title
-                Text {
-                    Layout.fillWidth: true
-                    text: model.title
-                    color: ThemeManager.text
-                    font.pixelSize: ThemeManager.fontSizeSmall
-                    elide: Text.ElideRight
-                    visible: !collapsed
-                }
+	                Text {
+	                    Layout.fillWidth: true
+	                    text: model.title || ""
+	                    color: ThemeManager.text
+	                    font.pixelSize: ThemeManager.fontSizeSmall
+	                    elide: Text.ElideRight
+	                    visible: !collapsed
+	                }
 
                 // Mobile drag handle (prevents interfering with scroll flick).
                 Item {

@@ -348,3 +348,55 @@ TEST_CASE("QML: PageTree sortMode createdAt puts newly created pages first", "[q
         return pages[0].toMap().value("pageId").toString() == newId;
     }));
 }
+
+TEST_CASE("QML: Ctrl+N creates a new page", "[qml][pagetree][shortcuts]") {
+    registerTypesOnce();
+
+    QQmlEngine engine;
+    QQmlComponent component(&engine);
+    component.setData(
+        "import QtQuick\n"
+        "import QtQuick.Controls\n"
+        "import zinc\n"
+        "ApplicationWindow {\n"
+        "    width: 800\n"
+        "    height: 600\n"
+        "    visible: true\n"
+        "    property int pageCount: 0\n"
+        "    Shortcut {\n"
+        "        context: Qt.ApplicationShortcut\n"
+        "        sequence: \"Ctrl+N\"\n"
+        "        onActivated: pageTree.createPage(\"\")\n"
+        "    }\n"
+        "    PageTree {\n"
+        "        id: pageTree\n"
+        "        objectName: \"pageTree\"\n"
+        "        anchors.fill: parent\n"
+        "        Component.onCompleted: {\n"
+        "            if (DataStore) DataStore.resetDatabase()\n"
+        "            resetToDefaults()\n"
+        "            pageCount = getAllPages().length\n"
+        "        }\n"
+        "        onPagesChanged: pageCount = getAllPages().length\n"
+        "    }\n"
+        "}\n",
+        QUrl(QStringLiteral("qrc:/qt/qml/zinc/tests/PageTreeCtrlNHost.qml")));
+
+    if (component.status() == QQmlComponent::Error) {
+        FAIL(formatErrors(component.errors()).toStdString());
+    }
+    REQUIRE(component.status() == QQmlComponent::Ready);
+
+    std::unique_ptr<QObject> root(component.create());
+    REQUIRE(root);
+
+    auto* window = requireWindow(root.get());
+    window->show();
+    QTest::qWait(50);
+
+    REQUIRE(waitUntil([&]() { return root->property("pageCount").toInt() >= 4; }));
+    const auto before = root->property("pageCount").toInt();
+
+    QTest::keyPress(window, Qt::Key_N, Qt::ControlModifier);
+    REQUIRE(waitUntil([&]() { return root->property("pageCount").toInt() == before + 1; }));
+}

@@ -62,12 +62,14 @@ ApplicationWindow {
     Shortcut {
         sequence: "Ctrl+N"
         enabled: !isMobile
+        context: Qt.ApplicationShortcut
         onActivated: pageTree.createPage("")
     }
     
     Shortcut {
         sequence: "Ctrl+F"
         enabled: !isMobile
+        context: Qt.ApplicationShortcut
         onActivated: searchDialog.open()
     }
     
@@ -211,7 +213,7 @@ ApplicationWindow {
                     Rectangle {
                         Layout.fillWidth: true
                         Layout.preferredHeight: 48
-                        //Layout.preferredWidth: 96
+                        Layout.preferredWidth: 72
                         Layout.alignment: Qt.AlignVCenter
                         Layout.margins: ThemeManager.spacingMedium
                         radius: ThemeManager.radiusMedium
@@ -229,6 +231,7 @@ ApplicationWindow {
                             Text {
                                 Layout.fillWidth: true
                                 text: "Find"                                
+                                color: ThemeManager.text
                                 font.weight: Font.Medium
                                 font.pixelSize: ThemeManager.fontSizeNormal
                             }
@@ -244,6 +247,7 @@ ApplicationWindow {
                         Layout.fillWidth: true
                         Layout.margins: ThemeManager.spacingSmall
                         Layout.alignment: Qt.AlignVCenter
+                        Layout.preferredWidth: 72
                         text: "+ New\nPage"
 
                         background: Rectangle {
@@ -270,20 +274,20 @@ ApplicationWindow {
                         Layout.margins: ThemeManager.spacingSmall
                         Layout.alignment: Qt.AlignVCenter
                         text: "New\nNotebook"
+                        Layout.preferredWidth: 72
 
                         background: Rectangle {
                             implicitHeight: 44
                             radius: ThemeManager.radiusSmall
-                            color: parent.pressed ? ThemeManager.surfaceActive : ThemeManager.surfaceHover
+                            
                             border.width: 1
-                            border.color: ThemeManager.border
+                            color: parent.pressed ? ThemeManager.accentHover : ThemeManager.accent
                         }
 
                         contentItem: Text {
                             text: parent.text
                             color: ThemeManager.text
-                            font.pixelSize: ThemeManager.fontSizeNormal
-                            font.weight: Font.Medium
+                            font.pixelSize: ThemeManager.fontSizeNormal                            
                             horizontalAlignment: Text.AlignHCenter
                             verticalAlignment: Text.AlignVCenter
                         }
@@ -513,9 +517,15 @@ ApplicationWindow {
         orientation: Qt.Horizontal
         visible: !isMobile
         
-        handle: Rectangle {
-            implicitWidth: 1
-            color: ThemeManager.border
+        handle: Item {
+            implicitWidth: 8
+            Rectangle {
+                width: 1
+                anchors.horizontalCenter: parent.horizontalCenter
+                anchors.top: parent.top
+                anchors.bottom: parent.bottom
+                color: ThemeManager.border
+            }
         }
         
         // Sidebar
@@ -598,44 +608,90 @@ ApplicationWindow {
 
 	                        onClicked: sidebarCollapsed = !sidebarCollapsed
 	                    }
-	                }
+                }
                 
-                // Search button
-                Rectangle {
+                // New Page + Find row
+                RowLayout {
                     Layout.fillWidth: true
                     Layout.preferredHeight: 32
-                    radius: ThemeManager.radiusMedium
-                    color: ThemeManager.surfaceHover
+                    spacing: ThemeManager.spacingSmall
                     visible: !sidebarCollapsed
-                    
-                    RowLayout {
-                        anchors.fill: parent
-                        anchors.leftMargin: ThemeManager.spacingSmall
-                        anchors.rightMargin: ThemeManager.spacingSmall
-                        
-                        Text {
-                            text: "🔍"
-                            font.pixelSize: ThemeManager.fontSizeSmall
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 32
+                        radius: ThemeManager.radiusMedium
+                        color: newPageMouse.containsMouse || newPageMouse.pressed ? ThemeManager.surfaceActive : ThemeManager.surfaceHover
+
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.leftMargin: ThemeManager.spacingSmall
+                            anchors.rightMargin: ThemeManager.spacingSmall
+                            spacing: ThemeManager.spacingSmall
+
+                            Text {
+                                text: "+"
+                                color: ThemeManager.textMuted
+                                font.pixelSize: ThemeManager.fontSizeSmall
+                            }
+
+                            Text {
+                                Layout.fillWidth: true
+                                text: "New Page"
+                                color: ThemeManager.textMuted
+                                font.pixelSize: ThemeManager.fontSizeSmall
+                                elide: Text.ElideRight
+                            }
                         }
-                        
-                        Text {
-                            Layout.fillWidth: true
-                            text: "Find"
-                            color: ThemeManager.textMuted
-                            font.pixelSize: ThemeManager.fontSizeSmall
-                        }
-                        
-                        Text {
-                            text: "Ctrl+F"
-                            color: ThemeManager.textMuted
-                            font.pixelSize: ThemeManager.fontSizeSmall
+
+                        ToolTip.visible: newPageMouse.containsMouse
+                        ToolTip.text: "New page (Ctrl+N)"
+
+                        MouseArea {
+                            id: newPageMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: pageTree.createPage("")
                         }
                     }
-                    
-                    MouseArea {
-                        anchors.fill: parent
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: searchDialog.open()
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 32
+                        radius: ThemeManager.radiusMedium
+                        color: findMouse.containsMouse || findMouse.pressed ? ThemeManager.surfaceActive : ThemeManager.surfaceHover
+
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.leftMargin: ThemeManager.spacingSmall
+                            anchors.rightMargin: ThemeManager.spacingSmall
+                            spacing: ThemeManager.spacingSmall
+
+                            Text {
+                                text: "🔍"
+                                font.pixelSize: ThemeManager.fontSizeSmall
+                            }
+
+                            Text {
+                                Layout.fillWidth: true
+                                text: "Find"
+                                color: ThemeManager.textMuted
+                                font.pixelSize: ThemeManager.fontSizeSmall
+                                elide: Text.ElideRight
+                            }
+                        }
+
+                        ToolTip.visible: findMouse.containsMouse
+                        ToolTip.text: "Find (Ctrl+F)"
+
+                        MouseArea {
+                            id: findMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: searchDialog.open()
+                        }
                     }
                 }
 
@@ -646,6 +702,8 @@ ApplicationWindow {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     visible: !sidebarCollapsed
+                    showNewPageButton: false
+                    showNewNotebookButton: true
 
                     onNewNotebookRequested: newNotebookDialog.open()
 
