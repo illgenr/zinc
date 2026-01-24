@@ -1125,7 +1125,11 @@ Item {
             id: delegateItem
             objectName: "pageTreeRow_" + index
             width: pageList.width
-            height: rowVisible(index) ? (collapsed ? 32 : 28) : 0
+            height: rowVisible(index)
+                ? (collapsed
+                    ? 32
+                    : (root._isMobile ? Math.max(44, root.actionButtonSize) : 28))
+                : 0
             visible: rowVisible(index)
 	            radius: ThemeManager.radiusSmall
 	            readonly property bool selected: root.selectedPageId === model.pageId
@@ -1197,21 +1201,23 @@ Item {
                 }
             }
             
-            RowLayout {
-                anchors.fill: parent
-                anchors.leftMargin: collapsed ? ThemeManager.spacingSmall : (ThemeManager.spacingSmall + model.depth * 20)
-                anchors.rightMargin: ThemeManager.spacingSmall
-                spacing: ThemeManager.spacingSmall
-                z: 1
-                
-                // Left affordance: small icon, becomes expand/collapse arrow on hover.
-                Item {
-                    width: 18
-                    height: 18
+	            RowLayout {
+	                anchors.fill: parent
+	                anchors.leftMargin: collapsed ? ThemeManager.spacingSmall : (ThemeManager.spacingSmall + model.depth * 20)
+	                anchors.rightMargin: ThemeManager.spacingSmall
+	                spacing: ThemeManager.spacingSmall
+	                z: 1
+	                
+	                // Left affordance: small icon, becomes expand/collapse arrow on hover.
+	                Item {
+	                    Layout.fillHeight: true
+	                    Layout.alignment: Qt.AlignVCenter
+	                    Layout.preferredWidth: 18
+	                    width: 18
 
-                    readonly property bool hasKids: root.hasChildrenAtIndex(index)
-                    readonly property bool showArrow: !collapsed && hasKids &&
-                                                     (root.showExpandArrowsAlways || delegateMouseArea.containsMouse)
+	                    readonly property bool hasKids: root.hasChildrenAtIndex(index)
+	                    readonly property bool showArrow: !collapsed && hasKids &&
+	                                                     (root.showExpandArrowsAlways || delegateMouseArea.containsMouse)
 
                     Text {
                         anchors.centerIn: parent
@@ -1244,11 +1250,12 @@ Item {
                     }
                 }
                 
-                // Page title
-                Item {
-                    Layout.fillWidth: true
-                    height: 24
-                    visible: !collapsed
+	                // Page title
+	                Item {
+	                    Layout.fillWidth: true
+	                    Layout.fillHeight: true
+	                    Layout.alignment: Qt.AlignVCenter
+	                    visible: !collapsed
 
                     readonly property bool editingThisRow: root._inlineMode === "rename" &&
                         ((root._inlineKind === "page" && (model.pageId || "") === root._inlinePageId) ||
@@ -1296,11 +1303,13 @@ Item {
                     }
                 }
 
-                // Mobile drag handle (prevents interfering with scroll flick).
-                Item {
-                    width: 18
-                    height: 18
-                    visible: root._isMobile && (model.kind === "page") && !collapsed
+	                // Mobile drag handle (prevents interfering with scroll flick).
+	                Item {
+	                    Layout.fillHeight: true
+	                    Layout.alignment: Qt.AlignVCenter
+	                    Layout.preferredWidth: 18
+	                    width: 18
+	                    visible: root._isMobile && (model.kind === "page") && !collapsed
 
                     Text {
                         anchors.centerIn: parent
@@ -1328,18 +1337,21 @@ Item {
                     }
                 }
                 
-                // Actions (appear on hover)
-                RowLayout {
-                    spacing: 2
-                    visible: (root.actionsAlwaysVisible || delegateMouseArea.containsMouse) && !collapsed
-                    
-                    Rectangle {
-                        id: addChildButton
-                        objectName: "pageTreeAddChildButton_" + index
-                        width: root.actionButtonSize
-                        height: root.actionButtonSize
-                        radius: ThemeManager.radiusSmall
-                        color: addChildMouse.containsMouse || addChildMouse.pressed ? ThemeManager.surfaceActive : "transparent"
+	                // Actions (appear on hover)
+	                RowLayout {
+	                    Layout.alignment: Qt.AlignVCenter
+	                    Layout.fillHeight: true
+	                    spacing: 2
+	                    visible: (root.actionsAlwaysVisible || delegateMouseArea.containsMouse) && !collapsed
+	                    
+	                    Rectangle {
+	                        id: addChildButton
+	                        objectName: "pageTreeAddChildButton_" + index
+	                        Layout.alignment: Qt.AlignVCenter
+	                        width: root.actionButtonSize
+	                        height: root.actionButtonSize
+	                        radius: ThemeManager.radiusSmall
+	                        color: addChildMouse.containsMouse || addChildMouse.pressed ? ThemeManager.surfaceActive : "transparent"
                         
                         Text {
                             anchors.centerIn: parent
@@ -1367,13 +1379,14 @@ Item {
                         }
                     }
                     
-                    Rectangle {
-                        id: menuButton
-                        objectName: "pageTreeMenuButton_" + index
-                        width: root.actionButtonSize
-                        height: root.actionButtonSize
-                        radius: ThemeManager.radiusSmall
-                        color: menuMouse.containsMouse || menuMouse.pressed ? ThemeManager.surfaceActive : "transparent"
+	                    Rectangle {
+	                        id: menuButton
+	                        objectName: "pageTreeMenuButton_" + index
+	                        Layout.alignment: Qt.AlignVCenter
+	                        width: root.actionButtonSize
+	                        height: root.actionButtonSize
+	                        radius: ThemeManager.radiusSmall
+	                        color: menuMouse.containsMouse || menuMouse.pressed ? ThemeManager.surfaceActive : "transparent"
                         
                         Text {
                             anchors.centerIn: parent
