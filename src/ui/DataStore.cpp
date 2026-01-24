@@ -523,7 +523,7 @@ QVariantList DataStore::getAllPages() {
     }
     
     QSqlQuery query(m_db);
-    query.exec("SELECT id, notebook_id, title, parent_id, depth, sort_order FROM pages ORDER BY sort_order, created_at");
+    query.exec("SELECT id, notebook_id, title, parent_id, depth, sort_order, created_at, updated_at FROM pages ORDER BY sort_order, created_at");
     
     while (query.next()) {
         QVariantMap page;
@@ -533,6 +533,8 @@ QVariantList DataStore::getAllPages() {
         page["parentId"] = query.value(3).toString();
         page["depth"] = query.value(4).toInt();
         page["sortOrder"] = query.value(5).toInt();
+        page["createdAt"] = query.value(6).toString();
+        page["updatedAt"] = query.value(7).toString();
         pages.append(page);
     }
     
@@ -550,7 +552,7 @@ QVariantList DataStore::getPagesForNotebook(const QString& notebookId) {
 
     QSqlQuery query(m_db);
     query.prepare(R"SQL(
-        SELECT id, notebook_id, title, parent_id, depth, sort_order
+        SELECT id, notebook_id, title, parent_id, depth, sort_order, created_at, updated_at
         FROM pages
         WHERE notebook_id = ?
         ORDER BY sort_order, created_at
@@ -566,6 +568,8 @@ QVariantList DataStore::getPagesForNotebook(const QString& notebookId) {
         page["parentId"] = query.value(3).toString();
         page["depth"] = query.value(4).toInt();
         page["sortOrder"] = query.value(5).toInt();
+        page["createdAt"] = query.value(6).toString();
+        page["updatedAt"] = query.value(7).toString();
         pages.append(page);
     }
 
@@ -2677,7 +2681,7 @@ QVariantList DataStore::getAllNotebooks() {
 
     QSqlQuery q(m_db);
     q.exec(R"SQL(
-        SELECT id, name, sort_order
+        SELECT id, name, sort_order, created_at, updated_at
         FROM notebooks
         ORDER BY sort_order, created_at
     )SQL");
@@ -2686,6 +2690,8 @@ QVariantList DataStore::getAllNotebooks() {
         nb["notebookId"] = q.value(0).toString();
         nb["name"] = q.value(1).toString();
         nb["sortOrder"] = q.value(2).toInt();
+        nb["createdAt"] = q.value(3).toString();
+        nb["updatedAt"] = q.value(4).toString();
         notebooks.append(nb);
     }
     return notebooks;

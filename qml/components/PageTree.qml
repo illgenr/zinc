@@ -13,6 +13,7 @@ Item {
     property bool activateOnSingleTap: true
     property int actionButtonSize: 20
     property string selectedPageId: ""
+    property string sortMode: "alphabetical" // "alphabetical" | "updatedAt" | "createdAt"
     property bool enableContextMenu: true
     
     signal pageSelected(string pageId, string title)
@@ -22,7 +23,14 @@ Item {
 
     property bool _dragActive: false
     property real _dragY: 0
+    property bool _componentReady: false
     readonly property bool _isMobile: Qt.platform.os === "android" || Qt.platform.os === "ios"
+
+    onSortModeChanged: {
+        if (!root._componentReady) return
+        loadPagesFromStorage()
+        pagesChanged()
+    }
 
     Timer {
         id: dragAutoScrollTimer
@@ -265,6 +273,7 @@ Item {
             createDefaultPages()
         }
         pagesChanged()
+        root._componentReady = true
     }
 
     Connections {
@@ -445,6 +454,56 @@ Item {
             byNotebook[nb].push(p)
         }
 
+        function normalizedSortMode() {
+            if (root.sortMode === "updatedAt") return "updatedAt"
+            if (root.sortMode === "createdAt") return "createdAt"
+            return "alphabetical"
+        }
+
+        function compareAlpha(a, b) {
+            const aTitle = ((a.title || "") + "").toLowerCase()
+            const bTitle = ((b.title || "") + "").toLowerCase()
+            const byTitle = aTitle.localeCompare(bTitle)
+            if (byTitle !== 0) return byTitle
+            const aId = (a.pageId || a.notebookId || "") + ""
+            const bId = (b.pageId || b.notebookId || "") + ""
+            return aId.localeCompare(bId)
+        }
+
+        function compareTimestampDesc(field, a, b) {
+            const aTs = (a && a[field]) ? (a[field] + "") : ""
+            const bTs = (b && b[field]) ? (b[field] + "") : ""
+            const byTs = bTs.localeCompare(aTs)
+            if (byTs !== 0) return byTs
+            const byTitle = compareAlpha(a, b)
+            if (byTitle !== 0) return byTitle
+            const aOrder = a.sortOrder || 0
+            const bOrder = b.sortOrder || 0
+            return aOrder - bOrder
+        }
+
+        function pageComparator() {
+            const mode = normalizedSortMode()
+            if (mode === "updatedAt") return (a, b) => compareTimestampDesc("updatedAt", a, b)
+            if (mode === "createdAt") return (a, b) => compareTimestampDesc("createdAt", a, b)
+            return compareAlpha
+        }
+
+        function notebookComparator() {
+            const mode = normalizedSortMode()
+            if (mode === "updatedAt") return (a, b) => compareTimestampDesc("updatedAt", a, b)
+            if (mode === "createdAt") return (a, b) => compareTimestampDesc("createdAt", a, b)
+            return (a, b) => {
+                const aName = ((a.name || "") + "").toLowerCase()
+                const bName = ((b.name || "") + "").toLowerCase()
+                const byName = aName.localeCompare(bName)
+                if (byName !== 0) return byName
+                const aId = (a.notebookId || "") + ""
+                const bId = (b.notebookId || "") + ""
+                return aId.localeCompare(bId)
+            }
+        }
+
         function toChildrenMap(list) {
             const m = {}
             for (let i = 0; i < list.length; i++) {
@@ -454,7 +513,7 @@ Item {
                 m[parent].push(p)
             }
             for (const key in m) {
-                m[key].sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0))
+                m[key].sort(pageComparator())
             }
             return m
         }
@@ -471,7 +530,9 @@ Item {
                     parentId: p.parentId || "",
                     expanded: true,
                     depth: depthBase,
-                    sortOrder: p.sortOrder || 0
+                    sortOrder: p.sortOrder || 0,
+                    createdAt: p.createdAt || "",
+                    updatedAt: p.updatedAt || ""
                 })
                 appendTree(childrenMap, p.pageId, depthBase + 1, notebookId)
             }
@@ -485,8 +546,14 @@ Item {
 
         // 2) Notebook folders + their notes.
         if (notebooks && notebooks.length > 0) {
+            const notebookList = []
             for (let i = 0; i < notebooks.length; i++) {
-                const nb = notebooks[i] || {}
+                notebookList.push(notebooks[i] || {})
+            }
+            notebookList.sort(notebookComparator())
+
+            for (let i = 0; i < notebookList.length; i++) {
+                const nb = notebookList[i] || {}
                 const notebookId = nb.notebookId || ""
                 if (notebookId === "") continue
                 pageModel.append({
@@ -496,7 +563,9 @@ Item {
                     title: nb.name || "Untitled Notebook",
                     parentId: "",
                     expanded: true,
-                    depth: 0
+                    depth: 0,
+                    createdAt: nb.createdAt || "",
+                    updatedAt: nb.updatedAt || ""
                 })
                 const notebookPages = byNotebook[notebookId] || []
                 appendTree(toChildrenMap(notebookPages), "", 1, notebookId)
@@ -635,16 +704,16 @@ Item {
         anchors.fill: parent
         spacing: ThemeManager.spacingSmall
         
-        // New Page button at top
+        // Top controls (New Page / New Notebook / Sort)
         RowLayout {
             Layout.fillWidth: true
             Layout.preferredHeight: 36
-            visible: root.showNewPageButton
             spacing: ThemeManager.spacingSmall
             
             Rectangle {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 36
+                visible: root.showNewPageButton
                 radius: ThemeManager.radiusSmall
                 color: newPageMouse.containsMouse || newPageMouse.pressed ? ThemeManager.surfaceHover : ThemeManager.surface
                 border.width: 1
@@ -682,6 +751,7 @@ Item {
             Rectangle {
                 Layout.preferredWidth: 132
                 Layout.preferredHeight: 36
+                visible: root.showNewPageButton
                 radius: ThemeManager.radiusSmall
                 color: newNotebookMouse.containsMouse || newNotebookMouse.pressed ? ThemeManager.surfaceHover : ThemeManager.surface
                 border.width: 1
@@ -713,6 +783,72 @@ Item {
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
                     onClicked: root.newNotebookRequested()
+                }
+            }
+
+            Item {
+                Layout.fillWidth: true
+                visible: !root.showNewPageButton
+            }
+
+            Rectangle {
+                Layout.preferredWidth: 132
+                Layout.preferredHeight: 36
+                radius: ThemeManager.radiusSmall
+                color: sortMouse.containsMouse || sortMouse.pressed ? ThemeManager.surfaceHover : ThemeManager.surface
+                border.width: 1
+                border.color: ThemeManager.border
+
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.margins: ThemeManager.spacingSmall
+                    spacing: ThemeManager.spacingSmall
+
+                    Text {
+                        text: "⇅"
+                        color: ThemeManager.text
+                        font.pixelSize: ThemeManager.fontSizeNormal
+                    }
+
+                    Text {
+                        Layout.fillWidth: true
+                        text: "Sort"
+                        color: ThemeManager.text
+                        font.pixelSize: ThemeManager.fontSizeNormal
+                        elide: Text.ElideRight
+                    }
+                }
+
+                MouseArea {
+                    id: sortMouse
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: sortMenu.popup()
+                }
+
+                Menu {
+                    id: sortMenu
+                    modal: true
+
+                    MenuItem {
+                        text: "Alphabetical"
+                        checkable: true
+                        checked: root.sortMode === "alphabetical"
+                        onTriggered: root.sortMode = "alphabetical"
+                    }
+                    MenuItem {
+                        text: "Updated at"
+                        checkable: true
+                        checked: root.sortMode === "updatedAt"
+                        onTriggered: root.sortMode = "updatedAt"
+                    }
+                    MenuItem {
+                        text: "Created at"
+                        checkable: true
+                        checked: root.sortMode === "createdAt"
+                        onTriggered: root.sortMode = "createdAt"
+                    }
                 }
             }
         }
