@@ -269,31 +269,6 @@ ApplicationWindow {
                             mobilePageTree.createPage("")
                         }
                     }
-
-                    Button {
-                        Layout.margins: ThemeManager.spacingSmall
-                        Layout.alignment: Qt.AlignVCenter
-                        text: "New\nNotebook"
-                        Layout.preferredWidth: 72
-
-                        background: Rectangle {
-                            implicitHeight: 44
-                            radius: ThemeManager.radiusSmall
-                            
-                            border.width: 1
-                            color: parent.pressed ? ThemeManager.accentHover : ThemeManager.accent
-                        }
-
-                        contentItem: Text {
-                            text: parent.text
-                            color: ThemeManager.text
-                            font.pixelSize: ThemeManager.fontSizeNormal                            
-                            horizontalAlignment: Text.AlignHCenter
-                            verticalAlignment: Text.AlignVCenter
-                        }
-
-                        onClicked: mobilePageTree.beginNewNotebook()
-                    }
                 }
 
                 // Notes list
@@ -617,29 +592,26 @@ ApplicationWindow {
                     spacing: ThemeManager.spacingSmall
                     visible: !sidebarCollapsed
 
-                    Rectangle {
-                        Layout.fillWidth: true
+                    Rectangle {                        
                         Layout.preferredHeight: 32
+                        implicitWidth: newPageButtonRow.implicitWidth + ThemeManager.spacingSmall
                         radius: ThemeManager.radiusMedium
-                        color: newPageMouse.containsMouse || newPageMouse.pressed ? ThemeManager.surfaceActive : ThemeManager.surfaceHover
+                        color: newPageMouse.containsMouse || newPageMouse.pressed ? ThemeManager.surfaceHover : ThemeManager.surface
+                        border.width: 1
+                        border.color: ThemeManager.border
 
                         RowLayout {
-                            anchors.fill: parent
-                            anchors.leftMargin: ThemeManager.spacingSmall
-                            anchors.rightMargin: ThemeManager.spacingSmall
+                            id: newPageButtonRow
+                            implicitWidth:  newPageText.implicitWidth
+                            anchors.verticalCenter: parent.verticalCenter
+                            anchors.horizontalCenter: parent.horizontalCenter
                             spacing: ThemeManager.spacingSmall
-
+                            
                             Text {
-                                text: "+"
-                                color: ThemeManager.textMuted
-                                font.pixelSize: ThemeManager.fontSizeSmall
-                            }
-
-                            Text {
-                                Layout.fillWidth: true
-                                text: "New Page"
-                                color: ThemeManager.textMuted
-                                font.pixelSize: ThemeManager.fontSizeSmall
+                                id: newPageText                                
+                                text: "🗎 New Page"
+                                color: ThemeManager.text
+                                font.pixelSize: ThemeManager.fontSizeNormal
                                 elide: Text.ElideRight
                             }
                         }
@@ -657,24 +629,26 @@ ApplicationWindow {
                     }
 
                     Rectangle {
-                        Layout.fillWidth: true
+                        implicitWidth: findButtonRow.implicitWidth + ThemeManager.spacingSmall * 2
                         Layout.preferredHeight: 32
-                        radius: ThemeManager.radiusMedium
+                        radius: ThemeManager.radiusMedium                        
                         color: findMouse.containsMouse || findMouse.pressed ? ThemeManager.surfaceActive : ThemeManager.surfaceHover
 
                         RowLayout {
-                            anchors.fill: parent
-                            anchors.leftMargin: ThemeManager.spacingSmall
-                            anchors.rightMargin: ThemeManager.spacingSmall
+                            id: findButtonRow
+                            implicitWidth: findIcon.implicitWidth + findButtonText.implicitWidth + 20                            
+                            anchors.verticalCenter: parent.verticalCenter
+                            anchors.horizontalCenter: parent.horizontalCenter
                             spacing: ThemeManager.spacingSmall
 
                             Text {
+                                id: findIcon
                                 text: "🔍"
                                 font.pixelSize: ThemeManager.fontSizeSmall
                             }
 
                             Text {
-                                Layout.fillWidth: true
+                                id: findButtonText                                
                                 text: "Find"
                                 color: ThemeManager.textMuted
                                 font.pixelSize: ThemeManager.fontSizeSmall

@@ -826,7 +826,7 @@ Item {
                     spacing: ThemeManager.spacingSmall
 
                     Text {
-                        text: "+"
+                        text: "🗎"
                         color: ThemeManager.accent
                         font.pixelSize: ThemeManager.fontSizeLarge
                         font.bold: true
@@ -850,7 +850,7 @@ Item {
             }
 
             Rectangle {
-                Layout.preferredWidth: 132
+                Layout.preferredWidth: 144
                 Layout.preferredHeight: 36
                 visible: root.showNewNotebookButton
                 radius: ThemeManager.radiusSmall
@@ -892,26 +892,30 @@ Item {
                 visible: !root.showNewPageButton
             }
 
-            Rectangle {
-                Layout.preferredWidth: 132
+            Rectangle {                
                 Layout.preferredHeight: 36
+                implicitWidth: sortButtonRow.implicitWidth + ThemeManager.spacingSmall + 20
                 radius: ThemeManager.radiusSmall
                 color: sortMouse.containsMouse || sortMouse.pressed ? ThemeManager.surfaceHover : ThemeManager.surface
                 border.width: 1
                 border.color: ThemeManager.border
 
                 RowLayout {
+                    id: sortButtonRow
                     anchors.fill: parent
+                    implicitWidth: sortIcon.implicitWidth + sortText.implicitWidth 
                     anchors.margins: ThemeManager.spacingSmall
                     spacing: ThemeManager.spacingSmall
 
                     Text {
+                        id: sortIcon
                         text: "⇅"
                         color: ThemeManager.text
                         font.pixelSize: ThemeManager.fontSizeNormal
                     }
 
                     Text {
+                        id: sortText
                         Layout.fillWidth: true
                         text: "Sort"
                         color: ThemeManager.text
