@@ -4,6 +4,7 @@ import QtQuick.Layouts
 import zinc
 import Zinc 1.0
 import "ScrollMath.js" as ScrollMath
+import "BlockEditorEnterLogic.js" as EnterLogic
 
 FocusScope {
     id: root
@@ -543,6 +544,65 @@ FocusScope {
         focusTimer.targetCursorPos = -1
         focusTimer.attemptsRemaining = 10
         focusTimer.start()
+    }
+
+    function handleEnterPressedAt(blockIndex) {
+        if (blockIndex < 0 || blockIndex >= blockModel.count) return
+
+        const item = blockRepeater.itemAt(blockIndex)
+        const tc = item && item.textControl ? item.textControl : null
+        const cursorPos = (tc && ("cursorPosition" in tc)) ? tc.cursorPosition : -1
+
+        const row = blockModel.get(blockIndex)
+        if (!row) return
+
+        const content = row.content || ""
+        const rowType = row.blockType || "paragraph"
+        const action = EnterLogic.enterAction({
+            blockIndex: blockIndex,
+            cursorPos: cursorPos,
+            blockType: rowType,
+            content: content,
+        })
+
+        if (!action || !("kind" in action) || action.kind === "noop") return
+
+        if (action.kind === "convertTodoToParagraph") {
+            blockModel.setProperty(blockIndex, "blockType", "paragraph")
+            return
+        }
+
+        if (action.kind !== "insert") return
+
+        const insertIndex = action.insertIndex
+        const newBlockType = action.newBlockType || "paragraph"
+        const focusCursorPos = ("focusCursorPos" in action) ? action.focusCursorPos : 0
+        const newChecked = false
+        const newBlock = {
+            blockId: generateUuid(),
+            blockType: newBlockType,
+            content: "",
+            depth: row.depth || 0,
+            checked: newChecked,
+            collapsed: false,
+            language: "",
+            headingLevel: 0
+        }
+
+        // Defer model mutation until after the key event finishes dispatching.
+        // Inserting above the currently-focused delegate can otherwise cause
+        // teardown/rebind while the TextEdit is still processing Enter.
+        const capturedInsertIndex = insertIndex
+        const capturedNewBlock = newBlock
+        Qt.callLater(() => {
+            blockModel.insert(capturedInsertIndex, capturedNewBlock)
+
+            // Focus the new block after a brief delay
+            focusTimer.targetIndex = capturedInsertIndex
+            focusTimer.targetCursorPos = focusCursorPos
+            focusTimer.attemptsRemaining = 10
+            focusTimer.start()
+        })
     }
     
     function loadPage(id) {
@@ -1311,37 +1371,7 @@ FocusScope {
                     }
                     
                     onBlockEnterPressed: {
-                        // For list types (todo), create another of the same type
-                        // unless the current block is empty (then convert to paragraph)
-                        let newBlockType = "paragraph"
-                        let newChecked = false
-                        
-                        if (model.blockType === "todo") {
-                            if (model.content.length === 0) {
-                                // Empty todo - convert current to paragraph and don't add new
-                                blockModel.setProperty(index, "blockType", "paragraph")
-                                return
-                            }
-                            newBlockType = "todo"
-                        }
-                        
-                        let newBlock = {
-                            blockId: generateUuid(),
-                            blockType: newBlockType,
-                            content: "",
-                            depth: model.depth,
-                            checked: newChecked,
-                            collapsed: false,
-                            language: "",
-                            headingLevel: 0
-                        }
-                        blockModel.insert(index + 1, newBlock)
-                        
-                        // Focus the new block after a brief delay
-                        focusTimer.targetIndex = index + 1
-                        focusTimer.targetCursorPos = -1
-                        focusTimer.attemptsRemaining = 10
-                        focusTimer.start()
+                        root.handleEnterPressedAt(index)
                     }
                     
                     onBlockBackspaceOnEmpty: {

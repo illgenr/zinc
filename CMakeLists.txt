@@ -326,6 +326,7 @@ set(ZINC_QML_FILES
     qml/sync/SyncPreferences.qml
     qml/components/MarkdownEditor.qml
     qml/components/BlockEditor.qml
+    qml/components/BlockEditorEnterLogic.js
     qml/components/ScrollMath.js
     qml/components/Block.qml
     qml/components/SyncButtons.qml
@@ -538,6 +539,7 @@ if(ZINC_BUILD_TESTS)
 		        tests/qml/test_datastore_notebooks.cpp
 		        tests/qml/test_attachments_disk_storage.cpp
 		        tests/qml/test_block_editor_cursor_visibility_qml.cpp
+		        tests/qml/test_block_editor_enter_logic_qml.cpp
 		        tests/qml/test_block_model.cpp
 		        tests/qml/test_block_model_undo.cpp
 		        tests/qml/test_markdown_blocks.cpp
