@@ -332,9 +332,11 @@ set(ZINC_QML_FILES
     qml/components/BlockEditorEnterLogic.js
     qml/components/CursorMotionIndicatorLogic.js
     qml/components/ScrollMath.js
-    qml/components/Block.qml
-    qml/components/SyncButtons.qml
-    qml/components/blocks/ParagraphBlock.qml
+	    qml/components/Block.qml
+	    qml/components/SyncButtons.qml
+	    qml/components/DesktopSidebarActions.qml
+	    qml/components/MobileSidebarActions.qml
+	    qml/components/blocks/ParagraphBlock.qml
     qml/components/blocks/HeadingBlock.qml
     qml/components/blocks/TodoBlock.qml
     qml/components/blocks/ImageBlock.qml
@@ -564,9 +566,11 @@ if(ZINC_BUILD_TESTS)
 		        tests/qml/test_markdown_editor_qml.cpp
 		        tests/qml/test_slash_menu_qml.cpp
 		        tests/qml/test_image_block_interactions.cpp
-		        tests/qml/test_page_tree_keyboard_shortcut_qml.cpp
-		        tests/qml/test_sidebar_toggle_button_qml.cpp
-			    )
+			        tests/qml/test_page_tree_keyboard_shortcut_qml.cpp
+			        tests/qml/test_sidebar_toggle_button_qml.cpp
+			        tests/qml/test_desktop_sidebar_actions_qml.cpp
+			        tests/qml/test_mobile_sidebar_actions_qml.cpp
+				    )
 
     qt_add_qml_module(zinc_qml_tests
         URI zinc

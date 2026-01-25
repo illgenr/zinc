@@ -9,6 +9,7 @@ Item {
     property bool collapsed: false
     property bool showNewPageButton: true
     property bool showNewNotebookButton: true
+    property bool showSortButton: true
     property bool showExpandArrowsAlways: false
     property bool actionsAlwaysVisible: false
     property bool activateOnSingleTap: true
@@ -810,6 +811,7 @@ Item {
             Layout.fillWidth: true
             Layout.preferredHeight: 36
             spacing: ThemeManager.spacingSmall
+            visible: root.showNewPageButton || root.showNewNotebookButton || root.showSortButton
             
             Rectangle {
                 Layout.fillWidth: true
@@ -894,6 +896,7 @@ Item {
 
             Rectangle {                
                 Layout.preferredHeight: 36
+                visible: root.showSortButton
                 implicitWidth: sortButtonRow.implicitWidth + ThemeManager.spacingSmall + 20
                 radius: ThemeManager.radiusSmall
                 color: sortMouse.containsMouse || sortMouse.pressed ? ThemeManager.surfaceHover : ThemeManager.surface

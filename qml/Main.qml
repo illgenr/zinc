@@ -175,22 +175,6 @@ ApplicationWindow {
                         Layout.alignment: Qt.AlignVCenter
                     }
 
-                    ToolButton {
-                        Layout.alignment: Qt.AlignVCenter
-                        contentItem: Text {
-                            text: "+"
-                            color: ThemeManager.text
-                            font.pixelSize: 20
-                            horizontalAlignment: Text.AlignHCenter
-                            verticalAlignment: Text.AlignVCenter
-                        }
-                        background: Rectangle {
-                            radius: ThemeManager.radiusSmall
-                            color: parent.pressed ? ThemeManager.surfaceActive : "transparent"
-                        }
-                        onClicked: mobilePageTree.beginNewNotebook()
-                    }
-
                     SyncButtons {
                         Layout.alignment: Qt.AlignVCenter
                         autoSyncEnabled: SyncPreferences.autoSyncEnabled
@@ -205,70 +189,15 @@ ApplicationWindow {
                 anchors.fill: parent                                
                 spacing: ThemeManager.spacingSmall
 
-                RowLayout {
+                MobileSidebarActions {
                     Layout.fillWidth: true
                     Layout.margins: ThemeManager.spacingSmall
-                    Layout.preferredHeight: 48
-                    // Search bar
-                    Rectangle {
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: 48
-                        Layout.preferredWidth: 72
-                        Layout.alignment: Qt.AlignVCenter
-                        Layout.margins: ThemeManager.spacingMedium
-                        radius: ThemeManager.radiusMedium
-                        color: ThemeManager.surfaceHover
-                        
-                        RowLayout {
-                            anchors.fill: parent
-                            anchors.margins: ThemeManager.spacingSmall
-                            
-                            Text {
-                                text: "🔍"
-                                font.pixelSize: ThemeManager.fontSizeNormal
-                            }
-                            
-                            Text {
-                                Layout.fillWidth: true
-                                text: "Find"                                
-                                color: ThemeManager.text
-                                font.weight: Font.Medium
-                                font.pixelSize: ThemeManager.fontSizeNormal
-                            }
-                        }
-                        
-                        MouseArea {
-                            anchors.fill: parent
-                            onClicked: searchDialog.open()
-                        }
-                    }
+                    sortMode: mobilePageTree.sortMode
 
-                    Button {
-                        Layout.fillWidth: true
-                        Layout.margins: ThemeManager.spacingSmall
-                        Layout.alignment: Qt.AlignVCenter
-                        Layout.preferredWidth: 72
-                        text: "+ New\nPage"
-
-                        background: Rectangle {
-                            implicitHeight: 44
-                            radius: ThemeManager.radiusSmall
-                            color: parent.pressed ? ThemeManager.accentHover : ThemeManager.accent
-                        }
-
-                        contentItem: Text {
-                            text: parent.text
-                            color: "white"
-                            font.pixelSize: ThemeManager.fontSizeNormal
-                            font.weight: Font.Medium
-                            horizontalAlignment: Text.AlignHCenter
-                            verticalAlignment: Text.AlignVCenter
-                        }
-
-                        onClicked: {
-                            mobilePageTree.createPage("")
-                        }
-                    }
+                    onNewPageRequested: mobilePageTree.createPage("")
+                    onFindRequested: searchDialog.open()
+                    onNewNotebookRequested: mobilePageTree.beginNewNotebook()
+                    onSortModeRequested: function(mode) { mobilePageTree.sortMode = mode }
                 }
 
                 // Notes list
@@ -278,6 +207,8 @@ ApplicationWindow {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     showNewPageButton: false
+                    showNewNotebookButton: false
+                    showSortButton: false
                     showExpandArrowsAlways: true
                     actionsAlwaysVisible: true
                     actionButtonSize: 44
@@ -585,88 +516,15 @@ ApplicationWindow {
 	                    }
                 }
                 
-                // New Page + Find row
-                RowLayout {
+                DesktopSidebarActions {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: 32
-                    spacing: ThemeManager.spacingSmall
-                    visible: !sidebarCollapsed
+                    collapsed: sidebarCollapsed
+                    sortMode: pageTree.sortMode
 
-                    Rectangle {                        
-                        Layout.preferredHeight: 32
-                        implicitWidth: newPageButtonRow.implicitWidth + ThemeManager.spacingSmall
-                        radius: ThemeManager.radiusMedium
-                        color: newPageMouse.containsMouse || newPageMouse.pressed ? ThemeManager.surfaceHover : ThemeManager.surface
-                        border.width: 1
-                        border.color: ThemeManager.border
-
-                        RowLayout {
-                            id: newPageButtonRow
-                            implicitWidth:  newPageText.implicitWidth
-                            anchors.verticalCenter: parent.verticalCenter
-                            anchors.horizontalCenter: parent.horizontalCenter
-                            spacing: ThemeManager.spacingSmall
-                            
-                            Text {
-                                id: newPageText                                
-                                text: "🗎 New Page"
-                                color: ThemeManager.text
-                                font.pixelSize: ThemeManager.fontSizeNormal
-                                elide: Text.ElideRight
-                            }
-                        }
-
-                        ToolTip.visible: newPageMouse.containsMouse
-                        ToolTip.text: "New page (Ctrl+N)"
-
-                        MouseArea {
-                            id: newPageMouse
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: pageTree.createPage("")
-                        }
-                    }
-
-                    Rectangle {
-                        implicitWidth: findButtonRow.implicitWidth + ThemeManager.spacingSmall * 2
-                        Layout.preferredHeight: 32
-                        radius: ThemeManager.radiusMedium                        
-                        color: findMouse.containsMouse || findMouse.pressed ? ThemeManager.surfaceActive : ThemeManager.surfaceHover
-
-                        RowLayout {
-                            id: findButtonRow
-                            implicitWidth: findIcon.implicitWidth + findButtonText.implicitWidth + 20                            
-                            anchors.verticalCenter: parent.verticalCenter
-                            anchors.horizontalCenter: parent.horizontalCenter
-                            spacing: ThemeManager.spacingSmall
-
-                            Text {
-                                id: findIcon
-                                text: "🔍"
-                                font.pixelSize: ThemeManager.fontSizeSmall
-                            }
-
-                            Text {
-                                id: findButtonText                                
-                                text: "Find"
-                                color: ThemeManager.textMuted
-                                font.pixelSize: ThemeManager.fontSizeSmall
-                                elide: Text.ElideRight
-                            }
-                        }
-
-                        ToolTip.visible: findMouse.containsMouse
-                        ToolTip.text: "Find (Ctrl+F)"
-
-                        MouseArea {
-                            id: findMouse
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: searchDialog.open()
-                        }
-                    }
+                    onNewPageRequested: pageTree.createPage("")
+                    onFindRequested: searchDialog.open()
+                    onNewNotebookRequested: pageTree.beginNewNotebook()
+                    onSortModeRequested: function(mode) { pageTree.sortMode = mode }
                 }
 
                 // Page tree
@@ -677,7 +535,8 @@ ApplicationWindow {
                     Layout.fillHeight: true
                     visible: !sidebarCollapsed
                     showNewPageButton: false
-                    showNewNotebookButton: true
+                    showNewNotebookButton: false
+                    showSortButton: false
 
                     onNewNotebookRequested: mobilePageTree.beginNewNotebook()
 
