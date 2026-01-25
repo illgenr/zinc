@@ -1,6 +1,8 @@
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Dialogs
 import QtQuick.Layouts
+import Qt.labs.folderlistmodel
 import zinc
 
 Dialog {
@@ -882,6 +884,71 @@ Dialog {
     
     // Data Settings
     component DataSettings: SettingsPage {
+        property ListModel notebooksModel: ListModel {}
+        property bool exportAllNotebooks: true
+        property bool exportIncludeAttachments: true
+        property url exportDestinationFolder: ""
+        property int exportFormatIndex: 0 // 0=markdown, 1=html
+        property string exportStatus: ""
+        property url folderPickerCurrentFolder: ""
+        property url folderPickerSelectedFolder: ""
+
+        function refreshNotebooks() {
+            notebooksModel.clear()
+            const notebooks = DataStore ? DataStore.getAllNotebooks() : []
+            for (let i = 0; i < notebooks.length; i++) {
+                const nb = notebooks[i] || {}
+                if (!nb.notebookId) continue
+                notebooksModel.append({
+                    notebookId: nb.notebookId,
+                    name: nb.name || "Untitled Notebook",
+                    selected: true
+                })
+            }
+        }
+
+        function selectedNotebookIds() {
+            const ids = []
+            for (let i = 0; i < notebooksModel.count; i++) {
+                const nb = notebooksModel.get(i)
+                if (nb.selected) ids.push(nb.notebookId)
+            }
+            return ids
+        }
+
+        function canExport() {
+            if (!exportDestinationFolder || exportDestinationFolder === "") return false
+            if (exportAllNotebooks) return true
+            return selectedNotebookIds().length > 0
+        }
+
+        function ensureExportDestinationFolder() {
+            const hasFolder = exportDestinationFolder && exportDestinationFolder !== "" &&
+                exportDestinationFolder.toString().indexOf("file:") === 0
+            if (hasFolder) return
+            exportDestinationFolder = DataStore ? DataStore.exportLastFolder() : ""
+        }
+
+        function openFolderPicker() {
+            ensureExportDestinationFolder()
+            folderPickerCurrentFolder = exportDestinationFolder
+            folderPickerSelectedFolder = ""
+            exportFolderPickerDialog.open()
+        }
+
+        Component.onCompleted: {
+            refreshNotebooks()
+            ensureExportDestinationFolder()
+        }
+
+        property Connections _dataStoreConnections: Connections {
+            target: DataStore
+            function onNotebooksChanged() { refreshNotebooks() }
+            function onError(message) {
+                exportStatus = message
+            }
+        }
+
         SettingsSection {
             title: "Database"
             
@@ -926,6 +993,38 @@ Dialog {
                 }
             }
         }
+
+        SettingsSection {
+            title: "Export"
+
+            Button {
+                Layout.fillWidth: true
+                text: "Export Notebooks…"
+
+                background: Rectangle {
+                    implicitHeight: 40
+                    radius: ThemeManager.radiusSmall
+                    color: parent.pressed ? ThemeManager.surfaceActive : ThemeManager.surfaceHover
+                    border.width: 1
+                    border.color: ThemeManager.border
+                }
+
+                contentItem: Text {
+                    text: parent.text
+                    color: ThemeManager.text
+                    font.pixelSize: ThemeManager.fontSizeNormal
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
+
+                onClicked: {
+                    exportStatus = ""
+                    refreshNotebooks()
+                    ensureExportDestinationFolder()
+                    exportDialog.open()
+                }
+            }
+        }
         
         SettingsSection {
             title: "⚠️ Danger Zone"
@@ -951,6 +1050,286 @@ Dialog {
                 }
                 
                 onClicked: resetConfirmDialog.open()
+            }
+        }
+
+        property Dialog _exportDialog: Dialog {
+            id: exportDialog
+            title: "Export Notebooks"
+            anchors.centerIn: parent
+            modal: true
+            standardButtons: Dialog.NoButton
+
+            width: isMobile ? parent.width * 0.95 : Math.min(520, parent.width * 0.9)
+
+            background: Rectangle {
+                color: ThemeManager.surface
+                border.width: isMobile ? 0 : 1
+                border.color: ThemeManager.border
+                radius: ThemeManager.radiusLarge
+            }
+
+            contentItem: ColumnLayout {
+                anchors.margins: ThemeManager.spacingMedium
+                spacing: ThemeManager.spacingMedium
+
+                SettingsRow {
+                    label: "Format"
+                    ComboBox {
+                        width: parent.width
+                        model: ["Markdown (.md)", "HTML (.html)"]
+                        currentIndex: exportFormatIndex
+                        onCurrentIndexChanged: exportFormatIndex = currentIndex
+                    }
+                }
+
+                SettingsRow {
+                    label: "Notebooks"
+                    CheckBox {
+                        text: "All notebooks"
+                        checked: exportAllNotebooks
+                        onToggled: exportAllNotebooks = checked
+                    }
+                }
+
+                SettingsRow {
+                    label: "Attachments"
+                    CheckBox {
+                        text: "Include attachments"
+                        checked: exportIncludeAttachments
+                        onToggled: exportIncludeAttachments = checked
+                    }
+                }
+
+                ScrollView {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 180
+                    visible: !exportAllNotebooks
+                    clip: true
+
+                    ColumnLayout {
+                        width: parent.width
+                        spacing: 4
+
+                        Repeater {
+                            model: notebooksModel
+                            delegate: CheckBox {
+                                text: model.name
+                                checked: model.selected
+                                onToggled: notebooksModel.setProperty(index, "selected", checked)
+                            }
+                        }
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: ThemeManager.spacingSmall
+
+                    Button {
+                        text: "Choose Folder…"
+                        onClicked: openFolderPicker()
+                    }
+
+                    Text {
+                        Layout.fillWidth: true
+                        text: exportDestinationFolder && exportDestinationFolder !== ""
+                            ? exportDestinationFolder.toString().replace("file://", "")
+                            : "No folder selected"
+                        color: ThemeManager.textSecondary
+                        font.pixelSize: ThemeManager.fontSizeSmall
+                        elide: Text.ElideMiddle
+                    }
+                }
+
+                Text {
+                    Layout.fillWidth: true
+                    visible: exportStatus && exportStatus.length > 0
+                    text: exportStatus
+                    color: ThemeManager.danger
+                    font.pixelSize: ThemeManager.fontSizeSmall
+                    wrapMode: Text.Wrap
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: ThemeManager.spacingSmall
+
+                    Item { Layout.fillWidth: true }
+
+                    Button {
+                        text: "Cancel"
+                        onClicked: exportDialog.close()
+                    }
+
+                    Button {
+                        text: "Export"
+                        enabled: canExport()
+                        onClicked: {
+                            if (!DataStore) return
+                            const ids = exportAllNotebooks ? [] : selectedNotebookIds()
+                            const fmt = exportFormatIndex === 0 ? "markdown" : "html"
+                            DataStore.setExportLastFolder(exportDestinationFolder)
+                            const ok = DataStore.exportNotebooks(ids, exportDestinationFolder, fmt, exportIncludeAttachments)
+                            if (ok) {
+                                exportDialog.close()
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        property Dialog _exportFolderPickerDialog: Dialog {
+            id: exportFolderPickerDialog
+            title: "Choose Export Folder"
+            anchors.centerIn: parent
+            modal: true
+            standardButtons: Dialog.NoButton
+
+            width: isMobile ? parent.width * 0.95 : Math.min(560, parent.width * 0.9)
+            height: isMobile ? parent.height * 0.85 : Math.min(520, parent.height * 0.85)
+
+            background: Rectangle {
+                color: ThemeManager.surface
+                border.width: isMobile ? 0 : 1
+                border.color: ThemeManager.border
+                radius: ThemeManager.radiusLarge
+            }
+
+            contentItem: ColumnLayout {
+                anchors.margins: ThemeManager.spacingMedium
+                spacing: ThemeManager.spacingSmall
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: ThemeManager.spacingSmall
+
+                    Button {
+                        text: "Up"
+                        enabled: DataStore && folderPickerCurrentFolder !== "" &&
+                            DataStore.parentFolder(folderPickerCurrentFolder).toString() !== folderPickerCurrentFolder.toString()
+                        onClicked: {
+                            if (!DataStore) return
+                            folderPickerCurrentFolder = DataStore.parentFolder(folderPickerCurrentFolder)
+                            folderPickerSelectedFolder = ""
+                        }
+                    }
+
+                    Text {
+                        Layout.fillWidth: true
+                        text: folderPickerCurrentFolder && folderPickerCurrentFolder !== ""
+                            ? folderPickerCurrentFolder.toString().replace("file://", "")
+                            : ""
+                        color: ThemeManager.textSecondary
+                        font.pixelSize: ThemeManager.fontSizeSmall
+                        elide: Text.ElideMiddle
+                    }
+                }
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    color: ThemeManager.background
+                    radius: ThemeManager.radiusSmall
+                    border.width: 1
+                    border.color: ThemeManager.border
+
+                    ListView {
+                        id: folderListView
+                        anchors.fill: parent
+                        anchors.margins: ThemeManager.spacingSmall
+                        clip: true
+                        model: FolderListModel {
+                            folder: folderPickerCurrentFolder
+                            showDirs: true
+                            showFiles: false
+                            sortField: FolderListModel.Name
+                        }
+
+                        delegate: Rectangle {
+                            readonly property string dirUrl: "file://" + filePath
+                            width: ListView.view.width
+                            height: 36
+                            radius: ThemeManager.radiusSmall
+                            color: (folderPickerSelectedFolder && folderPickerSelectedFolder.toString() === dirUrl)
+                                ? ThemeManager.surfaceHover
+                                : (rowMouse.containsMouse ? ThemeManager.surfaceHover : "transparent")
+
+                            RowLayout {
+                                anchors.fill: parent
+                                anchors.leftMargin: ThemeManager.spacingSmall
+                                anchors.rightMargin: ThemeManager.spacingSmall
+                                spacing: ThemeManager.spacingSmall
+
+                                Text {
+                                    text: "📁"
+                                    font.pixelSize: ThemeManager.fontSizeSmall
+                                }
+
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: fileName
+                                    color: ThemeManager.text
+                                    font.pixelSize: ThemeManager.fontSizeSmall
+                                    elide: Text.ElideRight
+                                }
+                            }
+
+                            MouseArea {
+                                id: rowMouse
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: folderPickerSelectedFolder = dirUrl
+                                onDoubleClicked: {
+                                    folderPickerCurrentFolder = dirUrl
+                                    folderPickerSelectedFolder = ""
+                                }
+                            }
+                        }
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: ThemeManager.spacingSmall
+
+                    Text {
+                        Layout.fillWidth: true
+                        text: folderPickerSelectedFolder && folderPickerSelectedFolder !== ""
+                            ? ("Selected: " + folderPickerSelectedFolder.toString().replace("file://", ""))
+                            : "Selected: (current folder)"
+                        color: ThemeManager.textSecondary
+                        font.pixelSize: ThemeManager.fontSizeSmall
+                        elide: Text.ElideMiddle
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: ThemeManager.spacingSmall
+
+                    Item { Layout.fillWidth: true }
+
+                    Button {
+                        text: "Cancel"
+                        onClicked: exportFolderPickerDialog.close()
+                    }
+
+                    Button {
+                        text: "Export"
+                        enabled: folderPickerCurrentFolder && folderPickerCurrentFolder !== ""
+                        onClicked: {
+                            const chosen = (folderPickerSelectedFolder && folderPickerSelectedFolder !== "")
+                                ? folderPickerSelectedFolder
+                                : folderPickerCurrentFolder
+                            exportDestinationFolder = chosen
+                            if (DataStore) DataStore.setExportLastFolder(chosen)
+                            exportFolderPickerDialog.close()
+                        }
+                    }
+                }
             }
         }
     }

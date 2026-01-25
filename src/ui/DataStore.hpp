@@ -3,6 +3,7 @@
 #include <QObject>
 #include <QQmlEngine>
 #include <QString>
+#include <QUrl>
 #include <QVariantList>
 #include <QVariantMap>
 #include <QSqlDatabase>
@@ -151,6 +152,27 @@ public:
     Q_INVOKABLE bool resetDatabase();
     Q_INVOKABLE bool runMigrations();
     Q_INVOKABLE int schemaVersion() const;
+
+    // Export folder preferences
+    // - defaults to user's home directory when unset/invalid
+    // - stored in settings so the picker remembers the last location
+    Q_INVOKABLE QUrl exportLastFolder() const;
+    Q_INVOKABLE void setExportLastFolder(const QUrl& folder);
+    Q_INVOKABLE QUrl parentFolder(const QUrl& folder) const;
+
+    // Export
+    // - notebookIds empty => export all notebooks
+    // - destinationFolder must be a local file URL
+    // - format: "markdown" | "html"
+    Q_INVOKABLE bool exportNotebooks(const QVariantList& notebookIds,
+                                     const QUrl& destinationFolder,
+                                     const QString& format);
+    // When includeAttachments=true, attachment files referenced from exported pages are copied
+    // into an "attachments/" folder alongside the exported pages and links are rewritten.
+    Q_INVOKABLE bool exportNotebooks(const QVariantList& notebookIds,
+                                     const QUrl& destinationFolder,
+                                     const QString& format,
+                                     bool includeAttachments);
     
 signals:
     void pagesChanged();

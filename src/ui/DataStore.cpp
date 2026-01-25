@@ -15,12 +15,16 @@
 #include <QSettings>
 #include <QSet>
 #include <QDebug>
+#include <QHash>
 #include <QRegularExpression>
+#include <QStringConverter>
+#include <QTextStream>
 #include <QUuid>
 #include <algorithm>
 #include <optional>
 
 #include "core/three_way_merge.hpp"
+#include "ui/Cmark.hpp"
 
 namespace zinc::ui {
 
@@ -34,6 +38,7 @@ constexpr const char* kSettingsEditorMode = "ui/editor_mode";
 constexpr const char* kSettingsLastViewedCursorPageId = "ui/last_viewed_cursor_page_id";
 constexpr const char* kSettingsLastViewedCursorBlockIndex = "ui/last_viewed_cursor_block_index";
 constexpr const char* kSettingsLastViewedCursorPos = "ui/last_viewed_cursor_pos";
+constexpr const char* kSettingsExportLastFolder = "ui/export_last_folder";
 constexpr int kDefaultDeletedPagesRetention = 100;
 constexpr int kMaxDeletedPagesRetention = 10000;
 constexpr auto kDefaultPagesSeedTimestamp = "1900-01-01 00:00:00.000";
@@ -56,6 +61,183 @@ int normalize_retention_limit(int limit) {
     if (limit < 0) return 0;
     if (limit > kMaxDeletedPagesRetention) return kMaxDeletedPagesRetention;
     return limit;
+}
+
+QString normalize_export_format(const QString& format) {
+    const auto f = format.trimmed().toLower();
+    if (f == QStringLiteral("markdown") || f == QStringLiteral("md")) return QStringLiteral("markdown");
+    if (f == QStringLiteral("html") || f == QStringLiteral("htm")) return QStringLiteral("html");
+    return {};
+}
+
+QString sanitize_path_component(const QString& input) {
+    const auto trimmed = input.trimmed();
+    if (trimmed.isEmpty()) return {};
+
+    QString out;
+    out.reserve(trimmed.size());
+    bool lastUnderscore = false;
+    for (const auto ch : trimmed) {
+        const bool alnum = ch.isLetterOrNumber();
+        const bool allowedPunct = (ch == QLatin1Char('_')) || (ch == QLatin1Char('-')) || (ch == QLatin1Char(' '));
+        if (alnum) {
+            out += ch;
+            lastUnderscore = false;
+            continue;
+        }
+        if (allowedPunct) {
+            if (!lastUnderscore) {
+                out += QLatin1Char('_');
+                lastUnderscore = true;
+            }
+            continue;
+        }
+        if (!lastUnderscore) {
+            out += QLatin1Char('_');
+            lastUnderscore = true;
+        }
+    }
+
+    out = out.trimmed();
+    while (out.endsWith(QLatin1Char('_'))) out.chop(1);
+    while (out.startsWith(QLatin1Char('_'))) out.remove(0, 1);
+    if (out.size() > 80) out = out.left(80);
+    return out;
+}
+
+bool write_text_file(const QString& filePath, const QString& text, QString* outError) {
+    QSaveFile f(filePath);
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        if (outError) *outError = f.errorString();
+        return false;
+    }
+    QTextStream stream(&f);
+    stream.setEncoding(QStringConverter::Utf8);
+    stream << text;
+    stream.flush();
+    if (stream.status() != QTextStream::Ok) {
+        if (outError) *outError = QStringLiteral("Write failed");
+        return false;
+    }
+    if (!f.commit()) {
+        if (outError) *outError = f.errorString();
+        return false;
+    }
+    return true;
+}
+
+QString html_document_for_page(const QString& title, const QString& markdown) {
+    const Cmark cmark;
+    const auto render_task_list_checkboxes = [](const QString& html) -> QString {
+        if (html.isEmpty()) return html;
+
+        static const QRegularExpression re(QStringLiteral(R"(<li>(\s*(?:<p>)?)\s*\[( |x|X)\]\s*)"));
+
+        QString out;
+        out.reserve(html.size());
+
+        int last = 0;
+        auto it = re.globalMatch(html);
+        while (it.hasNext()) {
+            const auto m = it.next();
+            out += html.mid(last, m.capturedStart(0) - last);
+
+            const auto prefix = m.captured(1);
+            const auto marker = m.captured(2);
+            const bool checked = (marker == QStringLiteral("x")) || (marker == QStringLiteral("X"));
+            const auto checkbox = checked
+                ? QStringLiteral("<input type=\"checkbox\" checked disabled onclick=\"return false\" /> ")
+                : QStringLiteral("<input type=\"checkbox\" disabled onclick=\"return false\" /> ");
+
+            out += QStringLiteral("<li>") + prefix + checkbox;
+            last = m.capturedEnd(0);
+        }
+        out += html.mid(last);
+        return out;
+    };
+
+    auto body = cmark.toHtml(markdown);
+    body = render_task_list_checkboxes(body);
+    return QStringLiteral(
+               "<!doctype html>\n"
+               "<html>\n"
+               "<head>\n"
+               "  <meta charset=\"utf-8\" />\n"
+               "  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />\n"
+               "  <title>%1</title>\n"
+               "  <style>\n"
+               "    :root { color-scheme: light dark; }\n"
+               "    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 2rem; max-width: 900px; line-height: 1.5; }\n"
+               "    img { max-width: 100%%; height: auto; }\n"
+               "    pre { padding: 0.75rem 1rem; overflow: auto; border-radius: 8px; background: rgba(127,127,127,0.12); }\n"
+               "    code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace; }\n"
+               "    a { color: #2f7cff; }\n"
+               "    input[type=checkbox] { margin-right: 0.5rem; }\n"
+               "  </style>\n"
+               "</head>\n"
+               "<body>\n"
+               "%2\n"
+               "</body>\n"
+               "</html>\n")
+        .arg(title.toHtmlEscaped(), body);
+}
+
+QString attachment_extension_for_mime(const QString& mime) {
+    const auto m = mime.trimmed().toLower();
+    if (m == QStringLiteral("image/png")) return QStringLiteral("png");
+    if (m == QStringLiteral("image/jpeg")) return QStringLiteral("jpg");
+    if (m == QStringLiteral("image/jpg")) return QStringLiteral("jpg");
+    if (m == QStringLiteral("image/webp")) return QStringLiteral("webp");
+    if (m == QStringLiteral("image/gif")) return QStringLiteral("gif");
+    if (m == QStringLiteral("image/bmp")) return QStringLiteral("bmp");
+    if (m == QStringLiteral("image/svg+xml")) return QStringLiteral("svg");
+
+    const auto slash = m.indexOf(QLatin1Char('/'));
+    if (slash < 0) return QStringLiteral("bin");
+    auto ext = m.mid(slash + 1);
+    const auto plus = ext.indexOf(QLatin1Char('+'));
+    if (plus >= 0) ext = ext.left(plus);
+    ext = sanitize_path_component(ext).toLower();
+    if (ext.isEmpty()) return QStringLiteral("bin");
+    return ext;
+}
+
+QSet<QString> collect_attachment_ids_from_markdown(const QString& markdown) {
+    QSet<QString> out;
+    if (markdown.isEmpty()) return out;
+    static const QRegularExpression re(QStringLiteral(R"(image://attachments/([0-9a-fA-F-]{36}))"));
+    auto it = re.globalMatch(markdown);
+    while (it.hasNext()) {
+        const auto m = it.next();
+        const auto id = m.captured(1);
+        if (!id.isEmpty()) out.insert(id);
+    }
+    return out;
+}
+
+QString rewrite_attachment_urls_in_markdown(const QString& markdown, const QHash<QString, QString>& idToRelativePath) {
+    if (markdown.isEmpty()) return markdown;
+    if (idToRelativePath.isEmpty()) return markdown;
+
+    static const QRegularExpression re(QStringLiteral(R"(image://attachments/([0-9a-fA-F-]{36}))"));
+
+    QString out;
+    out.reserve(markdown.size());
+
+    int last = 0;
+    auto it = re.globalMatch(markdown);
+    while (it.hasNext()) {
+        const auto m = it.next();
+        out += markdown.mid(last, m.capturedStart(0) - last);
+
+        const auto id = m.captured(1);
+        const auto mapped = idToRelativePath.value(id);
+        out += mapped.isEmpty() ? m.captured(0) : mapped;
+
+        last = m.capturedEnd(0);
+    }
+    out += markdown.mid(last);
+    return out;
 }
 
 int deleted_pages_retention_limit() {
@@ -98,6 +280,11 @@ int last_viewed_cursor_block_index() {
 int last_viewed_cursor_pos() {
     QSettings settings;
     return settings.value(QString::fromLatin1(kSettingsLastViewedCursorPos), -1).toInt();
+}
+
+QString export_last_folder_path() {
+    QSettings settings;
+    return settings.value(QString::fromLatin1(kSettingsExportLastFolder), QString{}).toString();
 }
 
 int normalize_cursor_int(int value) {
@@ -3536,6 +3723,186 @@ bool DataStore::runMigrations() {
     return true;
 }
 
+bool DataStore::exportNotebooks(const QVariantList& notebookIds,
+                                const QUrl& destinationFolder,
+                                const QString& format) {
+    return exportNotebooks(notebookIds, destinationFolder, format, false);
+}
+
+bool DataStore::exportNotebooks(const QVariantList& notebookIds,
+                                const QUrl& destinationFolder,
+                                const QString& format,
+                                bool includeAttachments) {
+    if (!m_ready) {
+        emit error(QStringLiteral("Export failed: database not initialized"));
+        return false;
+    }
+
+    const auto normalizedFormat = normalize_export_format(format);
+    if (normalizedFormat.isEmpty()) {
+        emit error(QStringLiteral("Export failed: unsupported format"));
+        return false;
+    }
+
+    if (!destinationFolder.isValid() || !destinationFolder.isLocalFile()) {
+        emit error(QStringLiteral("Export failed: destination must be a local folder"));
+        return false;
+    }
+
+    const auto rootPath = QDir(destinationFolder.toLocalFile()).absolutePath();
+    if (rootPath.isEmpty()) {
+        emit error(QStringLiteral("Export failed: invalid destination folder"));
+        return false;
+    }
+    if (!QDir().mkpath(rootPath)) {
+        emit error(QStringLiteral("Export failed: could not create destination folder"));
+        return false;
+    }
+
+    const auto resolvedNotebookIds = [&]() -> QStringList {
+        if (!notebookIds.isEmpty()) {
+            QStringList ids;
+            ids.reserve(notebookIds.size());
+            for (const auto& v : notebookIds) {
+                const auto id = v.toString();
+                if (!id.isEmpty()) ids.append(id);
+            }
+            return ids;
+        }
+        const auto notebooks = getAllNotebooks();
+        QStringList ids;
+        ids.reserve(notebooks.size());
+        for (const auto& entry : notebooks) {
+            const auto nb = entry.toMap();
+            const auto id = nb.value(QStringLiteral("notebookId")).toString();
+            if (!id.isEmpty()) ids.append(id);
+        }
+        return ids;
+    }();
+
+    const auto extension = (normalizedFormat == QStringLiteral("html")) ? QStringLiteral("html") : QStringLiteral("md");
+
+    for (const auto& notebookId : resolvedNotebookIds) {
+        const auto nb = getNotebook(notebookId);
+        const auto notebookNameRaw = nb.value(QStringLiteral("name")).toString();
+        const auto notebookName = sanitize_path_component(notebookNameRaw).isEmpty()
+            ? QStringLiteral("Notebook")
+            : sanitize_path_component(notebookNameRaw);
+
+        const auto notebookDirName = notebookName + QStringLiteral("_") + notebookId.left(8);
+        const auto notebookDirPath = QDir(rootPath).filePath(notebookDirName);
+        if (!QDir().mkpath(notebookDirPath)) {
+            emit error(QStringLiteral("Export failed: could not create notebook folder"));
+            return false;
+        }
+
+        QSqlQuery q(m_db);
+        q.prepare(R"SQL(
+            SELECT id, title, content_markdown, sort_order, created_at
+            FROM pages
+            WHERE notebook_id = ?
+            ORDER BY sort_order, created_at
+        )SQL");
+        q.addBindValue(notebookId);
+        if (!q.exec()) {
+            emit error(QStringLiteral("Export failed: could not query pages"));
+            return false;
+        }
+
+        struct PageRow {
+            QString pageId;
+            QString title;
+            QString markdown;
+            int sortOrder = 0;
+        };
+
+        QList<PageRow> pages;
+        QSet<QString> attachmentIds;
+
+        while (q.next()) {
+            PageRow row;
+            row.pageId = q.value(0).toString();
+            row.title = normalize_title(q.value(1));
+            row.markdown = q.value(2).toString();
+            row.sortOrder = q.value(3).toInt();
+            pages.append(row);
+            if (includeAttachments) {
+                attachmentIds.unite(collect_attachment_ids_from_markdown(row.markdown));
+            }
+        }
+
+        QHash<QString, QString> attachmentIdToRelativePath;
+        if (includeAttachments && !attachmentIds.isEmpty()) {
+            const auto attachmentsDirPath = QDir(notebookDirPath).filePath(QStringLiteral("attachments"));
+            if (!QDir().mkpath(attachmentsDirPath)) {
+                emit error(QStringLiteral("Export failed: could not create attachments folder"));
+                return false;
+            }
+
+            QSqlQuery a(m_db);
+            a.prepare(QStringLiteral("SELECT mime_type, file_name FROM attachments WHERE id = ?"));
+
+            for (const auto& attachmentId : attachmentIds) {
+                a.bindValue(0, attachmentId);
+                if (!a.exec() || !a.next()) {
+                    emit error(QStringLiteral("Export failed: missing attachment %1").arg(attachmentId));
+                    return false;
+                }
+                const auto mime = a.value(0).toString();
+                const auto fileName = a.value(1).toString().isEmpty() ? attachmentId : a.value(1).toString();
+
+                const auto srcPath = attachment_file_path_for_id(fileName);
+                const auto bytes = read_file_bytes(srcPath);
+                if (!bytes || bytes->isEmpty()) {
+                    emit error(QStringLiteral("Export failed: missing attachment file %1").arg(attachmentId));
+                    return false;
+                }
+
+                const auto ext = attachment_extension_for_mime(mime);
+                const auto outFileName = attachmentId + QLatin1Char('.') + ext;
+                const auto dstPath = QDir(attachmentsDirPath).filePath(outFileName);
+                if (!write_bytes_atomic(dstPath, *bytes)) {
+                    emit error(QStringLiteral("Export failed: could not write attachment %1").arg(attachmentId));
+                    return false;
+                }
+
+                attachmentIdToRelativePath.insert(attachmentId, QStringLiteral("attachments/%1").arg(outFileName));
+                a.finish();
+            }
+        }
+
+        for (const auto& row : pages) {
+            const auto pageId = row.pageId;
+            const auto title = row.title;
+            const auto markdown = includeAttachments
+                ? rewrite_attachment_urls_in_markdown(row.markdown, attachmentIdToRelativePath)
+                : row.markdown;
+
+            const auto fileTitle = sanitize_path_component(title).isEmpty()
+                ? QStringLiteral("Untitled")
+                : sanitize_path_component(title);
+            const auto fileName = QStringLiteral("%1-%2-%3.%4")
+                                      .arg(row.sortOrder, 4, 10, QLatin1Char('0'))
+                                      .arg(fileTitle)
+                                      .arg(pageId.left(8))
+                                      .arg(extension);
+            const auto filePath = QDir(notebookDirPath).filePath(fileName);
+
+            const auto payload = (normalizedFormat == QStringLiteral("html"))
+                ? html_document_for_page(title, markdown)
+                : (markdown.endsWith(QLatin1Char('\n')) ? markdown : (markdown + QLatin1Char('\n')));
+
+            QString err;
+            if (!write_text_file(filePath, payload, &err)) {
+                emit error(QStringLiteral("Export failed: %1").arg(err));
+                return false;
+            }
+        }
+    }
+
+    return true;
+}
+
 QString DataStore::ensureDefaultNotebook() {
     if (!m_ready) return QString::fromLatin1(kDefaultNotebookId);
 
@@ -3565,6 +3932,39 @@ int DataStore::schemaVersion() const {
         return query.value(0).toInt();
     }
     return -1;
+}
+
+QUrl DataStore::exportLastFolder() const {
+    const auto saved = export_last_folder_path();
+    if (!saved.isEmpty()) {
+        const QDir d(saved);
+        if (d.exists()) {
+            return QUrl::fromLocalFile(d.absolutePath());
+        }
+    }
+    return QUrl::fromLocalFile(QDir::homePath());
+}
+
+void DataStore::setExportLastFolder(const QUrl& folder) {
+    QSettings settings;
+    if (!folder.isValid() || !folder.isLocalFile()) {
+        settings.remove(QString::fromLatin1(kSettingsExportLastFolder));
+        return;
+    }
+    const auto path = QDir(folder.toLocalFile()).absolutePath();
+    settings.setValue(QString::fromLatin1(kSettingsExportLastFolder), path);
+}
+
+QUrl DataStore::parentFolder(const QUrl& folder) const {
+    if (!folder.isValid() || !folder.isLocalFile()) {
+        return QUrl::fromLocalFile(QDir::homePath());
+    }
+    const auto path = QDir(folder.toLocalFile()).absolutePath();
+    QDir dir(path);
+    if (!dir.cdUp()) {
+        return QUrl::fromLocalFile(path);
+    }
+    return QUrl::fromLocalFile(dir.absolutePath());
 }
 
 } // namespace zinc::ui
