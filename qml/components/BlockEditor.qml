@@ -5,6 +5,7 @@ import zinc
 import Zinc 1.0
 import "ScrollMath.js" as ScrollMath
 import "BlockEditorEnterLogic.js" as EnterLogic
+import "CursorMotionIndicatorLogic.js" as CursorMotionLogic
 
 FocusScope {
     id: root
@@ -38,6 +39,20 @@ FocusScope {
         interval: 250
         repeat: false
         onTriggered: root.keyboardSelecting = false
+    }
+
+    property bool cursorMotionIndicatorActive: false
+
+    Timer {
+        id: cursorMotionIndicatorTimer
+        interval: 250
+        repeat: false
+        onTriggered: root.cursorMotionIndicatorActive = false
+    }
+
+    function armCursorMotionIndicator() {
+        cursorMotionIndicatorActive = true
+        cursorMotionIndicatorTimer.restart()
     }
     
     // UUID generator (Qt.uuidCreate requires Qt 6.4+)
@@ -1073,6 +1088,10 @@ FocusScope {
     function handleEditorKeyEvent(event) {
         const mod = event.modifiers
         const ctrl = (mod & Qt.ControlModifier) || (mod & Qt.MetaModifier)
+
+        if (CursorMotionLogic.shouldArm(mod, event.key)) {
+            root.armCursorMotionIndicator()
+        }
 
         if ((mod & Qt.ShiftModifier) && (event.key === Qt.Key_Up || event.key === Qt.Key_Down)) {
             event.accepted = true

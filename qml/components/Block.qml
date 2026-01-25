@@ -58,6 +58,17 @@ Item {
         y: 0
     }
 
+    Rectangle {
+        id: localCursorIndicator
+        objectName: "localCursorIndicator"
+        visible: false
+        color: ThemeManager.text
+        width: 2
+        height: 0
+        x: 0
+        y: 0
+    }
+
     function refreshRemoteCursorIndicator() {
         if (!root.editor || !root.textControl) {
             remoteCursorIndicator.visible = false
@@ -92,6 +103,32 @@ Item {
         remoteCursorIndicator.x = p.x
         remoteCursorIndicator.y = p.y
         remoteCursorIndicator.height = rect.height > 0 ? rect.height : root.textControl.cursorRectangle.height
+    }
+
+    function refreshLocalCursorIndicator() {
+        if (!root.editor || !root.textControl) {
+            localCursorIndicator.visible = false
+            return
+        }
+        if (!("cursorMotionIndicatorActive" in root.editor) || !root.editor.cursorMotionIndicatorActive) {
+            localCursorIndicator.visible = false
+            return
+        }
+        if (!root.textControl.activeFocus) {
+            localCursorIndicator.visible = false
+            return
+        }
+        if (!("cursorRectangle" in root.textControl) || !("mapToItem" in root.textControl)) {
+            localCursorIndicator.visible = false
+            return
+        }
+
+        localCursorIndicator.visible = true
+        const rect = root.textControl.cursorRectangle
+        const p = root.textControl.mapToItem(root, rect.x, rect.y)
+        localCursorIndicator.x = p.x
+        localCursorIndicator.y = p.y
+        localCursorIndicator.height = rect.height > 0 ? rect.height : root.textControl.cursorRectangle.height
     }
 
     RowLayout {
@@ -222,17 +259,24 @@ Item {
         enabled: root.textControl !== null
 
         function onCursorPositionChanged() {
-            if (!root.textControl || !root.textControl.activeFocus) return
-            root.cursorMoved(root.textControl.cursorPosition)
+            if (!root.textControl) return
+            if (root.textControl.activeFocus) {
+                root.cursorMoved(root.textControl.cursorPosition)
+            }
+            root.refreshLocalCursorIndicator()
         }
 
         function onActiveFocusChanged() {
-            if (!root.textControl || !root.textControl.activeFocus) return
-            root.cursorMoved(root.textControl.cursorPosition)
+            if (!root.textControl) return
+            if (root.textControl.activeFocus) {
+                root.cursorMoved(root.textControl.cursorPosition)
+            }
+            root.refreshLocalCursorIndicator()
         }
 
         function onTextChanged() {
             root.refreshRemoteCursorIndicator()
+            root.refreshLocalCursorIndicator()
         }
     }
 
@@ -246,10 +290,17 @@ Item {
         function onRemoteCursorBlockIndexChanged() { root.refreshRemoteCursorIndicator() }
         function onRemoteCursorPosChanged() { root.refreshRemoteCursorIndicator() }
         function onPageIdChanged() { root.refreshRemoteCursorIndicator() }
+        function onCursorMotionIndicatorActiveChanged() { root.refreshLocalCursorIndicator() }
     }
 
-    Component.onCompleted: root.refreshRemoteCursorIndicator()
-    onBlockIndexChanged: root.refreshRemoteCursorIndicator()
+    Component.onCompleted: {
+        root.refreshRemoteCursorIndicator()
+        root.refreshLocalCursorIndicator()
+    }
+    onBlockIndexChanged: {
+        root.refreshRemoteCursorIndicator()
+        root.refreshLocalCursorIndicator()
+    }
 
     // Block type components
     Component {

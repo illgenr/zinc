@@ -327,6 +327,7 @@ set(ZINC_QML_FILES
     qml/components/MarkdownEditor.qml
     qml/components/BlockEditor.qml
     qml/components/BlockEditorEnterLogic.js
+    qml/components/CursorMotionIndicatorLogic.js
     qml/components/ScrollMath.js
     qml/components/Block.qml
     qml/components/SyncButtons.qml
@@ -544,6 +545,7 @@ if(ZINC_BUILD_TESTS)
 		        tests/qml/test_block_model_undo.cpp
 		        tests/qml/test_markdown_blocks.cpp
 		        tests/qml/test_cmark.cpp
+		        tests/qml/test_cursor_motion_indicator_logic_qml.cpp
 		        tests/qml/test_sync_controller_settings.cpp
 		        tests/qml/test_sync_buttons_qml.cpp
 		        tests/qml/test_sync_presence_parse.cpp
