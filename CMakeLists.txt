@@ -244,6 +244,8 @@ add_library(zinc_ui STATIC
     src/ui/DataStore.cpp
     src/ui/MarkdownBlocks.hpp
     src/ui/MarkdownBlocks.cpp
+    src/ui/InlineFormatting.hpp
+    src/ui/InlineFormatting.cpp
     src/ui/models/BlockModel.hpp
     src/ui/models/BlockModel.cpp
     src/ui/models/PageTreeModel.hpp
@@ -326,6 +328,7 @@ set(ZINC_QML_FILES
     qml/sync/SyncPreferences.qml
     qml/components/MarkdownEditor.qml
     qml/components/BlockEditor.qml
+    qml/components/InlineFormatBar.qml
     qml/components/BlockEditorEnterLogic.js
     qml/components/CursorMotionIndicatorLogic.js
     qml/components/ScrollMath.js
@@ -546,6 +549,7 @@ if(ZINC_BUILD_TESTS)
 		        tests/qml/test_block_model.cpp
 		        tests/qml/test_block_model_undo.cpp
 		        tests/qml/test_markdown_blocks.cpp
+		        tests/qml/test_inline_formatting.cpp
 		        tests/qml/test_cmark.cpp
 		        tests/qml/test_cursor_motion_indicator_logic_qml.cpp
 		        tests/qml/test_sync_controller_settings.cpp
@@ -554,6 +558,7 @@ if(ZINC_BUILD_TESTS)
 		        tests/qml/test_startup_page_settings.cpp
 		        tests/qml/test_startup_cursor_settings.cpp
 		        tests/qml/test_editor_mode_settings.cpp
+		        tests/qml/test_formatting_shortcuts_qml.cpp
 		        tests/qml/test_pairing_dialog_qml.cpp
 		        tests/qml/test_search_dialog_qml.cpp
 		        tests/qml/test_markdown_editor_qml.cpp

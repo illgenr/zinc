@@ -53,6 +53,7 @@ Item {
             font.pixelSize: ThemeManager.fontSizeNormal
             wrapMode: TextEdit.Wrap
             selectByMouse: true
+            persistentSelection: true
             
             // Placeholder
             Text {

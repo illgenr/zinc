@@ -81,6 +81,7 @@ Rectangle {
             font.pixelSize: ThemeManager.fontSizeNormal
             wrapMode: TextEdit.NoWrap
             selectByMouse: true
+            persistentSelection: true
             tabStopDistance: 40
 
             // Placeholder

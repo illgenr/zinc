@@ -14,6 +14,12 @@ FocusScope {
     Shortcut { sequences: ["Ctrl+Z", "Meta+Z"]; onActivated: root.performUndo() }
     Shortcut { sequences: ["Ctrl+Shift+Z", "Meta+Shift+Z", "Ctrl+Y", "Meta+Y"]; onActivated: root.performRedo() }
 
+    // Inline formatting shortcuts (hybrid editor).
+    Shortcut { sequences: ["Ctrl+B", "Meta+B"]; onActivated: formatBar.bold() }
+    Shortcut { sequences: ["Ctrl+I", "Meta+I"]; onActivated: formatBar.italic() }
+    Shortcut { sequences: ["Ctrl+U", "Meta+U"]; onActivated: formatBar.underline() }
+    Shortcut { sequences: ["Ctrl+Shift+M", "Meta+Shift+M"]; onActivated: formatBar.collapsed = !formatBar.collapsed }
+
     Shortcut { sequences: ["Ctrl+Home", "Meta+Home"]; onActivated: root.focusDocumentStart() }
     Shortcut { sequences: ["Ctrl+End", "Meta+End"]; onActivated: root.focusDocumentEnd() }
     Shortcut { sequences: ["PgUp", "PageUp"]; onActivated: root.pageNavigate(-1) }
@@ -1258,12 +1264,77 @@ FocusScope {
             Qt.callLater(() => root.focusBlockAtDeferred(targetIndex, targetPos))
         }
     }
+
+    Item {
+        id: formatBarWrap
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: parent.top
+        z: 10000
+        height: formatBarContainer.height + ThemeManager.spacingSmall
+
+        Item {
+            id: formatBarContainer
+            width: Math.min(ThemeManager.editorMaxWidth, parent.width - ThemeManager.spacingXXLarge * 2)
+            anchors.horizontalCenter: parent.horizontalCenter
+            anchors.top: parent.top
+            anchors.topMargin: ThemeManager.spacingMedium
+            height: formatBar.implicitHeight
+
+            InlineFormatBar {
+                id: formatBar
+                objectName: "blockEditorInlineFormatBar"
+                anchors.left: parent.left
+                anchors.right: parent.right
+
+                getState: function() {
+                    const idx = root.currentBlockIndex
+                    if (idx < 0 || idx >= blockRepeater.count) return null
+                    const item = blockRepeater.itemAt(idx)
+                    const tc = item && item.textControl ? item.textControl : null
+                    if (!tc) return null
+                    return {
+                        text: tc.text || "",
+                        selectionStart: ("selectionStart" in tc) ? tc.selectionStart : -1,
+                        selectionEnd: ("selectionEnd" in tc) ? tc.selectionEnd : -1,
+                        cursorPosition: ("cursorPosition" in tc) ? tc.cursorPosition : 0
+                    }
+                }
+
+                applyState: function(result) {
+                    const idx = root.currentBlockIndex
+                    if (idx < 0 || idx >= blockModel.count) return
+                    const next = (result && ("text" in result)) ? (result.text || "") : ""
+
+                    blockModel.beginUndoMacro("Format")
+                    blockModel.setProperty(idx, "content", next)
+                    blockModel.endUndoMacro()
+                    root.scheduleAutosave()
+
+                    Qt.callLater(() => {
+                        const item = blockRepeater.itemAt(idx)
+                        const tc = item && item.textControl ? item.textControl : null
+                        if (!tc) return
+                        tc.forceActiveFocus()
+
+                        const cursor = (result && ("cursorPosition" in result)) ? result.cursorPosition : -1
+                        if (cursor >= 0 && ("cursorPosition" in tc)) tc.cursorPosition = cursor
+
+                        const a = (result && ("selectionStart" in result)) ? result.selectionStart : -1
+                        const b = (result && ("selectionEnd" in result)) ? result.selectionEnd : -1
+                        if (a >= 0 && b >= 0 && ("select" in tc)) tc.select(a, b)
+                    })
+                }
+            }
+        }
+    }
     
     Flickable {
         id: flickable
         objectName: "blockEditorFlickable"
         
         anchors.fill: parent
+        anchors.topMargin: formatBarWrap.height
         contentWidth: width
         contentHeight: contentColumn.height + 200
         clip: true
@@ -1336,7 +1407,7 @@ FocusScope {
                     }
                 }
             }
-            
+
             // Blocks
     Repeater {
         id: blockRepeater
@@ -1720,6 +1791,11 @@ FocusScope {
             const pos = (cursorPos === undefined || cursorPos < 0) ? text.length : Math.min(cursorPos, text.length)
             target.cursorPosition = pos
         }
+    }
+
+    function blockItemAt(idx) {
+        if (idx < 0 || idx >= blockRepeater.count) return null
+        return blockRepeater.itemAt(idx)
     }
 
     function adjacentBlockNavigation(blockIndex, key, cursorPos, textLen) {

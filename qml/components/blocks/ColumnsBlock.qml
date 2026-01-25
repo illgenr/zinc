@@ -79,6 +79,7 @@ Item {
                     anchors.margins: ThemeManager.spacingSmall
                     wrapMode: TextEdit.Wrap
                     selectByMouse: true
+                    persistentSelection: true
                     color: ThemeManager.text
                     font.family: ThemeManager.fontFamily
                     font.pixelSize: ThemeManager.fontSizeNormal

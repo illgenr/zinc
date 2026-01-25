@@ -76,6 +76,7 @@ Item {
         font.pixelSize: ThemeManager.fontSizeNormal
         wrapMode: TextEdit.Wrap
         selectByMouse: true
+        persistentSelection: true
         visible: !root.showRendered
         
         // Placeholder

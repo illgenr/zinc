@@ -74,6 +74,7 @@ Item {
         font.weight: Font.Bold
         wrapMode: TextEdit.Wrap
         selectByMouse: true
+        persistentSelection: true
         visible: !root.showRendered
         
         // Placeholder

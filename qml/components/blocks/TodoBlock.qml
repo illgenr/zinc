@@ -108,6 +108,7 @@ Item {
             font.strikeout: isChecked
             wrapMode: TextEdit.Wrap
             selectByMouse: true
+            persistentSelection: true
             visible: !root.showRendered
             
             // Placeholder
