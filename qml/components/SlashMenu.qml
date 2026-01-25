@@ -10,6 +10,7 @@ Popup {
     property int currentBlockIndex: -1
     property real desiredX: 0
     property real desiredY: 0
+    readonly property bool _isMobile: Qt.platform.os === "android" || Qt.platform.os === "ios"
     
     signal commandSelected(var command)
     
@@ -71,8 +72,9 @@ Popup {
         const maxX = parent.width - root.width - margin
         const maxY = keyboardTopY() - root.height - margin
 
+        const desiredTopY = root._isMobile ? (root.desiredY - root.height) : root.desiredY
         root.x = clamp(root.desiredX, margin, Math.max(margin, maxX))
-        root.y = clamp(root.desiredY, margin, Math.max(margin, maxY))
+        root.y = clamp(desiredTopY, margin, Math.max(margin, maxY))
     }
     
     function updateFilteredCommands() {
@@ -114,32 +116,6 @@ Popup {
     contentItem: ColumnLayout {
         spacing: ThemeManager.spacingSmall
 
-        TextField {
-            id: filterInput
-            objectName: "slashMenuFilterInput"
-            Layout.fillWidth: true
-            placeholderText: "Type to filter..."
-            selectByMouse: true
-
-            onTextChanged: {
-                if (text !== root.filterText) {
-                    root.filterText = text
-                }
-            }
-
-            Keys.onUpPressed: commandList.currentIndex = Math.max(0, commandList.currentIndex - 1)
-            Keys.onDownPressed: commandList.currentIndex = Math.min(commandList.count - 1, commandList.currentIndex + 1)
-
-            Keys.onReturnPressed: {
-                if (commandList.currentIndex >= 0 && commandList.currentIndex < filteredCommands.length) {
-                    root.commandSelected(filteredCommands[commandList.currentIndex])
-                    root.close()
-                }
-            }
-
-            Keys.onEscapePressed: root.close()
-        }
-
         ListView {
             id: commandList
             objectName: "slashMenuCommandList"
@@ -175,11 +151,12 @@ Popup {
                         height: 28
                         Layout.alignment: Qt.AlignVCenter
                         radius: ThemeManager.radiusSmall
-                        color: ThemeManager.background
+                        color: ThemeManager.surfaceHover
 
                         Text {
                             anchors.centerIn: parent
                             text: modelData.icon
+                            color: ThemeManager.text
                             font.pixelSize: 14
                         }
                     }
@@ -230,6 +207,41 @@ Popup {
             Keys.onReturnPressed: {
                 if (currentIndex >= 0 && currentIndex < filteredCommands.length) {
                     root.commandSelected(filteredCommands[currentIndex])
+                    root.close()
+                }
+            }
+
+            Keys.onEscapePressed: root.close()
+        }
+
+        TextField {
+            id: filterInput
+            objectName: "slashMenuFilterInput"
+            Layout.fillWidth: true
+            placeholderText: "Type to filter..."
+            selectByMouse: true
+            color: ThemeManager.text
+            placeholderTextColor: ThemeManager.textMuted
+
+            background: Rectangle {
+                radius: ThemeManager.radiusSmall
+                color: ThemeManager.surfaceHover
+                border.width: 1
+                border.color: ThemeManager.border
+            }
+
+            onTextChanged: {
+                if (text !== root.filterText) {
+                    root.filterText = text
+                }
+            }
+
+            Keys.onUpPressed: commandList.currentIndex = Math.max(0, commandList.currentIndex - 1)
+            Keys.onDownPressed: commandList.currentIndex = Math.min(commandList.count - 1, commandList.currentIndex + 1)
+
+            Keys.onReturnPressed: {
+                if (commandList.currentIndex >= 0 && commandList.currentIndex < filteredCommands.length) {
+                    root.commandSelected(filteredCommands[commandList.currentIndex])
                     root.close()
                 }
             }

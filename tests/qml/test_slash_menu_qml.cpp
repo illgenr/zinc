@@ -3,6 +3,8 @@
 #include <QQmlComponent>
 #include <QQmlEngine>
 #include <QQmlError>
+#include <QFile>
+#include <QRegularExpression>
 #include <QStringList>
 #include <QUrl>
 #include <memory>
@@ -38,6 +40,18 @@ bool commandsContainLabel(const QVariant& commandsVariant, const QString& label)
         }
     }
     return false;
+}
+
+QString readAllText(const QString& path) {
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        return {};
+    }
+    return QString::fromUtf8(file.readAll());
+}
+
+bool containsRegex(const QString& text, const QRegularExpression& re) {
+    return re.match(text).hasMatch();
 }
 
 } // namespace
@@ -76,4 +90,23 @@ TEST_CASE("QML: SlashMenu includes Date and Now commands", "[qml]") {
     REQUIRE(commandsContainLabel(commands, QStringLiteral("Date")));
     REQUIRE(commandsContainLabel(commands, QStringLiteral("Date/Time")));
     REQUIRE(commandsContainLabel(commands, QStringLiteral("Now")));
+}
+
+TEST_CASE("QML: SlashMenu mobile layout avoids keyboard and respects theme", "[qml]") {
+    const auto qml = readAllText(QStringLiteral(":/qt/qml/zinc/qml/components/SlashMenu.qml"));
+    REQUIRE(!qml.isEmpty());
+
+    // Dark mode: ensure TextField uses theme text colors (avoid default black-on-dark).
+    REQUIRE(qml.contains(QStringLiteral("placeholderTextColor: ThemeManager.textMuted")));
+    REQUIRE(qml.contains(QStringLiteral("color: ThemeManager.text")));
+
+    // Mobile UX: list is above the filter input so the input stays visible above IME.
+    const auto listPos = qml.indexOf(QStringLiteral("ListView {"));
+    const auto inputPos = qml.indexOf(QStringLiteral("TextField {"));
+    REQUIRE(listPos >= 0);
+    REQUIRE(inputPos >= 0);
+    REQUIRE(listPos < inputPos);
+
+    // Mobile positioning: prefer anchoring above the caret/block.
+    REQUIRE(containsRegex(qml, QRegularExpression(QStringLiteral(R"(desiredTopY\s*=\s*root\._isMobile\s*\?\s*\(root\.desiredY\s*-\s*root\.height\)\s*:\s*root\.desiredY)"))));
 }
