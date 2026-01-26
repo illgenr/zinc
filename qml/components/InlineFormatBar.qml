@@ -33,34 +33,26 @@ Item {
         if (applyState) applyState(result)
     }
 
-    function wrap(prefix, suffix, toggle) {
+    function _format(fmt, opts) {
         const s = _stateOrNull()
         if (!s) return
-        const out = InlineFormatting.wrapSelection(
+        const out = InlineRichText.applyFormat(
             s.text || "",
+            ("runs" in s) ? (s.runs || []) : [],
             ("selectionStart" in s) ? s.selectionStart : -1,
             ("selectionEnd" in s) ? s.selectionEnd : -1,
             ("cursorPosition" in s) ? s.cursorPosition : 0,
-            prefix,
-            suffix,
-            toggle === true
+            fmt || ({}),
+            ("typingAttrs" in s) ? (s.typingAttrs || ({})) : ({})
         )
+        if (out && opts && opts.focusTarget) out.focusTarget = opts.focusTarget
         _apply(out)
     }
 
-    function spanStyle(styleText) {
-        const style = (styleText || "").trim()
-        if (style.length === 0) return
-        // Use single quotes for the HTML attribute so style text can safely contain double quotes
-        // (e.g. font-family values with spaces).
-        const htmlAttr = style.replace(/'/g, "&#39;")
-        wrap("<span style='" + htmlAttr + "'>", "</span>", false)
-    }
-
-    function underline() { wrap("<u>", "</u>", true) }
-    function bold() { wrap("**", "**", true) }
-    function italic() { wrap("*", "*", true) }
-    function strike() { wrap("<s>", "</s>", true) }
+    function underline() { _format({ type: "underline", toggle: true }) }
+    function bold() { _format({ type: "bold", toggle: true }) }
+    function italic() { _format({ type: "italic", toggle: true }) }
+    function strike() { _format({ type: "strike", toggle: true }) }
     function link() {
         const s = _stateOrNull()
         if (!s) return
@@ -95,21 +87,20 @@ Item {
     function fontFamily(family) {
         const f = (family || "").trim()
         if (f.length === 0) return
-        const cssValue = f.replace(/\\/g, "\\\\").replace(/\"/g, "\\\"")
-        spanStyle("font-family: \"" + cssValue + "\";")
+        _format({ type: "fontFamily", value: f }, { focusTarget: "toolbar" })
     }
 
     function fontSize(px) {
         const n = parseInt(px, 10)
         if (!isFinite(n) || n <= 0) return
         const pt = Math.max(1, Math.round(n * 0.75))
-        spanStyle("font-size: " + pt + "pt;")
+        _format({ type: "fontSizePt", value: pt }, { focusTarget: "toolbar" })
     }
 
     function textColor(hex) {
         const c = (hex || "").trim()
         if (c.length === 0) return
-        spanStyle("color: " + c + ";")
+        _format({ type: "color", value: c })
     }
 
     ToolBar {
@@ -189,18 +180,24 @@ Item {
                     id: fontCombo
                     width: 220
                     height: fullFlow.controlHeight
-                    focusPolicy: Qt.NoFocus
+                    focusPolicy: Qt.StrongFocus
                     model: FontUtils.systemFontFamilies()
-                    onActivated: function(index) { root.fontFamily(fontCombo.textAt(index)) }
+                    onActivated: function(index) {
+                        root.fontFamily(fontCombo.textAt(index))
+                        Qt.callLater(() => fontCombo.forceActiveFocus())
+                    }
                 }
 
                 ComboBox {
                     id: sizeCombo
                     width: 90
                     height: fullFlow.controlHeight
-                    focusPolicy: Qt.NoFocus
+                    focusPolicy: Qt.StrongFocus
                     model: [10, 12, 14, 16, 18, 20, 24, 32]
-                    onActivated: function(index) { root.fontSize(sizeCombo.textAt(index)) }
+                    onActivated: function(index) {
+                        root.fontSize(sizeCombo.textAt(index))
+                        Qt.callLater(() => sizeCombo.forceActiveFocus())
+                    }
                 }
 
                 ToolButton {

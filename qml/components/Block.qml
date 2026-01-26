@@ -19,6 +19,8 @@ Item {
     property var editor: null
     property var textControl: (blockLoader.item && blockLoader.item.textControl) ? blockLoader.item.textControl : null
     property var blockControl: blockLoader.item
+    property var inlineRuns: (blockLoader.item && ("inlineRuns" in blockLoader.item)) ? blockLoader.item.inlineRuns : []
+    property var typingAttrs: (blockLoader.item && ("typingAttrs" in blockLoader.item)) ? blockLoader.item.typingAttrs : ({})
     readonly property bool rangeSelected: editor &&
         editor.selectionStartBlockIndex >= 0 &&
         blockIndex >= editor.selectionStartBlockIndex &&

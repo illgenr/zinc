@@ -1349,49 +1349,76 @@ FocusScope {
                 anchors.left: parent.left
                 anchors.right: parent.right
 
-                getState: function() {
-                    const idx = root.currentBlockIndex
-                    if (idx < 0 || idx >= blockRepeater.count) return null
-                    const item = blockRepeater.itemAt(idx)
-                    const tc = item && item.textControl ? item.textControl : null
-                    if (!tc) return null
-                    return {
-                        text: tc.text || "",
-                        selectionStart: ("selectionStart" in tc) ? tc.selectionStart : -1,
-                        selectionEnd: ("selectionEnd" in tc) ? tc.selectionEnd : -1,
-                        cursorPosition: ("cursorPosition" in tc) ? tc.cursorPosition : 0
-                    }
-                }
+	                getState: function() {
+	                    const idx = root.currentBlockIndex
+	                    if (idx < 0 || idx >= blockRepeater.count) return null
+	                    const item = blockRepeater.itemAt(idx)
+	                    const tc = item && item.textControl ? item.textControl : null
+	                    const bc = item && item.blockControl ? item.blockControl : null
+	                    if (!tc) return null
+	                    return {
+	                        text: tc.text || "",
+	                        selectionStart: ("selectionStart" in tc) ? tc.selectionStart : -1,
+	                        selectionEnd: ("selectionEnd" in tc) ? tc.selectionEnd : -1,
+	                        cursorPosition: ("cursorPosition" in tc) ? tc.cursorPosition : 0,
+	                        runs: (bc && ("inlineRuns" in bc)) ? (bc.inlineRuns || []) : [],
+	                        typingAttrs: (bc && ("typingAttrs" in bc)) ? (bc.typingAttrs || ({})) : ({})
+	                    }
+	                }
 
-                applyState: function(result) {
-                    const idx = root.currentBlockIndex
-                    if (idx < 0 || idx >= blockModel.count) return
-                    const next = (result && ("text" in result)) ? (result.text || "") : ""
+	                applyState: function(result) {
+	                    const idx = root.currentBlockIndex
+	                    if (idx < 0 || idx >= blockModel.count) return
+	                    const itemNow = blockRepeater.itemAt(idx)
+	                    const bcNow = itemNow && itemNow.blockControl ? itemNow.blockControl : null
+	                    const tcNow = itemNow && itemNow.textControl ? itemNow.textControl : null
 
-                    blockModel.beginUndoMacro("Format")
-                    blockModel.setProperty(idx, "content", next)
-                    blockModel.endUndoMacro()
-                    root.scheduleAutosave()
+	                    const beforeText = tcNow ? (tcNow.text || "") : ""
+	                    const beforeRuns = (bcNow && ("inlineRuns" in bcNow)) ? (bcNow.inlineRuns || []) : []
+	                    const beforeTyping = (bcNow && ("typingAttrs" in bcNow)) ? (bcNow.typingAttrs || ({})) : ({})
 
-                    const itemNow = blockRepeater.itemAt(idx)
-                    const tcNow = itemNow && itemNow.textControl ? itemNow.textControl : null
-                    if (tcNow && ("text" in tcNow) && tcNow.text !== next) tcNow.text = next
+	                    const nextText = (result && ("text" in result)) ? (result.text || "") : beforeText
+	                    const focusTarget = (result && ("focusTarget" in result)) ? (result.focusTarget || "") : ""
+	                    const nextTyping = (result && ("typingAttrs" in result)) ? (result.typingAttrs || ({})) : beforeTyping
+	                    let nextRuns = (result && ("runs" in result)) ? (result.runs || []) : null
 
-                    Qt.callLater(() => {
-                        const item = blockRepeater.itemAt(idx)
-                        const tc = item && item.textControl ? item.textControl : null
-                        if (!tc) return
-                        tc.forceActiveFocus()
+	                    if (!nextRuns) {
+	                        const cursorForReconcile = (result && ("cursorPosition" in result)) ? result.cursorPosition : (tcNow && ("cursorPosition" in tcNow) ? tcNow.cursorPosition : 0)
+	                        const reconciled = InlineRichText.reconcileTextChange(beforeText,
+	                                                                             nextText,
+	                                                                             beforeRuns,
+	                                                                             beforeTyping,
+	                                                                             cursorForReconcile)
+	                        nextRuns = reconciled && ("runs" in reconciled) ? (reconciled.runs || []) : beforeRuns
+	                    }
 
-                        const cursor = (result && ("cursorPosition" in result)) ? result.cursorPosition : -1
-                        if (cursor >= 0 && ("cursorPosition" in tc)) tc.cursorPosition = cursor
+	                    const markup = InlineRichText.serialize(nextText, nextRuns)
+	
+	                    blockModel.beginUndoMacro("Format")
+	                    blockModel.setProperty(idx, "content", markup)
+	                    blockModel.endUndoMacro()
+	                    root.scheduleAutosave()
 
-                        const a = (result && ("selectionStart" in result)) ? result.selectionStart : -1
-                        const b = (result && ("selectionEnd" in result)) ? result.selectionEnd : -1
-                        if (a >= 0 && b >= 0 && ("select" in tc)) tc.select(a, b)
-                    })
-                }
-            }
+	                    if (bcNow && ("inlineRuns" in bcNow)) bcNow.inlineRuns = nextRuns
+	                    if (bcNow && ("typingAttrs" in bcNow)) bcNow.typingAttrs = nextTyping
+	
+	                    Qt.callLater(() => {
+	                        const item = blockRepeater.itemAt(idx)
+	                        const tc = item && item.textControl ? item.textControl : null
+	                        if (!tc) return
+	                        if (focusTarget !== "toolbar") {
+	                            tc.forceActiveFocus()
+	                        }
+	
+	                        const cursor = (result && ("cursorPosition" in result)) ? result.cursorPosition : -1
+	                        if (cursor >= 0 && ("cursorPosition" in tc)) tc.cursorPosition = cursor
+	
+	                        const a = (result && ("selectionStart" in result)) ? result.selectionStart : -1
+	                        const b = (result && ("selectionEnd" in result)) ? result.selectionEnd : -1
+	                        if (a >= 0 && b >= 0 && ("select" in tc)) tc.select(a, b)
+	                    })
+	                }
+	            }
         }
     }
     

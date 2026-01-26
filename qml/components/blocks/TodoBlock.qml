@@ -19,6 +19,29 @@ Item {
     signal blockFocused()
     
     readonly property bool showRendered: root.editor && root.editor.renderBlocksWhenNotFocused && !textEdit.activeFocus
+    property var inlineRuns: []
+    property var typingAttrs: ({})
+
+    property string _lastAppliedMarkup: ""
+    property string _lastPlainText: ""
+    property bool _syncingFromModel: false
+
+    function _syncFromMarkup() {
+        if (root._syncingFromModel) return
+        const markup = root.content || ""
+        if (markup === root._lastAppliedMarkup) return
+        root._syncingFromModel = true
+        const parsed = InlineRichText.parse(markup)
+        const plain = parsed && ("text" in parsed) ? (parsed.text || "") : ""
+        root.inlineRuns = parsed && ("runs" in parsed) ? (parsed.runs || []) : []
+        root._lastAppliedMarkup = markup
+        root._lastPlainText = plain
+        if (textEdit.text !== plain) textEdit.text = plain
+        root._syncingFromModel = false
+    }
+
+    onContentChanged: _syncFromMarkup()
+    Component.onCompleted: _syncFromMarkup()
 
     function markdownForRender() {
         // Render just the content; the checkbox UI is already shown separately.
@@ -160,7 +183,7 @@ Item {
             Layout.fillWidth: true
             Layout.alignment: Qt.AlignVCenter
             
-            text: root.content
+            text: root._lastPlainText
             color: isChecked ? ThemeManager.textSecondary : ThemeManager.text
             font.family: ThemeManager.fontFamily
             font.pixelSize: ThemeManager.fontSizeNormal
@@ -169,6 +192,11 @@ Item {
             selectByMouse: true
             persistentSelection: true
             visible: !root.showRendered
+
+            InlineRichTextHighlighter {
+                document: textEdit.textDocument
+                runs: root.inlineRuns
+            }
             
             // Placeholder
             Text {
@@ -180,8 +208,21 @@ Item {
             }
             
             onTextChanged: {
-                if (text !== root.content) {
-                    root.contentEdited(text)
+                if (root._syncingFromModel) return
+                const before = root._lastPlainText
+                const after = text
+                if (before !== after) {
+                    const reconciled = InlineRichText.reconcileTextChange(before,
+                                                                         after,
+                                                                         root.inlineRuns || [],
+                                                                         root.typingAttrs || ({}),
+                                                                         cursorPosition)
+                    root.inlineRuns = reconciled && ("runs" in reconciled) ? (reconciled.runs || []) : (root.inlineRuns || [])
+                    root.typingAttrs = reconciled && ("typingAttrs" in reconciled) ? (reconciled.typingAttrs || ({})) : (root.typingAttrs || ({}))
+                    root._lastPlainText = after
+                    const markup = InlineRichText.serialize(after, root.inlineRuns || [])
+                    root._lastAppliedMarkup = markup
+                    root.contentEdited(markup)
                 }
                 root.maybeConvertTaskMarker()
             }
@@ -190,6 +231,11 @@ Item {
                 if (activeFocus) {
                     root.blockFocused()
                 }
+            }
+
+            onCursorPositionChanged: {
+                if (root._syncingFromModel) return
+                root.typingAttrs = InlineRichText.attrsAt(root.inlineRuns || [], cursorPosition)
             }
 
             Keys.onShortcutOverride: function(event) {

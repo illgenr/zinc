@@ -27,10 +27,8 @@ TEST_CASE("QML: InlineFormatBar mobile is full-width and shows font controls", "
     // Qt QML's JS subset doesn't guarantee ES2021 APIs like String.prototype.replaceAll.
     REQUIRE(!qml.contains(QStringLiteral("replaceAll(")));
 
-    // Ensure we generate valid HTML for span style wrappers:
-    // - Use single quotes around the HTML attribute so CSS can use double quotes (e.g. font-family with spaces).
-    REQUIRE(qml.contains(QStringLiteral("<span style='")));
-    REQUIRE(!qml.contains(QStringLiteral("<span style=\\\"")));
+    // Formatting is run-based (WYSIWYG) and should not rely on injecting raw HTML tags.
+    REQUIRE(qml.contains(QStringLiteral("InlineRichText.applyFormat")));
 
     REQUIRE(qml.contains(QStringLiteral("id: mobileContent")));
     REQUIRE(qml.contains(QStringLiteral("sourceComponent: root._isMobile ? mobileContent : desktopContent")));
@@ -46,4 +44,8 @@ TEST_CASE("QML: InlineFormatBar mobile is full-width and shows font controls", "
     REQUIRE(!blockEditor.contains(QStringLiteral("replaceAll(")));
     REQUIRE(blockEditor.contains(QStringLiteral("id: formatBarContainer")));
     REQUIRE(containsRegex(blockEditor, QRegularExpression(QStringLiteral(R"(width:\s*\(AndroidUtils\.isAndroid\(\)\s*\|\|\s*Qt\.platform\.os\s*===\s*\"ios\"\))"))));
+
+    // Formatting changes coming from toolbar pickers should not steal focus back to the editor.
+    REQUIRE(blockEditor.contains(QStringLiteral("focusTarget")));
+    REQUIRE(blockEditor.contains(QStringLiteral("toolbar")));
 }

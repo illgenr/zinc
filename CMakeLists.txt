@@ -248,6 +248,10 @@ add_library(zinc_ui STATIC
     src/ui/MarkdownBlocks.cpp
     src/ui/InlineFormatting.hpp
     src/ui/InlineFormatting.cpp
+    src/ui/InlineRichText.hpp
+    src/ui/InlineRichText.cpp
+    src/ui/InlineRichTextHighlighter.hpp
+    src/ui/InlineRichTextHighlighter.cpp
     src/ui/models/BlockModel.hpp
     src/ui/models/BlockModel.cpp
     src/ui/models/PageTreeModel.hpp
@@ -557,11 +561,12 @@ if(ZINC_BUILD_TESTS)
 		        tests/qml/test_block_editor_enter_logic_qml.cpp
 		        tests/qml/test_block_model.cpp
 		        tests/qml/test_block_model_undo.cpp
-		        tests/qml/test_markdown_blocks.cpp
-		        tests/qml/test_inline_formatting.cpp
-			        tests/qml/test_cmark.cpp
-			        tests/qml/test_inline_format_bar_qml.cpp
-			        tests/qml/test_cursor_motion_indicator_logic_qml.cpp
+			        tests/qml/test_markdown_blocks.cpp
+			        tests/qml/test_inline_formatting.cpp
+			        tests/qml/test_inline_rich_text.cpp
+				        tests/qml/test_cmark.cpp
+				        tests/qml/test_inline_format_bar_qml.cpp
+				        tests/qml/test_cursor_motion_indicator_logic_qml.cpp
 		        tests/qml/test_sync_controller_settings.cpp
 		        tests/qml/test_sync_buttons_qml.cpp
 		        tests/qml/test_sync_presence_parse.cpp

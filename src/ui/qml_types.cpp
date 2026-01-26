@@ -5,6 +5,8 @@
 #include "ui/Cmark.hpp"
 #include "ui/MarkdownBlocks.hpp"
 #include "ui/InlineFormatting.hpp"
+#include "ui/InlineRichText.hpp"
+#include "ui/InlineRichTextHighlighter.hpp"
 #include "ui/FontUtils.hpp"
 #include "ui/models/BlockModel.hpp"
 #include "ui/models/PageTreeModel.hpp"
@@ -29,13 +31,15 @@ void registerQmlTypes() {
     // Data Store singleton (registered under "zinc" module to match QML imports)
     qmlRegisterSingletonType<DataStore>("zinc", 1, 0, "DataStore", DataStore::create);
     qmlRegisterSingletonType<Clipboard>("zinc", 1, 0, "Clipboard", Clipboard::create);
-    qmlRegisterSingletonType<MarkdownBlocks>("zinc", 1, 0, "MarkdownBlocks", MarkdownBlocks::create);
-    qmlRegisterSingletonType<Cmark>("zinc", 1, 0, "Cmark", Cmark::create);
-    qmlRegisterSingletonType<InlineFormatting>("zinc", 1, 0, "InlineFormatting", InlineFormatting::create);
-    qmlRegisterSingletonType<FontUtils>("zinc", 1, 0, "FontUtils", FontUtils::create);
-    
-    // Platform utilities
-    qmlRegisterSingletonType<platform::AndroidUtils>("zinc", 1, 0, "AndroidUtils", platform::AndroidUtils::create);
+	    qmlRegisterSingletonType<MarkdownBlocks>("zinc", 1, 0, "MarkdownBlocks", MarkdownBlocks::create);
+	    qmlRegisterSingletonType<Cmark>("zinc", 1, 0, "Cmark", Cmark::create);
+	    qmlRegisterSingletonType<InlineFormatting>("zinc", 1, 0, "InlineFormatting", InlineFormatting::create);
+	    qmlRegisterSingletonType<InlineRichText>("zinc", 1, 0, "InlineRichText", InlineRichText::create);
+	    qmlRegisterSingletonType<FontUtils>("zinc", 1, 0, "FontUtils", FontUtils::create);
+	    qmlRegisterType<InlineRichTextHighlighter>("zinc", 1, 0, "InlineRichTextHighlighter");
+	    
+	    // Platform utilities
+	    qmlRegisterSingletonType<platform::AndroidUtils>("zinc", 1, 0, "AndroidUtils", platform::AndroidUtils::create);
 
     // Feature flags
     qmlRegisterSingletonType<FeatureFlags>("Zinc", 1, 0, "FeatureFlags", FeatureFlags::create);
