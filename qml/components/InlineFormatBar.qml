@@ -9,6 +9,10 @@ Item {
     property var getState: null // () => { text, selectionStart, selectionEnd, cursorPosition }
     property var applyState: null // (result) => void; result from InlineFormatting.wrapSelection
     property bool collapsed: false
+    readonly property bool _isMobile: Qt.platform.os === "android" || Qt.platform.os === "ios"
+
+    readonly property int _mobileRowHeight: 44
+    readonly property int _mobilePadding: 4
 
     // ToolBar's implicitHeight won't propagate through a custom Flickable contentItem unless we set it.
     implicitHeight: toolbar.implicitHeight
@@ -77,7 +81,9 @@ Item {
         id: toolbar
         anchors.left: parent.left
         anchors.right: parent.right
-        implicitHeight: 40
+        implicitHeight: root._isMobile
+            ? ((contentLoader.item ? contentLoader.item.implicitHeight : root._mobileRowHeight) + root._mobilePadding * 2)
+            : 40
         focusPolicy: Qt.NoFocus
 
         background: Rectangle {
@@ -87,7 +93,18 @@ Item {
             radius: ThemeManager.radiusSmall
         }
 
-        contentItem: Flickable {
+        contentItem: Loader {
+            id: contentLoader
+            anchors.fill: parent
+            anchors.margins: root._isMobile ? root._mobilePadding : 0
+            sourceComponent: root._isMobile ? mobileContent : desktopContent
+        }
+    }
+
+    Component {
+        id: desktopContent
+
+        Flickable {
             clip: true
             contentWidth: root.collapsed ? collapsedRow.implicitWidth : fullRow.implicitWidth
             contentHeight: root.collapsed ? collapsedRow.implicitHeight : fullRow.implicitHeight
@@ -170,6 +187,100 @@ Item {
                     }
                 }
             }
+        }
+    }
+
+    Component {
+        id: mobileContent
+
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: root._mobilePadding
+
+            RowLayout {
+                Layout.fillWidth: true
+                Layout.preferredHeight: root._mobileRowHeight
+                spacing: root._mobilePadding
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: root._mobilePadding
+                    visible: root.collapsed
+
+                    Label {
+                        Layout.fillWidth: true
+                        text: "Formatting"
+                        color: ThemeManager.text
+                        verticalAlignment: Text.AlignVCenter
+                    }
+
+                    ToolButton {
+                        text: "v"
+                        focusPolicy: Qt.NoFocus
+                        onClicked: root.collapsed = false
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: root._mobilePadding
+                    visible: !root.collapsed
+
+                    ToolButton { text: "B"; font.bold: true; focusPolicy: Qt.NoFocus; onClicked: root.bold() }
+                    ToolButton { text: "I"; font.italic: true; focusPolicy: Qt.NoFocus; onClicked: root.italic() }
+                    ToolButton { text: "U"; focusPolicy: Qt.NoFocus; onClicked: root.underline() }
+                    ToolButton { text: "S"; focusPolicy: Qt.NoFocus; onClicked: root.strike() }
+
+                    ToolButton {
+                        text: "Color"
+                        focusPolicy: Qt.NoFocus
+                        onClicked: colorMenu.open()
+                    }
+
+                    Item { Layout.fillWidth: true }
+
+                    ToolButton {
+                        text: "^"
+                        focusPolicy: Qt.NoFocus
+                        onClicked: root.collapsed = true
+                    }
+                }
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                Layout.preferredHeight: root._mobileRowHeight
+                spacing: root._mobilePadding
+                visible: !root.collapsed
+
+                ComboBox {
+                    id: fontCombo
+                    Layout.fillWidth: true
+                    focusPolicy: Qt.NoFocus
+                    implicitHeight: root._mobileRowHeight
+                    popup.z: 20000
+                    model: [
+                        ThemeManager.fontFamily,
+                        ThemeManager.monoFontFamily,
+                        "Sans Serif",
+                        "Serif",
+                        "Monospace"
+                    ]
+                    onActivated: root.fontFamily(currentText)
+                }
+
+                ComboBox {
+                    id: sizeCombo
+                    Layout.preferredWidth: 120
+                    focusPolicy: Qt.NoFocus
+                    implicitHeight: root._mobileRowHeight
+                    popup.z: 20000
+                    model: [10, 12, 14, 16, 18, 20, 24, 32]
+                    onActivated: root.fontSize(currentText)
+                }
+            }
+
+            implicitHeight: root._mobileRowHeight + (root.collapsed ? 0 : (root._mobilePadding + root._mobileRowHeight))
         }
     }
 

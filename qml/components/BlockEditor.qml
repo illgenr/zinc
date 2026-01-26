@@ -1265,21 +1265,23 @@ FocusScope {
         }
     }
 
-    Item {
-        id: formatBarWrap
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.top: parent.top
-        z: 10000
-        height: formatBarContainer.height + ThemeManager.spacingSmall
-
         Item {
-            id: formatBarContainer
-            width: Math.min(ThemeManager.editorMaxWidth, parent.width - ThemeManager.spacingXXLarge * 2)
-            anchors.horizontalCenter: parent.horizontalCenter
+            id: formatBarWrap
+            anchors.left: parent.left
+            anchors.right: parent.right
             anchors.top: parent.top
-            anchors.topMargin: ThemeManager.spacingMedium
-            height: formatBar.implicitHeight
+            z: 100
+            height: formatBarContainer.height + ((AndroidUtils.isAndroid() || Qt.platform.os === "ios") ? Math.round(ThemeManager.spacingSmall / 2) : ThemeManager.spacingSmall)
+
+	        Item {
+	            id: formatBarContainer
+	            width: (AndroidUtils.isAndroid() || Qt.platform.os === "ios")
+	                ? (parent.width - ThemeManager.spacingSmall * 2)
+	                : Math.min(ThemeManager.editorMaxWidth, parent.width - ThemeManager.spacingXXLarge * 2)
+	            anchors.horizontalCenter: parent.horizontalCenter
+	            anchors.top: parent.top
+	            anchors.topMargin: (AndroidUtils.isAndroid() || Qt.platform.os === "ios") ? ThemeManager.spacingSmall : ThemeManager.spacingMedium
+	            height: formatBar.implicitHeight
 
             InlineFormatBar {
                 id: formatBar
