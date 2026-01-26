@@ -51,17 +51,52 @@ Item {
     function spanStyle(styleText) {
         const style = (styleText || "").trim()
         if (style.length === 0) return
-        wrap("<span style=\"" + style + "\">", "</span>", false)
+        // Use single quotes for the HTML attribute so style text can safely contain double quotes
+        // (e.g. font-family values with spaces).
+        const htmlAttr = style.replace(/'/g, "&#39;")
+        wrap("<span style='" + htmlAttr + "'>", "</span>", false)
     }
 
     function underline() { wrap("<u>", "</u>", true) }
     function bold() { wrap("**", "**", true) }
     function italic() { wrap("*", "*", true) }
     function strike() { wrap("<s>", "</s>", true) }
+    function link() {
+        const s = _stateOrNull()
+        if (!s) return
+        const text = s.text || ""
+        const selectionStart = ("selectionStart" in s) ? s.selectionStart : -1
+        const selectionEnd = ("selectionEnd" in s) ? s.selectionEnd : -1
+        const cursorPosition = ("cursorPosition" in s) ? s.cursorPosition : 0
+
+        const hasSelection = selectionStart >= 0 && selectionEnd >= 0 && selectionStart !== selectionEnd
+        const a = hasSelection ? Math.max(0, Math.min(selectionStart, selectionEnd)) : Math.max(0, cursorPosition)
+        const b = hasSelection ? Math.max(0, Math.max(selectionStart, selectionEnd)) : Math.max(0, cursorPosition)
+        const selected = hasSelection ? text.substring(a, b) : ""
+
+        const label = selected
+        const href = selected
+        const before = text.substring(0, a)
+        const after = text.substring(b)
+        const inserted = "[" + (label || "") + "](" + (href || "") + ")"
+        const outText = before + inserted + after
+
+        const hrefStart = before.length + inserted.indexOf("(") + 1
+        const hrefEnd = before.length + inserted.indexOf(")")
+
+        _apply({
+            text: outText,
+            selectionStart: hrefStart,
+            selectionEnd: Math.max(hrefStart, hrefEnd),
+            cursorPosition: hrefStart
+        })
+    }
 
     function fontFamily(family) {
-        const f = (family || "").replaceAll("'", "\\'")
-        spanStyle("font-family: '" + f + "';")
+        const f = (family || "").trim()
+        if (f.length === 0) return
+        const cssValue = f.replace(/\\/g, "\\\\").replace(/\"/g, "\\\"")
+        spanStyle("font-family: \"" + cssValue + "\";")
     }
 
     function fontSize(px) {
@@ -83,7 +118,7 @@ Item {
         anchors.right: parent.right
         implicitHeight: root._isMobile
             ? ((contentLoader.item ? contentLoader.item.implicitHeight : root._mobileRowHeight) + root._mobilePadding * 2)
-            : 40
+            : (contentLoader.item ? contentLoader.item.implicitHeight : 32)
         focusPolicy: Qt.NoFocus
 
         background: Rectangle {
@@ -104,87 +139,75 @@ Item {
     Component {
         id: desktopContent
 
-        Flickable {
-            clip: true
-            contentWidth: root.collapsed ? collapsedRow.implicitWidth : fullRow.implicitWidth
-            contentHeight: root.collapsed ? collapsedRow.implicitHeight : fullRow.implicitHeight
-            implicitHeight: toolbar.implicitHeight
-            interactive: contentWidth > width
-            boundsBehavior: Flickable.StopAtBounds
+        Item {
+            implicitHeight: root.collapsed ? collapsedRow.implicitHeight : fullFlow.implicitHeight
 
             Row {
-                id: row
-                spacing: 0
-                height: toolbar.implicitHeight
-                anchors.verticalCenter: parent.verticalCenter
+                id: collapsedRow
+                visible: root.collapsed
+                spacing: ThemeManager.spacingSmall
+                height: 32
 
-                Row {
-                    id: collapsedRow
-                    visible: root.collapsed
-                    spacing: ThemeManager.spacingSmall
-                    height: toolbar.implicitHeight
-
-                    ToolButton {
-                        text: "Formatting"
-                        focusPolicy: Qt.NoFocus
-                        onClicked: root.collapsed = false
-                    }
-
-                    ToolButton {
-                        text: "▾"
-                        focusPolicy: Qt.NoFocus
-                        onClicked: root.collapsed = false
-                    }
+                ToolButton {
+                    text: "Formatting"
+                    height: 28
+                    focusPolicy: Qt.NoFocus
+                    onClicked: root.collapsed = false
                 }
 
-                Row {
-                    id: fullRow
-                    visible: !root.collapsed
-                    spacing: ThemeManager.spacingSmall
-                    height: toolbar.implicitHeight
+                ToolButton {
+                    text: "▾"
+                    height: 28
+                    focusPolicy: Qt.NoFocus
+                    onClicked: root.collapsed = false
+                }
+            }
 
-                    ToolButton { text: "B"; font.bold: true; focusPolicy: Qt.NoFocus; onClicked: root.bold() }
-                    ToolButton { text: "I"; font.italic: true; focusPolicy: Qt.NoFocus; onClicked: root.italic() }
-                    ToolButton { text: "U"; focusPolicy: Qt.NoFocus; onClicked: root.underline() }
-                    ToolButton { text: "S"; focusPolicy: Qt.NoFocus; onClicked: root.strike() }
+            Flow {
+                id: fullFlow
+                visible: !root.collapsed
+                width: parent.width
+                spacing: ThemeManager.spacingSmall
+                flow: Flow.LeftToRight
 
-                    ToolSeparator { }
+                property int controlHeight: 28
 
-                    ToolButton {
-                        text: "Color"
-                        focusPolicy: Qt.NoFocus
-                        onClicked: colorMenu.open()
-                    }
+                ToolButton { text: "B"; height: fullFlow.controlHeight; font.bold: true; focusPolicy: Qt.NoFocus; onClicked: root.bold() }
+                ToolButton { text: "I"; height: fullFlow.controlHeight; font.italic: true; focusPolicy: Qt.NoFocus; onClicked: root.italic() }
+                ToolButton { text: "U"; height: fullFlow.controlHeight; focusPolicy: Qt.NoFocus; onClicked: root.underline() }
+                ToolButton { text: "S"; height: fullFlow.controlHeight; focusPolicy: Qt.NoFocus; onClicked: root.strike() }
+                ToolButton { text: "Link"; height: fullFlow.controlHeight; focusPolicy: Qt.NoFocus; onClicked: root.link() }
 
-                    ComboBox {
-                        id: fontCombo
-                        width: 160
-                        focusPolicy: Qt.NoFocus
-                        model: [
-                            ThemeManager.fontFamily,
-                            ThemeManager.monoFontFamily,
-                            "Sans Serif",
-                            "Serif",
-                            "Monospace"
-                        ]
-                        onActivated: root.fontFamily(currentText)
-                    }
+                ToolButton {
+                    text: "Color"
+                    height: fullFlow.controlHeight
+                    focusPolicy: Qt.NoFocus
+                    onClicked: colorMenu.open()
+                }
 
-                    ComboBox {
-                        id: sizeCombo
-                        width: 90
-                        focusPolicy: Qt.NoFocus
-                        model: [10, 12, 14, 16, 18, 20, 24, 32]
-                        onActivated: root.fontSize(currentText)
-                    }
+                ComboBox {
+                    id: fontCombo
+                    width: 220
+                    height: fullFlow.controlHeight
+                    focusPolicy: Qt.NoFocus
+                    model: FontUtils.systemFontFamilies()
+                    onActivated: function(index) { root.fontFamily(fontCombo.textAt(index)) }
+                }
 
-                    Item { width: 1; height: 1 }
+                ComboBox {
+                    id: sizeCombo
+                    width: 90
+                    height: fullFlow.controlHeight
+                    focusPolicy: Qt.NoFocus
+                    model: [10, 12, 14, 16, 18, 20, 24, 32]
+                    onActivated: function(index) { root.fontSize(sizeCombo.textAt(index)) }
+                }
 
-                    ToolButton {
-                        text: "▴"
-                        focusPolicy: Qt.NoFocus
-                        onClicked: root.collapsed = true
-                    }
+                ToolButton {
+                    text: "▴"
+                    height: fullFlow.controlHeight
+                    focusPolicy: Qt.NoFocus
+                    onClicked: root.collapsed = true
                 }
             }
         }

@@ -45,7 +45,7 @@ Popup {
         { type: "quote", label: "Quote", description: "Block quote", icon: "❝" },
         { type: "divider", label: "Divider", description: "Horizontal line", icon: "—" },
         { type: "toggle", label: "Toggle", description: "Collapsible content", icon: "▶" },
-        { type: "link", label: "Link to page", description: "Link to another page", icon: "🔗" }
+        { type: "page", label: "Page", description: "Link to or create a page", icon: "🔗" }
     ]
     
     property var filteredCommands: commands

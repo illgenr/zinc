@@ -18,7 +18,7 @@ Item {
     readonly property bool showRendered: root.editor && root.editor.renderBlocksWhenNotFocused && !textEdit.activeFocus
 
     function markdownForRender() {
-        const raw = root.content || ""
+        const raw = (root.content || "").replace(/\\[(\\s|x|X)\\]/g, (m, v) => (v === "x" || v === "X") ? "☑" : "☐")
         if (raw === "") return ""
         return raw.split("\n").map(line => "> " + line).join("\n")
     }
@@ -51,11 +51,56 @@ Item {
         visible: root.showRendered
 
         MouseArea {
+            id: renderedMouse
             anchors.fill: parent
+            hoverEnabled: true
             cursorShape: Qt.IBeamCursor
+
+            property string hoveredLink: ""
+            property point hoveredPoint: Qt.point(0, 0)
+
+            Timer {
+                id: linkTooltipTimer
+                interval: 1500
+                repeat: false
+                onTriggered: {
+                    if (!renderedMouse.containsMouse) return
+                    if (!renderedMouse.hoveredLink || renderedMouse.hoveredLink === "") return
+                    linkToolTip.visible = true
+                }
+            }
+
+            ToolTip {
+                id: linkToolTip
+                parent: root
+                visible: false
+                text: renderedMouse.hoveredLink
+                x: Math.max(0, Math.min(root.width - implicitWidth, renderedMouse.hoveredPoint.x + 8))
+                y: Math.max(0, Math.min(root.height - implicitHeight, renderedMouse.hoveredPoint.y + 18))
+            }
+
+            function isExternalHttpLink(link) {
+                return link && (link.indexOf("http://") === 0 || link.indexOf("https://") === 0)
+            }
+
+            function updateHover(mouse) {
+                const link = rendered.linkAt(mouse.x, mouse.y) || ""
+                const localPoint = rendered.mapToItem(root, mouse.x, mouse.y)
+                renderedMouse.hoveredPoint = Qt.point(localPoint.x, localPoint.y)
+                if (link === renderedMouse.hoveredLink) return
+                renderedMouse.hoveredLink = link
+                linkToolTip.visible = false
+                linkTooltipTimer.stop()
+                if (link && link !== "") {
+                    linkTooltipTimer.restart()
+                }
+            }
+
             onClicked: function(mouse) {
                 if (!root.editor) return
                 const link = rendered.linkAt(mouse.x, mouse.y)
+                linkToolTip.visible = false
+                linkTooltipTimer.stop()
                 if (link && link.indexOf("zinc://date/") === 0 && "openDateEditor" in root.editor) {
                     root.editor.openDateEditor(root.blockIndex, link.substring("zinc://date/".length))
                     return
@@ -65,8 +110,22 @@ Item {
                         root.editor.navigateToPage(link.substring("zinc://page/".length))
                         return
                     }
+                    if (isExternalHttpLink(link) && "externalLinkRequested" in root.editor) {
+                        root.editor.externalLinkRequested(link)
+                        return
+                    }
                 }
                 textEdit.forceActiveFocus()
+            }
+
+            onPositionChanged: function(mouse) {
+                updateHover(mouse)
+            }
+
+            onExited: {
+                renderedMouse.hoveredLink = ""
+                linkToolTip.visible = false
+                linkTooltipTimer.stop()
             }
         }
     }
@@ -103,6 +162,7 @@ Item {
             if (text !== root.content) {
                 root.contentEdited(text)
             }
+            root.maybeConvertTaskMarker()
         }
         
         onActiveFocusChanged: {
@@ -136,6 +196,13 @@ Item {
             if (root.editor && root.editor.handleEditorKeyEvent && root.editor.handleEditorKeyEvent(event)) {
                 return
             }
+            if (event.text === "[") {
+                root.taskMarkerStartPos = cursorPosition
+                root.taskMarkerKeystrokes = 0
+            }
+            if (root.taskMarkerStartPos >= 0 && event.text && event.text.length > 0) {
+                root.taskMarkerKeystrokes += 1
+            }
             if ((event.modifiers & Qt.ControlModifier) && event.key === Qt.Key_C && root.multiBlockSelectionActive && root.editor) {
                 event.accepted = true
                 root.editor.copyCrossBlockSelectionToClipboard()
@@ -154,6 +221,33 @@ Item {
                 root.backspaceOnEmpty()
             }
         }
+    }
+
+    property int taskMarkerStartPos: -1
+    property int taskMarkerKeystrokes: 0
+    property bool taskMarkerConverting: false
+
+    function maybeConvertTaskMarker() {
+        if (taskMarkerConverting) return
+        if (taskMarkerStartPos < 0) return
+        if (taskMarkerKeystrokes > 10) {
+            taskMarkerStartPos = -1
+            taskMarkerKeystrokes = 0
+            return
+        }
+        const pos = textEdit.cursorPosition
+        if (pos - taskMarkerStartPos !== 3) return
+        const snippet = textEdit.text.substring(taskMarkerStartPos, taskMarkerStartPos + 3)
+        const m = snippet.match(/^\\[(\\s|x|X)\\]$/)
+        if (!m) return
+        const glyph = (m[1] === "x" || m[1] === "X") ? "☑" : "☐"
+        taskMarkerConverting = true
+        textEdit.remove(taskMarkerStartPos, 3)
+        textEdit.insert(taskMarkerStartPos, glyph)
+        textEdit.cursorPosition = taskMarkerStartPos + 1
+        taskMarkerConverting = false
+        taskMarkerStartPos = -1
+        taskMarkerKeystrokes = 0
     }
 
     Timer {

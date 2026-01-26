@@ -18,6 +18,7 @@ Item {
     property int headingLevel: 1
     property var editor: null
     property var textControl: (blockLoader.item && blockLoader.item.textControl) ? blockLoader.item.textControl : null
+    property var blockControl: blockLoader.item
     readonly property bool rangeSelected: editor &&
         editor.selectionStartBlockIndex >= 0 &&
         blockIndex >= editor.selectionStartBlockIndex &&
@@ -137,8 +138,39 @@ Item {
 
         // Indent spacing
         Item {
+            id: indentSpacer
             width: depth * ThemeManager.blockIndent
         }
+
+        // Block content
+        Loader {
+            id: blockLoader
+
+            Layout.fillWidth: true
+
+            sourceComponent: {
+                switch (blockType) {
+                    case "heading": return headingComponent
+                    case "todo": return todoComponent
+                    case "image": return imageComponent
+                    case "columns": return columnsComponent
+                    case "code": return codeComponent
+                    case "quote": return quoteComponent
+                    case "divider": return dividerComponent
+                    case "toggle": return toggleComponent
+                    case "link": return linkComponent
+                    default: return paragraphComponent
+                }
+            }
+        }
+    }
+
+    // Selection + drag gutter (position-adjustable; placed outside layout so it doesn't shift content).
+    Item {
+        id: gutterLayer
+        width: 38
+        height: parent.height
+        x: indentSpacer.width + ThemeManager.spacingSmall + EditorPreferences.gutterPositionPx - width
 
         // Selection gutter (drag to select a range of blocks)
         Item {
@@ -179,6 +211,7 @@ Item {
 
         // Drag handle (appears on hover)
         Item {
+            x: 14
             width: 24
             height: parent.height
 
@@ -220,28 +253,6 @@ Item {
                     onReleased: {
                         if (root.editor) root.editor.endReorderBlock()
                     }
-                }
-            }
-        }
-
-        // Block content
-        Loader {
-            id: blockLoader
-
-            Layout.fillWidth: true
-
-            sourceComponent: {
-                switch (blockType) {
-                    case "heading": return headingComponent
-                    case "todo": return todoComponent
-                    case "image": return imageComponent
-                    case "columns": return columnsComponent
-                    case "code": return codeComponent
-                    case "quote": return quoteComponent
-                    case "divider": return dividerComponent
-                    case "toggle": return toggleComponent
-                    case "link": return linkComponent
-                    default: return paragraphComponent
                 }
             }
         }

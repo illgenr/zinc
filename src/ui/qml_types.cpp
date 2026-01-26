@@ -5,6 +5,7 @@
 #include "ui/Cmark.hpp"
 #include "ui/MarkdownBlocks.hpp"
 #include "ui/InlineFormatting.hpp"
+#include "ui/FontUtils.hpp"
 #include "ui/models/BlockModel.hpp"
 #include "ui/models/PageTreeModel.hpp"
 #include "ui/models/SearchResultModel.hpp"
@@ -31,6 +32,7 @@ void registerQmlTypes() {
     qmlRegisterSingletonType<MarkdownBlocks>("zinc", 1, 0, "MarkdownBlocks", MarkdownBlocks::create);
     qmlRegisterSingletonType<Cmark>("zinc", 1, 0, "Cmark", Cmark::create);
     qmlRegisterSingletonType<InlineFormatting>("zinc", 1, 0, "InlineFormatting", InlineFormatting::create);
+    qmlRegisterSingletonType<FontUtils>("zinc", 1, 0, "FontUtils", FontUtils::create);
     
     // Platform utilities
     qmlRegisterSingletonType<platform::AndroidUtils>("zinc", 1, 0, "AndroidUtils", platform::AndroidUtils::create);

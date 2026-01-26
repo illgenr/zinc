@@ -23,6 +23,7 @@ Dialog {
         { key: "Ctrl+B", desc: "Bold (hybrid editor)" },
         { key: "Ctrl+I", desc: "Italic (hybrid editor)" },
         { key: "Ctrl+U", desc: "Underline (hybrid editor)" },
+        { key: "Ctrl+L", desc: "Insert link (hybrid editor)" },
         { key: "Ctrl+Shift+M", desc: "Toggle formatting bar (hybrid editor)" },
         { key: "Ctrl+Shift+?", desc: "Show this screen" },
         { key: "Shift+Enter", desc: "Insert newline in text blocks" },

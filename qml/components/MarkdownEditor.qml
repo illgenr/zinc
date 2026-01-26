@@ -11,6 +11,7 @@ Item {
     property var availablePages: []
 
     signal titleEdited(string newTitle)
+    signal titleEditingFinished(string pageId, string newTitle)
 
     property var blockSpans: []
     property int draggingBlockIndex: -1
@@ -18,6 +19,8 @@ Item {
 
     property double lastLocalEditMs: 0
     property var pendingDateInsertSpan: null
+    property string titleEditingPageId: ""
+    property string titleEditingOriginalTitle: ""
 
     function pad2(n) {
         const s = "" + n
@@ -68,7 +71,7 @@ Item {
     }
 
     function ensureEditorPadding() {
-        editor.leftPadding = gutter.width + ThemeManager.spacingMedium
+        editor.leftPadding = ThemeManager.spacingSmall
         editor.rightPadding = ThemeManager.spacingMedium
         editor.topPadding = ThemeManager.spacingMedium
         editor.bottomPadding = ThemeManager.spacingMedium
@@ -208,6 +211,8 @@ Item {
                 Layout.fillWidth: true
                 Layout.topMargin: ThemeManager.spacingXLarge
                 Layout.bottomMargin: ThemeManager.spacingSmall
+                Layout.leftMargin: ThemeManager.spacingSmall
+                Layout.rightMargin: ThemeManager.spacingSmall
 
                 text: pageTitle
                 color: ThemeManager.text
@@ -226,6 +231,29 @@ Item {
                 onTextChanged: {
                     if (text !== pageTitle) {
                         root.titleEdited(text)
+                    }
+                }
+
+                onActiveFocusChanged: {
+                    if (activeFocus) {
+                        root.titleEditingPageId = root.pageId
+                        root.titleEditingOriginalTitle = text
+                        return
+                    }
+                    const editedId = root.titleEditingPageId
+                    const changed = editedId && editedId !== "" && text !== root.titleEditingOriginalTitle
+                    root.titleEditingPageId = ""
+                    root.titleEditingOriginalTitle = ""
+                    if (changed) {
+                        root.titleEditingFinished(editedId, text)
+                    }
+                }
+
+                Keys.onPressed: function(event) {
+                    if (event.key === Qt.Key_Tab || event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                        event.accepted = true
+                        Qt.callLater(() => root.focusContent())
+                        return
                     }
                 }
             }
@@ -352,10 +380,10 @@ Item {
 
                 Item {
                     id: gutter
-                    anchors.left: parent.left
                     anchors.top: parent.top
                     anchors.bottom: parent.bottom
                     width: 28
+                    x: editor.leftPadding + EditorPreferences.gutterPositionPx - width
 
                     Repeater {
                         model: root.blockSpans
@@ -530,9 +558,9 @@ Item {
                 replaceWith("<details><summary>" + (content === "" ? "Toggle" : content) + "</summary></details>")
             } else if (command.type === "paragraph") {
                 replaceWith(content)
-            } else if (command.type === "link") {
-                // Placeholder link; page picker integration TBD.
-                replaceWith("[Link](zinc://page/)")
+            } else if (command.type === "page") {
+                // Placeholder page link.
+                replaceWith("[Page](zinc://page/)")
             }
         }
     }

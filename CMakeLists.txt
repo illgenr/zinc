@@ -232,6 +232,8 @@ target_link_libraries(zinc_network PUBLIC
 add_library(zinc_ui STATIC
     src/ui/qml_types.hpp
     src/ui/qml_types.cpp
+    src/ui/FontUtils.hpp
+    src/ui/FontUtils.cpp
     src/ui/Clipboard.hpp
     src/ui/Clipboard.cpp
     src/ui/AttachmentImageProvider.hpp
@@ -326,9 +328,12 @@ qt_add_executable(appzinc
 set(ZINC_QML_FILES
     qml/Main.qml
     qml/sync/SyncPreferences.qml
+    qml/editor/EditorPreferences.qml
+    qml/preferences/GeneralPreferences.qml
     qml/components/MarkdownEditor.qml
     qml/components/BlockEditor.qml
     qml/components/InlineFormatBar.qml
+    qml/components/InlinePagePickerPopup.qml
     qml/components/BlockEditorEnterLogic.js
     qml/components/CursorMotionIndicatorLogic.js
     qml/components/ScrollMath.js
@@ -372,6 +377,8 @@ endif()
 # Mark ThemeManager as a singleton BEFORE qt_add_qml_module
 set_source_files_properties(qml/theme/ThemeManager.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
 set_source_files_properties(qml/sync/SyncPreferences.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
+set_source_files_properties(qml/editor/EditorPreferences.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
+set_source_files_properties(qml/preferences/GeneralPreferences.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
 
 qt_add_qml_module(appzinc
     URI zinc
@@ -571,6 +578,11 @@ if(ZINC_BUILD_TESTS)
 			        tests/qml/test_sidebar_toggle_button_qml.cpp
 			        tests/qml/test_desktop_sidebar_actions_qml.cpp
 			        tests/qml/test_mobile_sidebar_actions_qml.cpp
+                    tests/qml/test_editor_gutter_settings_qml.cpp
+                    tests/qml/test_title_editing_commit_qml.cpp
+                    tests/qml/test_external_link_tooltip_qml.cpp
+                    tests/qml/test_slash_menu_page_command_qml.cpp
+                    tests/qml/test_task_marker_rendering_qml.cpp
 				    )
 
     qt_add_qml_module(zinc_qml_tests

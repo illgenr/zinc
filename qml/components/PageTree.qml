@@ -400,15 +400,18 @@ Item {
         return s4() + s4() + '-' + s4() + '-' + s4() + '-' + s4() + '-' + s4() + s4() + s4()
     }
     
-    function createPage(parentId) {
-        return createPageWithNotebook(parentId, "")
+    function createPage(parentId, options) {
+        return createPageWithNotebook(parentId, "", options)
     }
 
-    function createPageWithNotebook(parentId, notebookId) {
+    function createPageWithNotebook(parentId, notebookId, options) {
         let id = generateUuid()
         let depth = 0
         let insertIndex = pageModel.count
         let resolvedNotebookId = notebookId || ""
+        const selectAfterCreate = options && ("selectAfterCreate" in options)
+            ? !!options.selectAfterCreate
+            : GeneralPreferences.jumpToNewPageOnCreate
 
         // Calculate depth and notebook based on parent page (if any).
         if (parentId && parentId !== "") {
@@ -460,8 +463,10 @@ Item {
         savePagesToStorage()
         pagesChanged()
 
-        root.selectedPageId = id
-        pageSelected(id, "Untitled")
+        if (selectAfterCreate) {
+            root.selectedPageId = id
+            pageSelected(id, "Untitled")
+        }
         return id
     }
     

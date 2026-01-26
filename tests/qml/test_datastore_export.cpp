@@ -109,6 +109,46 @@ TEST_CASE("DataStore: export notebooks as html", "[qml][datastore][export]") {
     REQUIRE(html.contains(QStringLiteral("checked")));
 }
 
+TEST_CASE("DataStore: html export rewrites zinc page links", "[qml][datastore][export]") {
+    zinc::ui::DataStore store;
+    REQUIRE(store.initialize());
+    REQUIRE(store.resetDatabase());
+
+    const auto nbId = store.createNotebook(QStringLiteral("Links"));
+    REQUIRE_FALSE(nbId.isEmpty());
+
+    const auto pageA = QStringLiteral("00000000-0000-0000-0000-0000000000aa");
+    const auto pageB = QStringLiteral("00000000-0000-0000-0000-0000000000bb");
+
+    store.savePage(makePage(pageB, nbId, QStringLiteral("Target"), QStringLiteral("B")));
+    store.savePage(makePage(pageA,
+                            nbId,
+                            QStringLiteral("Source"),
+                            QStringLiteral("[Go](zinc://page/%1)\n").arg(pageB)));
+
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+
+    const auto ok = store.exportNotebooks(QVariantList{nbId}, QUrl::fromLocalFile(tmp.path()), QStringLiteral("html"), false);
+    REQUIRE(ok);
+
+    const auto files = listFilesRecursively(tmp.path());
+    REQUIRE(files.size() == 2);
+
+    QString sourceHtml;
+    for (const auto& f : files) {
+        if (f.contains(pageA.left(8))) {
+            sourceHtml = readAllText(f);
+            break;
+        }
+    }
+    REQUIRE_FALSE(sourceHtml.isEmpty());
+
+    const auto expectedTarget = QStringLiteral("0000-Target-%1.html").arg(pageB.left(8));
+    REQUIRE(sourceHtml.contains(expectedTarget));
+    REQUIRE_FALSE(sourceHtml.contains(QStringLiteral("zinc://page/")));
+}
+
 TEST_CASE("DataStore: export respects selected notebooks", "[qml][datastore][export]") {
     zinc::ui::DataStore store;
     REQUIRE(store.initialize());

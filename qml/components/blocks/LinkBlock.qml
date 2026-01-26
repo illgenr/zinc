@@ -22,6 +22,17 @@ Item {
     signal linkClicked(string pageId)
     
     implicitHeight: 40
+
+    function beginEditing(initialQuery) {
+        root.editing = true
+        root.queryText = initialQuery === undefined ? (linkedPageTitle || "") : (initialQuery || "")
+        Qt.callLater(function() {
+            input.forceActiveFocus()
+            input.selectAll()
+            suggestions.update()
+            suggestions.openBelow()
+        })
+    }
     
     Rectangle {
         anchors.fill: parent
@@ -98,14 +109,7 @@ Item {
                     root.linkClicked(linkedPageId)
                     return
                 }
-                root.editing = true
-                root.queryText = linkedPageTitle || ""
-                Qt.callLater(function() {
-                    input.forceActiveFocus()
-                    input.selectAll()
-                    suggestions.update()
-                    suggestions.openBelow()
-                })
+                root.beginEditing()
             }
         }
     }

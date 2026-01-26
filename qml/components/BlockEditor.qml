@@ -18,6 +18,7 @@ FocusScope {
     Shortcut { sequences: ["Ctrl+B", "Meta+B"]; onActivated: formatBar.bold() }
     Shortcut { sequences: ["Ctrl+I", "Meta+I"]; onActivated: formatBar.italic() }
     Shortcut { sequences: ["Ctrl+U", "Meta+U"]; onActivated: formatBar.underline() }
+    Shortcut { sequences: ["Ctrl+L", "Meta+L"]; onActivated: formatBar.link() }
     Shortcut { sequences: ["Ctrl+Shift+M", "Meta+Shift+M"]; onActivated: formatBar.collapsed = !formatBar.collapsed }
 
     Shortcut { sequences: ["Ctrl+Home", "Meta+Home"]; onActivated: root.focusDocumentStart() }
@@ -130,9 +131,12 @@ FocusScope {
     signal cursorMoved(int blockIndex, int cursorPos)
     signal contentSaved(string pageId)
     signal titleEdited(string newTitle)
+    signal titleEditingFinished(string pageId, string newTitle)
+    signal externalLinkRequested(string url)
     signal navigateToPage(string targetPageId)
     signal showPagePicker(int blockIndex)
     signal createChildPageRequested(string title, int blockIndex)
+    signal createChildPageInlineRequested(string title, int blockIndex, int replaceStart, int replaceEnd)
 
     property bool showRemoteCursor: false
     property string remoteCursorPageId: ""
@@ -155,6 +159,62 @@ FocusScope {
 
     property bool debugSelection: Qt.application.arguments.indexOf("--debug-selection") !== -1
     property int pendingDateInsertBlockIndex: -1
+    property string titleEditingPageId: ""
+    property string titleEditingOriginalTitle: ""
+    property int pendingSlashBlockIndex: -1
+    property int pendingSlashReplaceStart: -1
+    property int pendingSlashReplaceEnd: -1
+    property bool pendingSlashInline: false
+    property var pendingInlineDateInsert: null
+
+    function slashTokenAt(text, cursorPos) {
+        const s = text || ""
+        const pos = Math.max(0, Math.min(cursorPos === undefined ? s.length : cursorPos, s.length))
+        const prefix = s.substring(0, pos)
+        const lastSpace = Math.max(prefix.lastIndexOf(" "), prefix.lastIndexOf("\n"), prefix.lastIndexOf("\t"))
+        const tokenStart = lastSpace + 1
+        if (tokenStart < 0 || tokenStart >= prefix.length) return null
+        if (prefix[tokenStart] !== "/") return null
+        if (tokenStart > 0) {
+            const prev = prefix[tokenStart - 1]
+            if (prev !== " " && prev !== "\n" && prev !== "\t") return null
+        }
+        const filter = prefix.substring(tokenStart + 1)
+        return { start: tokenStart, end: pos, filter: filter }
+    }
+
+    function replaceBlockContentRange(blockIndex, start, end, replacement, cursorAfter) {
+        if (blockIndex < 0 || blockIndex >= blockModel.count) return
+        const item = blockRepeater.itemAt(blockIndex)
+        const tc = item && item.textControl ? item.textControl : null
+        const row = blockModel.get(blockIndex)
+        const modelText = row && ("content" in row) ? (row.content || "") : ""
+        const current = tc && ("text" in tc) ? (tc.text || "") : modelText
+        const a = Math.max(0, Math.min(start, end))
+        const b = Math.max(0, Math.max(start, end))
+        const next = current.substring(0, a) + (replacement || "") + current.substring(b)
+
+        blockModel.beginUndoMacro("Insert")
+        blockModel.setProperty(blockIndex, "content", next)
+        blockModel.endUndoMacro()
+        scheduleAutosave()
+
+        if (tc && ("text" in tc) && tc.text !== next) tc.text = next
+        if (tc) {
+            Qt.callLater(() => {
+                tc.forceActiveFocus()
+                const c = cursorAfter === undefined ? (a + (replacement || "").length) : cursorAfter
+                if ("cursorPosition" in tc) tc.cursorPosition = Math.max(0, Math.min(c, (tc.text || "").length))
+            })
+        }
+    }
+
+    function insertPageLinkAt(blockIndex, start, end, pageId, pageTitle) {
+        const label = (pageTitle || "Untitled").replace(/]/g, "\\]")
+        const href = "zinc://page/" + (pageId || "")
+        const md = "[" + label + "](" + href + ")"
+        replaceBlockContentRange(blockIndex, start, end, md)
+    }
 
     readonly property bool hasCrossBlockSelection: selectionAnchorBlockIndex >= 0 &&
                                                   selectionFocusBlockIndex >= 0 &&
@@ -1313,6 +1373,10 @@ FocusScope {
                     blockModel.endUndoMacro()
                     root.scheduleAutosave()
 
+                    const itemNow = blockRepeater.itemAt(idx)
+                    const tcNow = itemNow && itemNow.textControl ? itemNow.textControl : null
+                    if (tcNow && ("text" in tcNow) && tcNow.text !== next) tcNow.text = next
+
                     Qt.callLater(() => {
                         const item = blockRepeater.itemAt(idx)
                         const tc = item && item.textControl ? item.textControl : null
@@ -1388,6 +1452,8 @@ FocusScope {
                 Layout.fillWidth: true
                 Layout.topMargin: ThemeManager.spacingXLarge
                 Layout.bottomMargin: ThemeManager.spacingLarge
+                Layout.leftMargin: ThemeManager.spacingSmall
+                Layout.rightMargin: ThemeManager.spacingSmall
                 
                 text: pageTitle
                 color: ThemeManager.text
@@ -1408,6 +1474,29 @@ FocusScope {
                         root.titleEdited(text)
                     }
                 }
+
+                onActiveFocusChanged: {
+                    if (activeFocus) {
+                        root.titleEditingPageId = root.pageId
+                        root.titleEditingOriginalTitle = text
+                        return
+                    }
+                    const editedId = root.titleEditingPageId
+                    const changed = editedId && editedId !== "" && text !== root.titleEditingOriginalTitle
+                    root.titleEditingPageId = ""
+                    root.titleEditingOriginalTitle = ""
+                    if (changed) {
+                        root.titleEditingFinished(editedId, text)
+                    }
+                }
+
+                Keys.onPressed: function(event) {
+                    if (event.key === Qt.Key_Tab || event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                        event.accepted = true
+                        Qt.callLater(() => root.focusContent())
+                        return
+                    }
+                }
             }
 
             // Blocks
@@ -1415,7 +1504,7 @@ FocusScope {
         id: blockRepeater
         model: blockModel
                 
-        delegate: Block {
+                delegate: Block {
             Layout.fillWidth: true
             objectName: "blockDelegate_" + index
                     
@@ -1441,10 +1530,18 @@ FocusScope {
                         currentBlockIndex = index
                         scheduleAutosave()
                         
-                        // Check for slash command
-                        if (newContent === "/" || (newContent.startsWith("/") && !newContent.includes(" "))) {
+                        // Slash command: allow invocation mid-block (at a whitespace boundary).
+                        const token = root.slashTokenAt(newContent, curPos)
+                        const wantsSlash = token !== null && token.end >= token.start + 1
+                        if (wantsSlash) {
                             slashMenu.currentBlockIndex = index
-                            slashMenu.filterText = newContent.substring(1)
+                            slashMenu.filterText = token.filter || ""
+                            root.pendingSlashBlockIndex = index
+                            root.pendingSlashReplaceStart = token.start
+                            root.pendingSlashReplaceEnd = token.end
+                            const before = (newContent || "").substring(0, token.start)
+                            const after = (newContent || "").substring(token.end)
+                            root.pendingSlashInline = before.trim().length > 0 || after.trim().length > 0
                             const blockItem = blockRepeater.itemAt(index)
                             if (blockItem) {
                                 const p = blockItem.mapToItem(null, ThemeManager.spacingLarge, blockItem.height)
@@ -1457,6 +1554,12 @@ FocusScope {
                             }
                             slashMenu.open()
                         } else {
+                            if (root.pendingSlashBlockIndex === index) {
+                                root.pendingSlashBlockIndex = -1
+                                root.pendingSlashReplaceStart = -1
+                                root.pendingSlashReplaceEnd = -1
+                                root.pendingSlashInline = false
+                            }
                             slashMenu.close()
                         }
                         root.scheduleEnsureFocusedCursorVisible()
@@ -1619,67 +1722,133 @@ FocusScope {
         onCommandSelected: function(command) {
             let idx = slashMenu.currentBlockIndex
             if (idx >= 0 && idx < blockModel.count) {
+                const inline = root.pendingSlashInline && root.pendingSlashBlockIndex === idx &&
+                               root.pendingSlashReplaceStart >= 0 && root.pendingSlashReplaceEnd >= 0
                 const needsImmediateMutation = command.type !== "date" &&
                                               command.type !== "datetime" &&
                                               command.type !== "image"
+                const needsBlockMutation = !inline
                 if (needsImmediateMutation) {
-                    blockModel.beginUndoMacro("Slash command")
+                    if (needsBlockMutation) blockModel.beginUndoMacro("Slash command")
                 }
-                if (command.type === "date") {
+
+                if (inline && (command.type === "date" || command.type === "datetime")) {
+                    root.pendingInlineDateInsert = {
+                        blockIndex: idx,
+                        start: root.pendingSlashReplaceStart,
+                        end: root.pendingSlashReplaceEnd,
+                        includeTime: command.type === "datetime"
+                    }
+                    datePicker.selectedDate = new Date()
+                    datePicker.includeTime = command.type === "datetime"
+                    datePicker.open()
+                } else if (inline && command.type === "now") {
+                    root.replaceBlockContentRange(idx, root.pendingSlashReplaceStart, root.pendingSlashReplaceEnd, formatLocalDateTime(new Date()))
+                } else if (command.type === "page") {
+                    const query = ""
+                    const item = blockRepeater.itemAt(idx)
+                    const tc = item && item.textControl ? item.textControl : null
+                    inlinePagePicker._blockIndex = idx
+                    inlinePagePicker._replaceStart = root.pendingSlashReplaceStart
+                    inlinePagePicker._replaceEnd = root.pendingSlashReplaceEnd
+                    if (tc && ("cursorRectangle" in tc)) {
+                        const rect = tc.cursorRectangle
+                        const p = tc.mapToItem(root, rect.x, rect.y + rect.height)
+                        inlinePagePicker.openAt(p.x, p.y + ThemeManager.spacingSmall, query)
+                    } else {
+                        inlinePagePicker.openAt(ThemeManager.spacingLarge, ThemeManager.spacingLarge, query)
+                    }
+                } else if (!inline && command.type === "date") {
                     pendingDateInsertBlockIndex = idx
                     datePicker.selectedDate = new Date()
                     datePicker.includeTime = false
                     datePicker.open()
-                } else if (command.type === "datetime") {
+                } else if (!inline && command.type === "datetime") {
                     pendingDateInsertBlockIndex = idx
                     datePicker.selectedDate = new Date()
                     datePicker.includeTime = true
                     datePicker.open()
-                } else if (command.type === "now") {
+                } else if (!inline && command.type === "now") {
                     blockModel.setProperty(idx, "blockType", "paragraph")
                     blockModel.setProperty(idx, "content", formatLocalDateTime(new Date()))
                     scheduleAutosave()
                     Qt.callLater(() => root.focusBlock(idx))
-                } else if (command.type === "link") {
-                    // Show page picker for link blocks
-                    blockModel.setProperty(idx, "blockType", "link")
-                    blockModel.setProperty(idx, "content", "")
-                    pendingLinkBlockIndex = idx
-                    root.showPagePicker(idx)
                 } else if (command.type === "image") {
-                    startImageUpload(idx)
+                    if (!inline) startImageUpload(idx)
                 } else if (command.type === "columns") {
                     const count = command.count || 2
                     let cols = []
                     for (let i = 0; i < count; i++) cols.push("")
-                    blockModel.setProperty(idx, "blockType", "columns")
-                    blockModel.setProperty(idx, "content", JSON.stringify({ cols: cols }))
+                    if (!inline) {
+                        blockModel.setProperty(idx, "blockType", "columns")
+                        blockModel.setProperty(idx, "content", JSON.stringify({ cols: cols }))
+                    }
                 } else {
                     // Transform current block
-                    blockModel.setProperty(idx, "blockType", command.type)
-                    blockModel.setProperty(idx, "content", "")
-                    if (command.type === "heading") {
-                        blockModel.setProperty(idx, "headingLevel", command.level || 1)
+                    if (!inline) {
+                        blockModel.setProperty(idx, "blockType", command.type)
+                        blockModel.setProperty(idx, "content", "")
+                        if (command.type === "heading") {
+                            blockModel.setProperty(idx, "headingLevel", command.level || 1)
+                        }
                     }
                 }
                 if (needsImmediateMutation) {
-                    blockModel.endUndoMacro()
+                    if (needsBlockMutation) blockModel.endUndoMacro()
                 }
-                scheduleAutosave()
+                if (!inline) scheduleAutosave()
                 const shouldRefocus = command.type !== "date" &&
                                       command.type !== "datetime" &&
                                       command.type !== "image" &&
-                                      command.type !== "link"
-                if (shouldRefocus) {
+                                      command.type !== "page"
+                if (shouldRefocus && !inline) {
                     Qt.callLater(() => root.focusBlock(idx))
                 }
             }
         }
     }
 
+    InlinePagePickerPopup {
+        id: inlinePagePicker
+        parent: root
+        z: 20000
+        availablePages: root.availablePages || []
+
+        property int _blockIndex: -1
+        property int _replaceStart: -1
+        property int _replaceEnd: -1
+
+        onPageSelected: function(pageId, pageTitle) {
+            if (_blockIndex < 0) return
+            root.insertPageLinkAt(_blockIndex, _replaceStart, _replaceEnd, pageId, pageTitle)
+            _blockIndex = -1
+            _replaceStart = -1
+            _replaceEnd = -1
+        }
+
+        onCreatePageRequested: function(title) {
+            if (_blockIndex < 0) return
+            root.createChildPageInlineRequested(title, _blockIndex, _replaceStart, _replaceEnd)
+            _blockIndex = -1
+            _replaceStart = -1
+            _replaceEnd = -1
+        }
+    }
+
     DatePickerPopup {
         id: datePicker
         onAccepted: function(date) {
+            if (root.pendingInlineDateInsert) {
+                const payload = root.pendingInlineDateInsert
+                root.pendingInlineDateInsert = null
+                root.replaceBlockContentRange(
+                    payload.blockIndex,
+                    payload.start,
+                    payload.end,
+                    (payload.includeTime ? formatLocalDateTime(date) : formatLocalDate(date)))
+                return
+            }
+
             const idx = pendingDateInsertBlockIndex
             pendingDateInsertBlockIndex = -1
             if (idx < 0 || idx >= blockModel.count) return

@@ -355,8 +355,17 @@ ApplicationWindow {
                 onTitleEdited: function(newTitle) {
                     if (root.currentPage) {
                         root.currentPage.title = newTitle
-                        pageTree.updatePageTitle(root.currentPage.id, newTitle)
                     }
+                }
+
+                onTitleEditingFinished: function(pageId, newTitle) {
+                    if (!pageId || pageId === "") return
+                    pageTree.updatePageTitle(pageId, newTitle)
+                }
+
+                onExternalLinkRequested: function(url) {
+                    if (!url || url === "") return
+                    Qt.openUrlExternally(url)
                 }
 
                 onShowPagePicker: function(blockIndex) {
@@ -375,10 +384,26 @@ ApplicationWindow {
 
                 onCreateChildPageRequested: function(title, blockIndex) {
                     if (!title || title === "") return
-                    var newId = pageTree.createPage(mobileBlockEditor.pageId)
+                    var newId = pageTree.createPage(mobileBlockEditor.pageId, { selectAfterCreate: false })
                     if (!newId || newId === "") return
                     pageTree.updatePageTitle(newId, title)
                     mobileBlockEditor.setLinkAtIndex(blockIndex, newId, title)
+                    if (GeneralPreferences.jumpToNewPageOnCreate) {
+                        pageTree.selectPage(newId)
+                    }
+                }
+
+                onCreateChildPageInlineRequested: function(title, blockIndex, replaceStart, replaceEnd) {
+                    if (!title || title === "") return
+                    var newId = pageTree.createPage(mobileBlockEditor.pageId, { selectAfterCreate: false })
+                    if (!newId || newId === "") return
+                    pageTree.updatePageTitle(newId, title)
+                    if (mobileBlockEditor && mobileBlockEditor.insertPageLinkAt) {
+                        mobileBlockEditor.insertPageLinkAt(blockIndex, replaceStart, replaceEnd, newId, title)
+                    }
+                    if (GeneralPreferences.jumpToNewPageOnCreate) {
+                        pageTree.selectPage(newId)
+                    }
                 }
 
                 onCursorMoved: function(blockIndex, cursorPos) {
@@ -603,8 +628,17 @@ ApplicationWindow {
                         onTitleEdited: function(newTitle) {
                             if (currentPage) {
                                 currentPage.title = newTitle
-                                pageTree.updatePageTitle(currentPage.id, newTitle)
                             }
+                        }
+
+                        onTitleEditingFinished: function(pageId, newTitle) {
+                            if (!pageId || pageId === "") return
+                            pageTree.updatePageTitle(pageId, newTitle)
+                        }
+
+                        onExternalLinkRequested: function(url) {
+                            if (!url || url === "") return
+                            Qt.openUrlExternally(url)
                         }
 
                         onShowPagePicker: function(blockIndex) {
@@ -624,10 +658,26 @@ ApplicationWindow {
 
                         onCreateChildPageRequested: function(title, blockIndex) {
                             if (!title || title === "") return
-                            var newId = pageTree.createPage(blockEditor.pageId)
+                            var newId = pageTree.createPage(blockEditor.pageId, { selectAfterCreate: false })
                             if (!newId || newId === "") return
                             pageTree.updatePageTitle(newId, title)
                             blockEditor.setLinkAtIndex(blockIndex, newId, title)
+                            if (GeneralPreferences.jumpToNewPageOnCreate) {
+                                pageTree.selectPage(newId)
+                            }
+                        }
+
+                        onCreateChildPageInlineRequested: function(title, blockIndex, replaceStart, replaceEnd) {
+                            if (!title || title === "") return
+                            var newId = pageTree.createPage(blockEditor.pageId, { selectAfterCreate: false })
+                            if (!newId || newId === "") return
+                            pageTree.updatePageTitle(newId, title)
+                            if (blockEditor && blockEditor.insertPageLinkAt) {
+                                blockEditor.insertPageLinkAt(blockIndex, replaceStart, replaceEnd, newId, title)
+                            }
+                            if (GeneralPreferences.jumpToNewPageOnCreate) {
+                                pageTree.selectPage(newId)
+                            }
                         }
 
                         onCursorMoved: function(blockIndex, cursorPos) {
@@ -660,8 +710,12 @@ ApplicationWindow {
                         onTitleEdited: function(newTitle) {
                             if (currentPage) {
                                 currentPage.title = newTitle
-                                pageTree.updatePageTitle(currentPage.id, newTitle)
                             }
+                        }
+
+                        onTitleEditingFinished: function(pageId, newTitle) {
+                            if (!pageId || pageId === "") return
+                            pageTree.updatePageTitle(pageId, newTitle)
                         }
                     }
                 }

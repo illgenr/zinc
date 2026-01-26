@@ -126,7 +126,9 @@ bool write_text_file(const QString& filePath, const QString& text, QString* outE
     return true;
 }
 
-QString html_document_for_page(const QString& title, const QString& markdown) {
+QString html_document_for_page(const QString& title,
+                               const QString& markdown,
+                               const QHash<QString, QString>& pageIdToFileName) {
     const Cmark cmark;
     const auto render_task_list_checkboxes = [](const QString& html) -> QString {
         if (html.isEmpty()) return html;
@@ -156,8 +158,35 @@ QString html_document_for_page(const QString& title, const QString& markdown) {
         return out;
     };
 
+    const auto rewrite_page_links = [&](const QString& html) -> QString {
+        if (html.isEmpty()) return html;
+        if (pageIdToFileName.isEmpty()) return html;
+
+        static const QRegularExpression re(QStringLiteral(R"(href=\"zinc://page/([^\"]+)\")"));
+
+        QString out;
+        out.reserve(html.size());
+        int last = 0;
+        auto it = re.globalMatch(html);
+        while (it.hasNext()) {
+            const auto m = it.next();
+            out += html.mid(last, m.capturedStart(0) - last);
+            const auto pageId = m.captured(1);
+            const auto fileName = pageIdToFileName.value(pageId);
+            if (!fileName.isEmpty()) {
+                out += QStringLiteral("href=\"") + fileName.toHtmlEscaped() + QLatin1Char('"');
+            } else {
+                out += m.captured(0);
+            }
+            last = m.capturedEnd(0);
+        }
+        out += html.mid(last);
+        return out;
+    };
+
     auto body = cmark.toHtml(markdown);
     body = render_task_list_checkboxes(body);
+    body = rewrite_page_links(body);
     return QStringLiteral(
                "<!doctype html>\n"
                "<html>\n"
@@ -3871,6 +3900,25 @@ bool DataStore::exportNotebooks(const QVariantList& notebookIds,
             }
         }
 
+        const auto pageIdToFileName = [&]() -> QHash<QString, QString> {
+            QHash<QString, QString> out;
+            out.reserve(pages.size());
+            for (const auto& row : pages) {
+                const auto pageId = row.pageId;
+                const auto title = row.title;
+                const auto fileTitle = sanitize_path_component(title).isEmpty()
+                    ? QStringLiteral("Untitled")
+                    : sanitize_path_component(title);
+                const auto fileName = QStringLiteral("%1-%2-%3.%4")
+                                          .arg(row.sortOrder, 4, 10, QLatin1Char('0'))
+                                          .arg(fileTitle)
+                                          .arg(pageId.left(8))
+                                          .arg(extension);
+                out.insert(pageId, fileName);
+            }
+            return out;
+        }();
+
         for (const auto& row : pages) {
             const auto pageId = row.pageId;
             const auto title = row.title;
@@ -3889,7 +3937,7 @@ bool DataStore::exportNotebooks(const QVariantList& notebookIds,
             const auto filePath = QDir(notebookDirPath).filePath(fileName);
 
             const auto payload = (normalizedFormat == QStringLiteral("html"))
-                ? html_document_for_page(title, markdown)
+                ? html_document_for_page(title, markdown, pageIdToFileName)
                 : (markdown.endsWith(QLatin1Char('\n')) ? markdown : (markdown + QLatin1Char('\n')));
 
             QString err;
