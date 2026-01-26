@@ -129,7 +129,6 @@ void InlineRichTextHighlighter::setDocument(QQuickTextDocument* doc) {
     if (m_document == doc) return;
     m_document = doc;
     rebuildHighlighter();
-    emit documentChanged();
 }
 
 QVariantList InlineRichTextHighlighter::runs() const {
@@ -140,15 +139,17 @@ void InlineRichTextHighlighter::setRuns(const QVariantList& runs) {
     if (m_runs == runs) return;
     m_runs = runs;
     rehighlight();
-    emit runsChanged();
 }
 
 void InlineRichTextHighlighter::rebuildHighlighter() {
-    m_impl.reset();
+    if (m_impl) {
+        m_impl->deleteLater();
+        m_impl = nullptr;
+    }
     if (!m_document) return;
     auto* doc = m_document->textDocument();
     if (!doc) return;
-    m_impl = std::make_unique<Impl>(doc);
+    m_impl = new Impl(doc);
     m_impl->setRuns(m_runs);
 }
 

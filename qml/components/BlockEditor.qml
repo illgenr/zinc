@@ -604,8 +604,9 @@ FocusScope {
         openImageFileDialog()
     }
 
-    function deleteBlockAt(blockIndex) {
+    function deleteBlockAt(blockIndex, focusAfter) {
         if (blockIndex < 0 || blockIndex >= blockModel.count) return
+        const shouldFocus = (focusAfter === undefined) ? true : !!focusAfter
         blockModel.remove(blockIndex)
         if (blockModel.count === 0) {
             blockModel.append({
@@ -620,11 +621,13 @@ FocusScope {
             })
         }
         scheduleAutosave()
-        const next = Math.max(0, Math.min(blockIndex - 1, blockModel.count - 1))
-        focusTimer.targetIndex = next
-        focusTimer.targetCursorPos = -1
-        focusTimer.attemptsRemaining = 10
-        focusTimer.start()
+        if (shouldFocus) {
+            const next = Math.max(0, Math.min(blockIndex - 1, blockModel.count - 1))
+            focusTimer.targetIndex = next
+            focusTimer.targetCursorPos = -1
+            focusTimer.attemptsRemaining = 10
+            focusTimer.start()
+        }
     }
 
     function handleEnterPressedAt(blockIndex) {
@@ -1598,7 +1601,12 @@ FocusScope {
                     
                     onBlockBackspaceOnEmpty: {
                         if (index > 0) {
-                            root.deleteBlockAt(index)
+                            // Defer model mutation until after the key event finishes dispatching.
+                            // Removing the currently-focused delegate can otherwise cause teardown
+                            // while the TextEdit is still processing Backspace.
+                            root.focusBlockAt(index - 1, -1)
+                            const capturedIndex = index
+                            Qt.callLater(() => root.deleteBlockAt(capturedIndex, false))
                         }
                     }
                     

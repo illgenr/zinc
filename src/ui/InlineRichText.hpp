@@ -15,8 +15,10 @@ public:
     explicit InlineRichText(QObject* parent = nullptr);
 
     static InlineRichText* create(QQmlEngine* engine, QJSEngine*) {
-        Q_UNUSED(engine)
         static InlineRichText instance;
+        if (engine) {
+            QQmlEngine::setObjectOwnership(&instance, QQmlEngine::CppOwnership);
+        }
         return &instance;
     }
 

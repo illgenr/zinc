@@ -4,8 +4,6 @@
 #include <QPointer>
 #include <QVariantList>
 
-#include <memory>
-
 #include <QQuickTextDocument>
 class QTextDocument;
 
@@ -38,7 +36,7 @@ private:
     QVariantList m_runs;
 
     class Impl;
-    std::unique_ptr<Impl> m_impl;
+    QPointer<Impl> m_impl;
 };
 
 } // namespace zinc::ui

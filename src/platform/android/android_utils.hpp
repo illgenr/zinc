@@ -24,8 +24,11 @@ class AndroidUtils : public QObject {
 public:
     explicit AndroidUtils(QObject* parent = nullptr);
     
-    static AndroidUtils* create(QQmlEngine*, QJSEngine*) {
+    static AndroidUtils* create(QQmlEngine* engine, QJSEngine*) {
         static AndroidUtils instance;
+        if (engine) {
+            QQmlEngine::setObjectOwnership(&instance, QQmlEngine::CppOwnership);
+        }
         return &instance;
     }
 

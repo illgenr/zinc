@@ -147,17 +147,17 @@ Item {
         }
     }
 
-    TextEdit {
-        id: textEdit
-        
-        anchors.fill: parent
-        anchors.margins: ThemeManager.spacingSmall
-        
-        text: root._lastPlainText
-        color: ThemeManager.text
-        font.family: ThemeManager.fontFamily
-        font.pixelSize: ThemeManager.fontSizeNormal
-        wrapMode: TextEdit.Wrap
+	    TextEdit {
+	        id: textEdit
+	        
+	        anchors.fill: parent
+	        anchors.margins: ThemeManager.spacingSmall
+	        
+	        text: root._lastPlainText
+	        color: ThemeManager.text
+	        font.family: ThemeManager.fontFamily
+	        font.pixelSize: ThemeManager.fontSizeNormal
+	        wrapMode: TextEdit.Wrap
         selectByMouse: true
         persistentSelection: true
         visible: !root.showRendered

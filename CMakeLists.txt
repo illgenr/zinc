@@ -557,9 +557,11 @@ if(ZINC_BUILD_TESTS)
 		        tests/qml/test_datastore_export.cpp
 		        tests/qml/test_export_folder_settings.cpp
 		        tests/qml/test_attachments_disk_storage.cpp
-		        tests/qml/test_block_editor_cursor_visibility_qml.cpp
-		        tests/qml/test_block_editor_enter_logic_qml.cpp
-		        tests/qml/test_block_model.cpp
+			        tests/qml/test_block_editor_cursor_visibility_qml.cpp
+			        tests/qml/test_block_editor_enter_logic_qml.cpp
+			        tests/qml/test_block_editor_backspace_delete_empty_block_qml.cpp
+			        tests/qml/test_paragraph_block_destroy_qml.cpp
+			        tests/qml/test_block_model.cpp
 		        tests/qml/test_block_model_undo.cpp
 			        tests/qml/test_markdown_blocks.cpp
 			        tests/qml/test_inline_formatting.cpp
