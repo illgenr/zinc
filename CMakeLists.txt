@@ -553,6 +553,7 @@ if(ZINC_BUILD_TESTS)
 			        tests/qml/test_main.cpp
 			        tests/qml/test_feature_flags.cpp
 			        tests/qml/test_datastore_sync.cpp
+                    tests/qml/test_datastore_lifetime.cpp
 		        tests/qml/test_datastore_notebooks.cpp
 		        tests/qml/test_datastore_export.cpp
 		        tests/qml/test_export_folder_settings.cpp

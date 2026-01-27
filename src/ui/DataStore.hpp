@@ -23,13 +23,7 @@ public:
     explicit DataStore(QObject* parent = nullptr);
     ~DataStore() override;
     
-    static DataStore* create(QQmlEngine* engine, QJSEngine*) {
-        static DataStore instance;
-        if (engine) {
-            QQmlEngine::setObjectOwnership(&instance, QQmlEngine::CppOwnership);
-        }
-        return &instance;
-    }
+    static DataStore* create(QQmlEngine* engine, QJSEngine*);
     
     // Page operations
     Q_INVOKABLE QVariantList getAllPages();

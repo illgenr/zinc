@@ -2,6 +2,8 @@
 #include "ui/MarkdownBlocks.hpp"
 #include <QDateTime>
 #include <QTimeZone>
+#include <QCoreApplication>
+#include <QPointer>
 #include <QSqlQuery>
 #include <QSqlError>
 #include <QStandardPaths>
@@ -27,6 +29,29 @@
 #include "ui/Cmark.hpp"
 
 namespace zinc::ui {
+
+DataStore* DataStore::create(QQmlEngine* engine, QJSEngine*) {
+    static QPointer<DataStore> instance = nullptr;
+
+    if (!instance) {
+        QObject* parent = nullptr;
+        if (engine) {
+            parent = engine;
+        } else if (auto* app = QCoreApplication::instance()) {
+            parent = app;
+        }
+
+        instance = new DataStore(parent);
+        if (engine) {
+            QQmlEngine::setObjectOwnership(instance, QQmlEngine::CppOwnership);
+        }
+    } else if (engine && instance->parent() == nullptr) {
+        instance->setParent(engine);
+        QQmlEngine::setObjectOwnership(instance, QQmlEngine::CppOwnership);
+    }
+
+    return instance;
+}
 
 namespace {
 
@@ -574,7 +599,9 @@ DataStore::~DataStore() {
     }
     const auto connection = m_db.connectionName();
     m_db = {};
-    if (!connection.isEmpty() && QSqlDatabase::contains(connection)) {
+    // QSqlDatabase requires QCoreApplication; avoid noisy shutdown warnings when static
+    // destruction order causes this destructor to run after Q(Core|Gui)Application teardown.
+    if (QCoreApplication::instance() && !connection.isEmpty() && QSqlDatabase::contains(connection)) {
         QSqlDatabase::removeDatabase(connection);
     }
 }
