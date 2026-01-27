@@ -51,6 +51,23 @@ ninja -C ./build-tests zinc_qml_tests
 ctest --test-dir ./build-tests -R zinc_qml_tests --output-on-failure
 ```
 
+## Native (Windows) Debug Build (Qt Desktop)
+set PATH=C:\Qt\Tools\mingw1310_64\bin;%PATH%
+
+### Configure
+```bash
+cmake -S . -B ./build/build-debug -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCMAKE_PREFIX_PATH=C:\Qt\6.10.1\mingw_64\bin -DQt6_DIR=C:/Qt/6.10.1/mingw_64/lib/cmake/Qt6 -DZINC_BUILD_TESTS=OFF "-DQT_QMAKE_EXECUTABLE:FILEPATH=C:/Qt/6.10.1/mingw_64/bin/qmake.exe" "-DCMAKE_C_COMPILER:FILEPATH=C:/Qt/Tools/mingw1310_64/bin/gcc.exe" "-DCMAKE_CXX_COMPILER:FILEPATH=C:/Qt/Tools/mingw1310_64/bin/g++.exe"
+```
+
+Build
+```bash
+ninja -C ./build/build-debug
+"C:\Qt\6.10.1\mingw_64\bin\windeployqt.exe" --qmldir=.\qml .\build\build-debug\bin\zinc.exe
+
+Run
+.\build\build-debug\bin\zinc.exe
+
+
 Headless / CI note:
 
 - If there is no display server available, run QML tests with `QT_QPA_PLATFORM=offscreen`, e.g.
