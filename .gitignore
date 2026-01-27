@@ -25,6 +25,9 @@ object_script.*.MinSizeRel
 
 # Build artifacts (CMake)
 CMakeLists.txt.user*
+/CMakeFiles*
+CMakeCache.txt
+
 # CMake build directories (if not handled by global .gitignore)
 /build*
 /bin*
