@@ -51,6 +51,11 @@ ninja -C ./build-tests zinc_qml_tests
 ctest --test-dir ./build-tests -R zinc_qml_tests --output-on-failure
 ```
 
+Headless / CI note:
+
+- If there is no display server available, run QML tests with `QT_QPA_PLATFORM=offscreen`, e.g.
+  - `QT_QPA_PLATFORM=offscreen ctest --test-dir ./build-tests -R zinc_qml_tests --output-on-failure`
+
 Notes
 
 If CMake cache gets into a bad state, delete ./build/build-debug/ and re-configure.

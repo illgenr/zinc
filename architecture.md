@@ -71,6 +71,11 @@ Registration:
 
 - `src/ui/qml_types.cpp`: registers QML singletons/types under modules `zinc` and `Zinc 1.0`.
 
+Important singleton ownership rule:
+
+- If a QML singleton factory returns a pointer to a static instance (e.g. `static Foo instance; return &instance;`), it must set `QQmlEngine::CppOwnership` for that instance when an engine is provided, otherwise the `QQmlEngine` may attempt to `delete` non-heap memory during teardown.
+  - Pattern: `QQmlEngine::setObjectOwnership(&instance, QQmlEngine::CppOwnership);`
+
 Persistence / state:
 
 - `src/ui/DataStore.hpp`, `src/ui/DataStore.cpp`: the canonical app datastore (SQLite via `QSqlDatabase`).
@@ -92,6 +97,8 @@ Markdown helpers:
 
 - `src/ui/MarkdownBlocks.*`: parse/serialize block lists to markdown.
 - `src/ui/Cmark.*`: markdown → HTML rendering.
+- `src/ui/InlineRichText.*`: inline formatting spans used by block `TextEdit`s.
+- `src/ui/InlineRichTextHighlighter.*`: applies inline spans to a `QTextDocument` via `QSyntaxHighlighter` (used by block components).
 
 Attachments:
 
@@ -153,6 +160,10 @@ Relevant files:
 - `qml/components/BlockEditor.qml`
 - `src/ui/MarkdownBlocks.cpp`
 - `src/ui/DataStore.cpp` (`savePageContentMarkdown`)
+
+Notes on editor teardown safety:
+
+- When a key handler deletes the currently focused block, prefer deferring model mutation (e.g. `Qt.callLater`) and/or moving focus first to avoid destroying the `TextEdit` while it is still processing the key event.
 
 ### 2) Persisted Changes → Snapshot Sync Outbound
 
@@ -264,6 +275,10 @@ Test layout:
 - `tests/qml/*`: offscreen QML tests (loads the same QML module as the app)
 
 To add a UI behavior regression test, prefer `tests/qml/*` if it can be asserted without full UI automation.
+
+Running QML tests:
+
+- `zinc_qml_tests` loads the same QML module as the app; on headless machines you may need `QT_QPA_PLATFORM=offscreen`.
 
 ## “Where do I change X?”
 
