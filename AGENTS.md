@@ -52,7 +52,11 @@ ctest --test-dir ./build-tests -R zinc_qml_tests --output-on-failure
 ```
 
 ## Native (Windows) Debug Build (Qt Desktop)
+cmd.exe:
 set PATH=C:\Qt\Tools\mingw1310_64\bin;%PATH%
+
+PowerShell:
+$env:Path = "C:\\Qt\\Tools\\mingw1310_64\\bin;" + $env:Path
 
 ### Configure
 ```bash

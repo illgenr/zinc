@@ -197,6 +197,8 @@ target_link_libraries(zinc_crypto PUBLIC
 add_library(zinc_network STATIC
     src/network/discovery.hpp
     src/network/discovery.cpp
+    src/network/discovery_datagram.hpp
+    src/network/discovery_datagram.cpp
     src/network/udp_discovery_backend.hpp
     src/network/udp_discovery_backend.cpp
     src/network/transport.hpp
@@ -232,6 +234,8 @@ target_link_libraries(zinc_network PUBLIC
 add_library(zinc_ui STATIC
     src/ui/qml_types.hpp
     src/ui/qml_types.cpp
+    src/ui/logging.hpp
+    src/ui/logging.cpp
     src/ui/FontUtils.hpp
     src/ui/FontUtils.cpp
     src/ui/Clipboard.hpp
@@ -534,6 +538,7 @@ if(ZINC_BUILD_TESTS)
     # Integration tests
     add_executable(zinc_integration_tests
         tests/integration/test_main.cpp
+        tests/integration/test_discovery_datagram.cpp
         tests/integration/test_sync.cpp
         tests/integration/test_storage_roundtrip.cpp
     )

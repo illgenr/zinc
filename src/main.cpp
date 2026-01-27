@@ -5,6 +5,7 @@
 #include <QQmlContext>
 #include <QStyleHints>
 
+#include "ui/logging.hpp"
 #include "ui/qml_types.hpp"
 #include "ui/AttachmentImageProvider.hpp"
 #include "crypto/keys.hpp"
@@ -13,6 +14,17 @@ int main(int argc, char *argv[])
 {
     QGuiApplication app(argc, argv);
     app.styleHints()->setCursorFlashTime(500);
+
+    // Set application metadata
+    app.setApplicationName("Zinc");
+    app.setApplicationVersion("0.1.0");
+    app.setOrganizationName("Zinc");
+    app.setOrganizationDomain("zinc.local");
+    app.setWindowIcon(QIcon(QStringLiteral(":/qt/qml/zinc/src/assets/icon.png")));
+
+    // Install file logging early so crashes (especially on Windows GUI builds) are actionable.
+    zinc::ui::install_file_logging();
+    qInfo() << "Zinc: logging to" << zinc::ui::default_log_file_path();
 
     const auto args = QCoreApplication::arguments();
     if (args.contains(QStringLiteral("--debug-attachments"))) {
@@ -24,13 +36,6 @@ int main(int argc, char *argv[])
         qputenv("ZINC_DEBUG_SYNC", "1");
         qInfo() << "Zinc: sync debug enabled";
     }
-    
-    // Set application metadata
-    app.setApplicationName("Zinc");
-    app.setApplicationVersion("0.1.0");
-    app.setOrganizationName("Zinc");
-    app.setOrganizationDomain("zinc.local");
-    app.setWindowIcon(QIcon(QStringLiteral(":/qt/qml/zinc/src/assets/icon.png")));
     
     // Initialize crypto
     auto crypto_result = zinc::crypto::init();
