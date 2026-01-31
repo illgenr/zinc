@@ -21,6 +21,7 @@ This repository uses CMake + Ninja for native builds and CMake (Android toolchai
 ## Repository Layout Conventions
 
 - Native debug build output: `./build/build-debug/`
+- Native debug release output: `./build/build-release/`
 - Native test build output: `./build-tests/`
 - Android build directory: `./build-android/`
 - Android Gradle output APK (expected): `./android-build/build/outputs/apk/debug/android-build-debug.apk`
@@ -191,7 +192,17 @@ Build:
 cmake --build . --parallel
 ```
 
-Agent Expectations
+## Packaging
+
+### Windows
+
+The build-release/bin directory can be zipped and deployed as a portable program.
+
+The Windows installer uses the QT Installer Framework
+cd .\install\wininstaller
+C:\Qt\Tools\QtInstallerFramework\4.10\bin\binarycreator.exe --offline-only -c .\config\config.xml -t C:\Qt\Tools\QtInstallerFramework\4.10\bin\installerbase.exe -p packages ZincInstaller.exe
+
+# Agent Expectations
 
 Use functional programming principles when possible.
 

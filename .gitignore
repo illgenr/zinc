@@ -44,6 +44,10 @@ CMakeCache.txt
 [Rr]elease/
 [Dd]ebug/
 
+# Installers
+/install/wininstaller/ZincInstaller.exe
+/install/wininstaller/packages/Zinc/data/*
+
 # Crash logs
 *.crash
 
