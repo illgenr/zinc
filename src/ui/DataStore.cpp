@@ -579,11 +579,15 @@ QDateTime parse_timestamp(const QString& value) {
 }
 
 QString normalize_timestamp(const QVariant& value) {
-    const auto raw = value.toString();
-    if (!raw.isEmpty()) {
+    const auto raw = value.toString().trimmed();
+    if (raw.isEmpty()) {
+        return now_timestamp_utc();
+    }
+    const auto dt = parse_timestamp(raw);
+    if (!dt.isValid()) {
         return raw;
     }
-    return now_timestamp_utc();
+    return dt.toUTC().toString("yyyy-MM-dd HH:mm:ss.zzz");
 }
 
 } // namespace
@@ -3773,6 +3777,92 @@ bool DataStore::runMigrations() {
         migration.exec("PRAGMA user_version = 9");
         m_db.commit();
         currentVersion = 9;
+    }
+
+    // Migration 10: Normalize timestamp strings to a canonical UTC format so that
+    // SQL string comparisons (e.g., updated_at cursors) behave consistently across platforms/versions.
+    if (currentVersion < 10) {
+        qDebug() << "DataStore: Running migration to version 10";
+        m_db.transaction();
+
+        auto tableColumns = [&](const QString& table) -> QSet<QString> {
+            QSet<QString> cols;
+            QSqlQuery info(m_db);
+            info.exec(QStringLiteral("PRAGMA table_info(%1)").arg(table));
+            while (info.next()) {
+                cols.insert(info.value(1).toString());
+            }
+            info.finish();
+            return cols;
+        };
+
+        auto normalizeColumn = [&](const QString& table, const QString& pk, const QString& col) {
+            const auto cols = tableColumns(table);
+            if (!cols.contains(pk) || !cols.contains(col)) {
+                return;
+            }
+
+            QSqlQuery select(m_db);
+            select.prepare(QStringLiteral("SELECT %1, %2 FROM %3 WHERE COALESCE(%2, '') != ''")
+                               .arg(pk, col, table));
+
+            QSqlQuery update(m_db);
+            update.prepare(QStringLiteral("UPDATE %1 SET %2 = ? WHERE %3 = ?")
+                               .arg(table, col, pk));
+
+            if (!select.exec()) {
+                qWarning() << "DataStore: Migration 10 select failed table=" << table
+                           << "col=" << col << ":" << select.lastError().text();
+                return;
+            }
+
+            while (select.next()) {
+                const auto id = select.value(0).toString();
+                const auto raw = select.value(1).toString();
+                const auto normalized = normalize_timestamp(raw);
+                if (normalized == raw) {
+                    continue;
+                }
+                update.bindValue(0, normalized);
+                update.bindValue(1, id);
+                if (!update.exec()) {
+                    qWarning() << "DataStore: Migration 10 update failed table=" << table
+                               << "col=" << col << ":" << update.lastError().text();
+                }
+                update.finish();
+            }
+            select.finish();
+        };
+
+        normalizeColumn(QStringLiteral("pages"), QStringLiteral("id"), QStringLiteral("created_at"));
+        normalizeColumn(QStringLiteral("pages"), QStringLiteral("id"), QStringLiteral("updated_at"));
+        normalizeColumn(QStringLiteral("pages"), QStringLiteral("id"), QStringLiteral("last_synced_at"));
+
+        normalizeColumn(QStringLiteral("deleted_pages"), QStringLiteral("page_id"), QStringLiteral("deleted_at"));
+
+        normalizeColumn(QStringLiteral("page_conflicts"), QStringLiteral("page_id"), QStringLiteral("base_updated_at"));
+        normalizeColumn(QStringLiteral("page_conflicts"), QStringLiteral("page_id"), QStringLiteral("local_updated_at"));
+        normalizeColumn(QStringLiteral("page_conflicts"), QStringLiteral("page_id"), QStringLiteral("remote_updated_at"));
+        normalizeColumn(QStringLiteral("page_conflicts"), QStringLiteral("page_id"), QStringLiteral("created_at"));
+
+        normalizeColumn(QStringLiteral("notebooks"), QStringLiteral("id"), QStringLiteral("created_at"));
+        normalizeColumn(QStringLiteral("notebooks"), QStringLiteral("id"), QStringLiteral("updated_at"));
+
+        normalizeColumn(QStringLiteral("deleted_notebooks"), QStringLiteral("notebook_id"), QStringLiteral("deleted_at"));
+
+        normalizeColumn(QStringLiteral("attachments"), QStringLiteral("id"), QStringLiteral("created_at"));
+        normalizeColumn(QStringLiteral("attachments"), QStringLiteral("id"), QStringLiteral("updated_at"));
+
+        normalizeColumn(QStringLiteral("blocks"), QStringLiteral("id"), QStringLiteral("created_at"));
+        normalizeColumn(QStringLiteral("blocks"), QStringLiteral("id"), QStringLiteral("updated_at"));
+
+        normalizeColumn(QStringLiteral("paired_devices"), QStringLiteral("device_id"), QStringLiteral("last_seen"));
+        normalizeColumn(QStringLiteral("paired_devices"), QStringLiteral("device_id"), QStringLiteral("paired_at"));
+
+        QSqlQuery migration(m_db);
+        migration.exec("PRAGMA user_version = 10");
+        m_db.commit();
+        currentVersion = 10;
     }
     
     qDebug() << "DataStore: Migrations complete. Schema version:" << currentVersion;

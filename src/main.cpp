@@ -4,6 +4,7 @@
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QStyleHints>
+#include <QQuickStyle>
 
 #include "ui/logging.hpp"
 #include "ui/qml_types.hpp"
@@ -36,6 +37,14 @@ int main(int argc, char *argv[])
         qputenv("ZINC_DEBUG_SYNC", "1");
         qInfo() << "Zinc: sync debug enabled";
     }
+
+#ifdef Q_OS_WIN
+    // Qt Quick Controls' native styles can reject customization of certain controls (background/contentItem).
+    // Prefer a non-native style by default on Windows, while allowing explicit overrides via env var.
+    if (qEnvironmentVariableIsEmpty("QT_QUICK_CONTROLS_STYLE")) {
+        QQuickStyle::setStyle(QStringLiteral("Fusion"));
+    }
+#endif
     
     // Initialize crypto
     auto crypto_result = zinc::crypto::init();

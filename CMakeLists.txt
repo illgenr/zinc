@@ -20,7 +20,7 @@ else()
 endif()
 
 # Find Qt packages
-find_package(Qt6 REQUIRED COMPONENTS Quick Sql Network Multimedia Svg Test)
+find_package(Qt6 REQUIRED COMPONENTS Quick QuickControls2 Sql Network Multimedia Svg Test)
 
 qt_standard_project_setup(REQUIRES 6.8)
 
@@ -428,6 +428,7 @@ target_link_libraries(appzinc PRIVATE
     zinc_network
     zinc_crypto
     Qt6::Quick
+    Qt6::QuickControls2
     Qt6::Sql
     Qt6::Multimedia
     Qt6::Svg

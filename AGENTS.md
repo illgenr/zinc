@@ -53,7 +53,7 @@ ctest --test-dir ./build-tests -R zinc_qml_tests --output-on-failure
 
 ## Native (Windows) Debug Build (Qt Desktop)
 cmd.exe:
-set PATH=C:\Qt\Tools\mingw1310_64\bin;%PATH%
+set PATH=%PATH%;C:\Qt\Tools\mingw1310_64\bin
 
 PowerShell:
 $env:Path = "C:\\Qt\\Tools\\mingw1310_64\\bin;" + $env:Path
@@ -145,6 +145,51 @@ rm -rf ./build-android
 
 
 Re-run the configure + build steps after cleaning.
+
+---
+
+## Android (Windows) Debug Build (arm64-v8a)
+
+From repo root (PowerShell):
+
+Notes:
+- CMake defaults to the `NMake Makefiles` generator on some Windows setups; if you see `Running 'nmake' '-?' failed`, add `-G Ninja` (or install VS Build Tools + `nmake`).
+- Avoid in-source builds: if `CMakeCache.txt` or `CMakeFiles/` exist in the repo root, delete them and re-configure in `./build-android/`.
+
+Configure (in `build-android/`):
+
+```powershell
+cd build-android
+cmake -S .. -B . -G Ninja `
+  -DCMAKE_BUILD_TYPE=Debug `
+  -DCMAKE_PREFIX_PATH="C:\Qt\6.10.1\android_arm64_v8a" `
+  -DCMAKE_FIND_ROOT_PATH="C:\Qt\6.10.1\android_arm64_v8a" `
+  -DQT_HOST_PATH="C:\Qt\6.10.1\mingw_64" `
+  -DANDROID_SDK_ROOT="$env:LOCALAPPDATA\Android\Sdk" `
+  -DANDROID_NDK="$env:LOCALAPPDATA\Android\Sdk\ndk\<YOUR_NDK_VERSION>" `
+  -DQT_ANDROID_ABIS="arm64-v8a" `
+  -DCMAKE_TOOLCHAIN_FILE="$env:LOCALAPPDATA\Android\Sdk\ndk\<YOUR_NDK_VERSION>\build\cmake\android.toolchain.cmake" `
+  -DANDROID_ABI=arm64-v8a `
+  -DANDROID_PLATFORM=android-24
+```
+
+If CMake says it cannot find the toolchain file, list your installed NDK versions:
+
+```powershell
+Get-ChildItem "$env:LOCALAPPDATA\Android\Sdk\ndk"
+```
+
+If CMake says it cannot find Ninja (CMAKE_MAKE_PROGRAM not set), ensure `ninja.exe` is on `PATH` or pass:
+
+```powershell
+-DCMAKE_MAKE_PROGRAM="C:\path\to\ninja.exe"
+```
+
+Build:
+
+```powershell
+cmake --build . --parallel
+```
 
 Agent Expectations
 

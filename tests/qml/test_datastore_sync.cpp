@@ -142,6 +142,21 @@ TEST_CASE("DataStore: applyPageUpdates updates contentMarkdown", "[qml][datastor
     REQUIRE(store.getPageContentMarkdown(QStringLiteral("p3")) == QStringLiteral("World"));
 }
 
+TEST_CASE("DataStore: applyPageUpdates normalizes ISO updatedAt to canonical UTC", "[qml][datastore]") {
+    zinc::ui::DataStore store;
+    REQUIRE(store.initialize());
+    REQUIRE(store.resetDatabase());
+
+    QVariantList pages;
+    pages.append(makePage("p_iso", QStringLiteral("Page"),
+                          QStringLiteral("2026-01-11T00:00:00.123Z"),
+                          QStringLiteral("Hello")));
+    store.applyPageUpdates(pages);
+
+    REQUIRE(store.getPageContentMarkdown(QStringLiteral("p_iso")) == QStringLiteral("Hello"));
+    REQUIRE(updatedAtForPage(store, QStringLiteral("p_iso")) == QStringLiteral("2026-01-11 00:00:00.123"));
+}
+
 TEST_CASE("DataStore: applyPageUpdates allows equal updatedAt to overwrite", "[qml][datastore]") {
     zinc::ui::DataStore store;
     REQUIRE(store.initialize());
