@@ -142,7 +142,7 @@ Dialog {
         { label: "Editor", icon: "✍️" },
         { label: "Sync", icon: "🔄" },
         { label: "Devices", icon: "📱" },
-        { label: "Security", icon: "🔒" },
+        //{ label: "Security", icon: "🔒" },
         { label: "Data", icon: "💾" },
         { label: "About", icon: "ℹ️" }
     ]
@@ -223,7 +223,7 @@ Dialog {
                 EditorSettings {}
                 SyncSettings {}
                 DevicesSettings { onPairDevice: { root.pairDeviceRequested(); root.close() } }
-                SecuritySettings {}
+                //SecuritySettings {}
                 DataSettings {}
                 AboutSettings {}
             }
@@ -298,7 +298,7 @@ Dialog {
                 EditorSettings {}
                 SyncSettings {}
                 DevicesSettings { onPairDevice: { root.pairDeviceRequested(); root.close() } }
-                SecuritySettings {}
+                //SecuritySettings {}
                 DataSettings {}
                 AboutSettings {}
             }
