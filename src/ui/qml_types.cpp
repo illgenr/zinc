@@ -31,15 +31,15 @@ void registerQmlTypes() {
     // Data Store singleton (registered under "zinc" module to match QML imports)
     qmlRegisterSingletonType<DataStore>("zinc", 1, 0, "DataStore", DataStore::create);
     qmlRegisterSingletonType<Clipboard>("zinc", 1, 0, "Clipboard", Clipboard::create);
-	    qmlRegisterSingletonType<MarkdownBlocks>("zinc", 1, 0, "MarkdownBlocks", MarkdownBlocks::create);
-	    qmlRegisterSingletonType<Cmark>("zinc", 1, 0, "Cmark", Cmark::create);
-	    qmlRegisterSingletonType<InlineFormatting>("zinc", 1, 0, "InlineFormatting", InlineFormatting::create);
-	    qmlRegisterSingletonType<InlineRichText>("zinc", 1, 0, "InlineRichText", InlineRichText::create);
-	    qmlRegisterSingletonType<FontUtils>("zinc", 1, 0, "FontUtils", FontUtils::create);
-	    qmlRegisterType<InlineRichTextHighlighter>("zinc", 1, 0, "InlineRichTextHighlighter");
+	qmlRegisterSingletonType<MarkdownBlocks>("zinc", 1, 0, "MarkdownBlocks", MarkdownBlocks::create);
+	qmlRegisterSingletonType<Cmark>("zinc", 1, 0, "Cmark", Cmark::create);
+	qmlRegisterSingletonType<InlineFormatting>("zinc", 1, 0, "InlineFormatting", InlineFormatting::create);
+	qmlRegisterSingletonType<InlineRichText>("zinc", 1, 0, "InlineRichText", InlineRichText::create);
+	qmlRegisterSingletonType<FontUtils>("zinc", 1, 0, "FontUtils", FontUtils::create);
+	qmlRegisterType<InlineRichTextHighlighter>("zinc", 1, 0, "InlineRichTextHighlighter");
 	    
-	    // Platform utilities
-	    qmlRegisterSingletonType<platform::AndroidUtils>("zinc", 1, 0, "AndroidUtils", platform::AndroidUtils::create);
+	// Platform utilities
+	qmlRegisterSingletonType<platform::AndroidUtils>("zinc", 1, 0, "AndroidUtils", platform::AndroidUtils::create);
 
     // Feature flags
     qmlRegisterSingletonType<FeatureFlags>("Zinc", 1, 0, "FeatureFlags", FeatureFlags::create);
@@ -53,9 +53,9 @@ void registerQmlTypes() {
     qmlRegisterType<EditorController>("Zinc", 1, 0, "EditorController");
     qmlRegisterType<SyncController>("Zinc", 1, 0, "SyncController");
     qmlRegisterType<PairingController>("Zinc", 1, 0, "PairingController");
-#if ZINC_ENABLE_QR
-    qmlRegisterType<QrScanner>("Zinc", 1, 0, "QrScanner");
-#endif
+    #if ZINC_ENABLE_QR
+        qmlRegisterType<QrScanner>("Zinc", 1, 0, "QrScanner");
+    #endif
 }
 
 } // namespace zinc::ui

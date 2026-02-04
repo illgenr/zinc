@@ -1053,7 +1053,7 @@ Item {
             Layout.fillHeight: true
             model: pageModel
             clip: true
-            spacing: 2
+            spacing: 0
 
             DropArea {
                 anchors.fill: parent
@@ -1133,92 +1133,102 @@ Item {
                 }
             }
 
-            delegate: Rectangle {
-            id: delegateItem
-            objectName: "pageTreeRow_" + index
-            width: pageList.width
-            height: rowVisible(index)
-                ? (collapsed
+            delegate: Item {
+                id: delegateItem
+                objectName: "pageTreeRow_" + index
+                width: pageList.width
+
+                readonly property bool rowIsVisible: rowVisible(index)
+                readonly property int rowHeight: collapsed
                     ? 32
-                    : (root._isMobile ? Math.max(44, root.actionButtonSize) : 28))
-                : 0
-            visible: rowVisible(index)
-	            radius: ThemeManager.radiusSmall
-	            readonly property bool selected: root.selectedPageId === model.pageId
-	            readonly property string pageId: model.pageId || ""
-            color: selected
-                ? ThemeManager.surfaceActive
-                : (delegateMouseArea.containsMouse || delegateMouseArea.pressed ? ThemeManager.surfaceHover : "transparent")
+                    : (root._isMobile ? Math.max(44, root.actionButtonSize) : 28)
+                readonly property bool hasNextVisible: rowIsVisible && root.nextVisibleIndex(index) !== -1
+                readonly property int rowGap: hasNextVisible ? 2 : 0
 
-            Drag.active: root._isMobile ? mobileDragHandler.active : desktopDragHandler.active
-            Drag.supportedActions: Qt.MoveAction
-            Drag.hotSpot.x: width / 2
-            Drag.hotSpot.y: height / 2
-            Drag.mimeData: (model.kind === "page" && model.pageId)
-                ? ({ "application/x-zinc-page": model.pageId })
-                : ({})
+                height: rowIsVisible ? (rowHeight + rowGap) : 0
+                visible: rowIsVisible
 
-            DragHandler {
-                id: desktopDragHandler
-                enabled: !root._isMobile && model.kind === "page"
-                target: null
+                Rectangle {
+                    id: rowBackground
+                    width: parent.width
+                    height: delegateItem.rowHeight
+                    visible: delegateItem.visible
+                    radius: ThemeManager.radiusSmall
+                    readonly property bool selected: root.selectedPageId === model.pageId
+                    readonly property string pageId: model.pageId || ""
+                    color: selected
+                        ? ThemeManager.surfaceActive
+                        : (delegateMouseArea.containsMouse || delegateMouseArea.pressed ? ThemeManager.surfaceHover : "transparent")
 
-                onActiveChanged: {
-                    root._dragActive = desktopDragHandler.active
-                    if (!desktopDragHandler.active) {
-                        root._dragY = 0
+                    Drag.active: root._isMobile ? mobileDragHandler.active : desktopDragHandler.active
+                    Drag.supportedActions: Qt.MoveAction
+                    Drag.hotSpot.x: width / 2
+                    Drag.hotSpot.y: height / 2
+                    Drag.mimeData: (model.kind === "page" && model.pageId)
+                        ? ({ "application/x-zinc-page": model.pageId })
+                        : ({})
+
+                    DragHandler {
+                        id: desktopDragHandler
+                        enabled: !root._isMobile && model.kind === "page"
+                        target: null
+
+                        onActiveChanged: {
+                            root._dragActive = desktopDragHandler.active
+                            if (!desktopDragHandler.active) {
+                                root._dragY = 0
+                            }
+                        }
+
+                        onCentroidChanged: {
+                            if (!desktopDragHandler.active) return
+                            root._dragY = delegateItem.y + desktopDragHandler.centroid.position.y
+                        }
                     }
-                }
 
-                onCentroidChanged: {
-                    if (!desktopDragHandler.active) return
-                    root._dragY = delegateItem.y + desktopDragHandler.centroid.position.y
-                }
-            }
-
-            DropArea {
-                anchors.fill: parent
-                keys: ["application/x-zinc-page"]
-                onDropped: function(drop) {
-                    if (!drop || !drop.mimeData) return
-                    const draggedId = drop.mimeData.getDataAsString("application/x-zinc-page")
-                    if (!draggedId || draggedId === "") return
-                    root.movePageTo(model.kind || "page", model.pageId || "", model.notebookId || "", draggedId)
-                    drop.accepted = true
-                }
-            }
-            
-            // Background MouseArea for hover and page selection (z = 0)
-            MouseArea {
-                id: delegateMouseArea
-                anchors.fill: parent
-                hoverEnabled: true
-                acceptedButtons: Qt.LeftButton | Qt.RightButton
-                z: 0
-                enabled: !(root._inlineMode === "rename" &&
-                           ((root._inlineKind === "page" && (model.pageId || "") === root._inlinePageId) ||
-                            (root._inlineKind === "notebook" && (model.notebookId || "") === root._inlineNotebookId)))
-                
-                onPressed: function(mouse) {
-                    if (mouse.button === Qt.RightButton) {
-                        root.openContextMenu(model.kind || "page", model.pageId || "", model.notebookId || "", model.title || "")
-                        mouse.accepted = true
+                    DropArea {
+                        anchors.fill: parent
+                        keys: ["application/x-zinc-page"]
+                        onDropped: function(drop) {
+                            if (!drop || !drop.mimeData) return
+                            const draggedId = drop.mimeData.getDataAsString("application/x-zinc-page")
+                            if (!draggedId || draggedId === "") return
+                            root.movePageTo(model.kind || "page", model.pageId || "", model.notebookId || "", draggedId)
+                            drop.accepted = true
+                        }
                     }
-                }
+                    
+                    // Background MouseArea for hover and page selection (z = 0)
+                    MouseArea {
+                        id: delegateMouseArea
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        acceptedButtons: Qt.LeftButton | Qt.RightButton
+                        z: 0
+                        enabled: !(root._inlineMode === "rename" &&
+                                   ((root._inlineKind === "page" && (model.pageId || "") === root._inlinePageId) ||
+                                    (root._inlineKind === "notebook" && (model.notebookId || "") === root._inlineNotebookId)))
+                        
+                        onPressed: function(mouse) {
+                            if (mouse.button === Qt.RightButton) {
+                                root.openContextMenu(model.kind || "page", model.pageId || "", model.notebookId || "", model.title || "")
+                                mouse.accepted = true
+                            }
+                        }
 
-                onClicked: function(mouse) {
-                    if (mouse.button === Qt.LeftButton) {
-                        root.handleRowTap(model.kind || "page", model.pageId || "", model.notebookId || "", model.title || "")
+                        onClicked: function(mouse) {
+                            if (mouse.button === Qt.LeftButton) {
+                                root.handleRowTap(model.kind || "page", model.pageId || "", model.notebookId || "", model.title || "")
+                            }
+                        }
                     }
-                }
-            }
-            
-	            RowLayout {
-	                anchors.fill: parent
-	                anchors.leftMargin: collapsed ? ThemeManager.spacingSmall : (ThemeManager.spacingSmall + model.depth * 20)
-	                anchors.rightMargin: ThemeManager.spacingSmall
-	                spacing: ThemeManager.spacingSmall
-	                z: 1
+                    
+		            RowLayout {
+		                anchors.fill: parent
+		                anchors.leftMargin: collapsed ? ThemeManager.spacingSmall : (ThemeManager.spacingSmall + model.depth * 20)
+		                anchors.rightMargin: ThemeManager.spacingSmall
+		                spacing: ThemeManager.spacingSmall
+		                z: 1
 	                
 	                // Left affordance: small icon, becomes expand/collapse arrow on hover.
 	                Item {
@@ -1423,12 +1433,13 @@ Item {
                     }
                 }
             }
+	        }
+	    }
         }
-    }
-    
-    // Context menu for page actions
-    Loader {
-        id: pageContextMenuLoader
+	    
+	    // Context menu for page actions
+	    Loader {
+	        id: pageContextMenuLoader
         active: root.enableContextMenu
 
         sourceComponent: Menu {
