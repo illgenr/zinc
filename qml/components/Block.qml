@@ -160,7 +160,6 @@ Item {
                     case "quote": return quoteComponent
                     case "divider": return dividerComponent
                     case "toggle": return toggleComponent
-                    case "link": return linkComponent
                     default: return paragraphComponent
                 }
             }
@@ -438,18 +437,4 @@ Item {
         }
     }
     
-    Component {
-        id: linkComponent
-        LinkBlock {
-            content: root.content
-            editor: root.editor
-            blockIndex: root.blockIndex
-            multiBlockSelectionActive: root.editor ? root.editor.hasCrossBlockSelection : false
-            onContentEdited: (newContent) => root.contentEdited(newContent)
-            onEnterPressed: root.blockEnterPressed()
-            onBackspaceOnEmpty: root.blockBackspaceOnEmpty()
-            onBlockFocused: root.blockFocused()
-            onLinkClicked: (pageId) => root.linkClicked(pageId)
-        }
-    }
 }

@@ -1945,16 +1945,17 @@ FocusScope {
     // Called when user selects a page from page picker
     function setLinkTarget(pageId, pageTitle) {
         if (pendingLinkBlockIndex >= 0 && pendingLinkBlockIndex < blockModel.count) {
-            blockModel.setProperty(pendingLinkBlockIndex, "content", pageId + "|" + pageTitle)
-            scheduleAutosave()
+            root.setLinkAtIndex(pendingLinkBlockIndex, pageId, pageTitle)
         }
         pendingLinkBlockIndex = -1
     }
 
     function setLinkAtIndex(blockIndex, pageId, pageTitle) {
         if (blockIndex < 0 || blockIndex >= blockModel.count) return
-        blockModel.setProperty(blockIndex, "blockType", "link")
-        blockModel.setProperty(blockIndex, "content", pageId + "|" + pageTitle)
+        blockModel.setProperty(blockIndex, "blockType", "paragraph")
+        const label = (pageTitle || "Untitled").replace(/]/g, "\\]")
+        const href = "zinc://page/" + (pageId || "")
+        blockModel.setProperty(blockIndex, "content", "[" + label + "](" + href + ")")
         scheduleAutosave()
     }
     

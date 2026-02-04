@@ -42,7 +42,6 @@ TEST_CASE("MarkdownBlocks: serialize/parse round-trip", "[qml][markdown]") {
     blocks.append(block("quote", "A\nB"));
     blocks.append(block("code", "int main() {\n  return 0;\n}", 0, false, false, "cpp"));
     blocks.append(block("divider", ""));
-    blocks.append(block("link", "00000000-0000-0000-0000-000000000001|Example"));
     blocks.append(block("toggle", "Summary", 0, false, true));
 
     const auto markdown = codec.serialize(blocks);
@@ -124,6 +123,26 @@ TEST_CASE("MarkdownBlocks: parseWithSpans returns raw slices", "[qml][markdown]"
     REQUIRE(spans[5].toMap().value("blockType").toString() == QStringLiteral("divider"));
     REQUIRE(spans[5].toMap().value("raw").toString() == QStringLiteral("---\n"));
 
-    REQUIRE(spans[6].toMap().value("blockType").toString() == QStringLiteral("link"));
+    REQUIRE(spans[6].toMap().value("blockType").toString() == QStringLiteral("paragraph"));
     REQUIRE(spans[6].toMap().value("raw").toString().startsWith("[Example]("));
+}
+
+TEST_CASE("MarkdownBlocks: standalone zinc page links remain paragraphs", "[qml][markdown]") {
+    zinc::ui::MarkdownBlocks codec;
+
+    const auto md = QStringLiteral("[Example](zinc://page/00000000-0000-0000-0000-000000000001)\n");
+    const auto blocks = codec.parse(md);
+    REQUIRE(blocks.size() == 1);
+    const auto b = blocks[0].toMap();
+    REQUIRE(b.value("blockType").toString() == QStringLiteral("paragraph"));
+    REQUIRE(b.value("content").toString() == QStringLiteral("[Example](zinc://page/00000000-0000-0000-0000-000000000001)"));
+}
+
+TEST_CASE("MarkdownBlocks: legacy link blocks serialize to zinc page links", "[qml][markdown]") {
+    zinc::ui::MarkdownBlocks codec;
+
+    QVariantList blocks;
+    blocks.append(block("link", "00000000-0000-0000-0000-000000000001|Example"));
+    const auto md = codec.serializeContent(blocks);
+    REQUIRE(md.contains(QStringLiteral("[Example](zinc://page/00000000-0000-0000-0000-000000000001)")));
 }

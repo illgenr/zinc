@@ -80,16 +80,6 @@ QString image_to_markdown(const QString& content) {
     return QStringLiteral("![](%1%2)").arg(src, title);
 }
 
-std::optional<QString> parse_link(const QString& line) {
-    static const QRegularExpression re(
-        R"(^\[(.*)\]\(zinc://page/([^)]+)\)\s*$)");
-    const auto m = re.match(line);
-    if (!m.hasMatch()) return std::nullopt;
-    const auto title = m.captured(1);
-    const auto pageId = m.captured(2);
-    return pageId + "|" + title;
-}
-
 std::optional<QString> parse_image(const QString& line) {
     static const QRegularExpression re1(
         R"re(^!\[[^\]]*\]\(<([^>]+)>(?:\s+"([^"]*)")?\)\s*$)re");
@@ -450,12 +440,6 @@ QVariantList MarkdownBlocks::parse(const QString& markdown) const {
             continue;
         }
 
-        if (auto link = parse_link(line)) {
-            emit_paragraph(paragraph);
-            blocks.append(make_block("link", *link));
-            continue;
-        }
-
         if (trimmed.isEmpty()) {
             emit_paragraph(paragraph);
             continue;
@@ -638,12 +622,6 @@ QVariantList MarkdownBlocks::parseWithSpans(const QString& markdown) const {
             addBlock(make_block("quote", quoted.join('\n')),
                      blockStartOffset, lines[endLine].end);
             i = j;
-            continue;
-        }
-
-        if (auto link = parse_link(lines[i].view)) {
-            addBlock(make_block("link", *link), blockStartOffset, lines[i].end);
-            i = i + 1;
             continue;
         }
 

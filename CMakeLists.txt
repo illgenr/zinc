@@ -349,20 +349,19 @@ set(ZINC_QML_FILES
 	    qml/components/SyncButtons.qml
 	    qml/components/DesktopSidebarActions.qml
 	    qml/components/MobileSidebarActions.qml
-	    qml/components/blocks/ParagraphBlock.qml
-    qml/components/blocks/HeadingBlock.qml
-    qml/components/blocks/TodoBlock.qml
-    qml/components/blocks/ImageBlock.qml
-    qml/components/blocks/ColumnsBlock.qml
-    qml/components/blocks/CodeBlock.qml
-    qml/components/blocks/QuoteBlock.qml
-    qml/components/blocks/DividerBlock.qml
-    qml/components/blocks/ToggleBlock.qml
-    qml/components/blocks/LinkBlock.qml
-    qml/components/SlashMenu.qml
-    qml/components/DatePickerPopup.qml
-    qml/components/PageTree.qml
-    qml/components/SearchDialog.qml
+		    qml/components/blocks/ParagraphBlock.qml
+	    qml/components/blocks/HeadingBlock.qml
+	    qml/components/blocks/TodoBlock.qml
+	    qml/components/blocks/ImageBlock.qml
+	    qml/components/blocks/ColumnsBlock.qml
+	    qml/components/blocks/CodeBlock.qml
+	    qml/components/blocks/QuoteBlock.qml
+	    qml/components/blocks/DividerBlock.qml
+	    qml/components/blocks/ToggleBlock.qml
+	    qml/components/SlashMenu.qml
+	    qml/components/DatePickerPopup.qml
+	    qml/components/PageTree.qml
+	    qml/components/SearchDialog.qml
     qml/dialogs/PairingDialog.qml
     qml/dialogs/SettingsDialog.qml
     qml/dialogs/PagePickerDialog.qml
@@ -489,16 +488,32 @@ if(ZINC_BUILD_TESTS)
     FetchContent_MakeAvailable(Catch2)
     
     # Fetch rapidcheck for property-based testing
-    FetchContent_Declare(
-        rapidcheck
-        GIT_REPOSITORY https://github.com/emil-e/rapidcheck.git
-        GIT_TAG master
-    )
-    FetchContent_MakeAvailable(rapidcheck)
-    
-    # Unit tests
-    add_executable(zinc_tests
-        tests/unit/test_main.cpp
+	    FetchContent_Declare(
+	        rapidcheck
+	        GIT_REPOSITORY https://github.com/emil-e/rapidcheck.git
+	        GIT_TAG master
+	    )
+	    FetchContent_MakeAvailable(rapidcheck)
+
+        # rapidcheck's headers are missing an explicit <cstdint> include on some toolchains,
+        # which breaks builds when uint8_t is not otherwise pulled in.
+        # Patch the fetched source in-place to keep the build reproducible.
+        set(_rapidcheck_maybe_h "${rapidcheck_SOURCE_DIR}/include/rapidcheck/Maybe.h")
+        if(EXISTS "${_rapidcheck_maybe_h}")
+            file(READ "${_rapidcheck_maybe_h}" _rapidcheck_maybe_contents)
+            if(NOT _rapidcheck_maybe_contents MATCHES "#include <cstdint>")
+                string(REPLACE
+                    "#include \"rapidcheck/Nothing.h\"\n"
+                    "#include \"rapidcheck/Nothing.h\"\n#include <cstdint>\n"
+                    _rapidcheck_maybe_contents
+                    "${_rapidcheck_maybe_contents}")
+                file(WRITE "${_rapidcheck_maybe_h}" "${_rapidcheck_maybe_contents}")
+            endif()
+        endif()
+	    
+	    # Unit tests
+	    add_executable(zinc_tests
+	        tests/unit/test_main.cpp
         tests/unit/test_result.cpp
         tests/unit/test_block_types.cpp
         tests/unit/test_fractional_index.cpp
