@@ -167,6 +167,14 @@ public:
                                      const QUrl& destinationFolder,
                                      const QString& format,
                                      bool includeAttachments);
+
+    // Import (backup/restore)
+    // - sourceFolder must be a local folder URL containing a Zinc export
+    // - format: "auto" | "markdown" | "html"
+    // - when replaceExisting=true, the current DB + attachments are wiped before import
+    Q_INVOKABLE bool importNotebooks(const QUrl& sourceFolder,
+                                     const QString& format,
+                                     bool replaceExisting);
     
 signals:
     void pagesChanged();

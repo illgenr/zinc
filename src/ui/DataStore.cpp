@@ -130,6 +130,67 @@ QString sanitize_path_component(const QString& input) {
     return out;
 }
 
+QString sanitize_export_component(const QString& input) {
+    const auto trimmed = input.trimmed();
+    if (trimmed.isEmpty()) return {};
+
+    QString out;
+    out.reserve(trimmed.size());
+
+    auto push_space = [&]() {
+        if (out.isEmpty()) return;
+        if (out.endsWith(QLatin1Char(' '))) return;
+        out += QLatin1Char(' ');
+    };
+
+    for (const auto ch : trimmed) {
+        const bool safe =
+            ch.isLetterOrNumber() ||
+            ch == QLatin1Char('-') ||
+            ch == QLatin1Char('_') ||
+            ch == QLatin1Char('.') ||
+            ch == QLatin1Char(' ');
+        if (safe) {
+            if (ch == QLatin1Char(' ')) {
+                push_space();
+            } else {
+                out += ch;
+            }
+            continue;
+        }
+
+        // Replace common illegal filesystem characters and other punctuation with a single space.
+        // This keeps the exported names readable while still being broadly cross-platform safe.
+        push_space();
+    }
+
+    out = out.trimmed();
+    while (out.endsWith(QLatin1Char('.'))) out.chop(1);
+    while (out.endsWith(QLatin1Char(' '))) out.chop(1);
+
+    if (out == QStringLiteral(".") || out == QStringLiteral("..")) return {};
+    return out;
+}
+
+QString unique_with_counter_suffix(const QString& base, const QSet<QString>& used) {
+    if (base.isEmpty()) return {};
+    if (!used.contains(base)) return base;
+    for (int i = 2;; ++i) {
+        const auto candidate = QStringLiteral("%1 (%2)").arg(base).arg(i);
+        if (!used.contains(candidate)) return candidate;
+    }
+}
+
+QString unique_file_name_for_stem(const QString& stem, const QString& extension, const QSet<QString>& used) {
+    if (stem.isEmpty() || extension.isEmpty()) return {};
+    const auto base = stem + QLatin1Char('.') + extension;
+    if (!used.contains(base)) return base;
+    for (int i = 2;; ++i) {
+        const auto candidate = QStringLiteral("%1 (%2).%3").arg(stem).arg(i).arg(extension);
+        if (!used.contains(candidate)) return candidate;
+    }
+}
+
 bool write_text_file(const QString& filePath, const QString& text, QString* outError) {
     QSaveFile f(filePath);
     if (!f.open(QIODevice::WriteOnly | QIODevice::Text)) {
@@ -153,6 +214,8 @@ bool write_text_file(const QString& filePath, const QString& text, QString* outE
 
 QString html_document_for_page(const QString& title,
                                const QString& markdown,
+                               const QString& pageId,
+                               const QString& notebookId,
                                const QHash<QString, QString>& pageIdToFileName) {
     const Cmark cmark;
     const auto render_task_list_checkboxes = [](const QString& html) -> QString {
@@ -212,12 +275,16 @@ QString html_document_for_page(const QString& title,
     auto body = cmark.toHtml(markdown);
     body = render_task_list_checkboxes(body);
     body = rewrite_page_links(body);
+    const auto embeddedMarkdown = markdown.toHtmlEscaped();
     return QStringLiteral(
                "<!doctype html>\n"
                "<html>\n"
                "<head>\n"
                "  <meta charset=\"utf-8\" />\n"
                "  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />\n"
+               "  <meta name=\"zinc-page-id\" content=\"%3\" />\n"
+               "  <meta name=\"zinc-notebook-id\" content=\"%4\" />\n"
+               "  <meta name=\"zinc-export\" content=\"1\" />\n"
                "  <title>%1</title>\n"
                "  <style>\n"
                "    :root { color-scheme: light dark; }\n"
@@ -227,13 +294,15 @@ QString html_document_for_page(const QString& title,
                "    code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace; }\n"
                "    a { color: #2f7cff; }\n"
                "    input[type=checkbox] { margin-right: 0.5rem; }\n"
+               "    #zinc-markdown { display: none; }\n"
                "  </style>\n"
                "</head>\n"
                "<body>\n"
+               "<textarea id=\"zinc-markdown\">%5</textarea>\n"
                "%2\n"
                "</body>\n"
                "</html>\n")
-        .arg(title.toHtmlEscaped(), body);
+        .arg(title.toHtmlEscaped(), body, pageId.toHtmlEscaped(), notebookId.toHtmlEscaped(), embeddedMarkdown);
 }
 
 QString attachment_extension_for_mime(const QString& mime) {
@@ -288,6 +357,191 @@ QString rewrite_attachment_urls_in_markdown(const QString& markdown, const QHash
         const auto mapped = idToRelativePath.value(id);
         out += mapped.isEmpty() ? m.captured(0) : mapped;
 
+        last = m.capturedEnd(0);
+    }
+    out += markdown.mid(last);
+    return out;
+}
+
+QString rewrite_exported_attachment_paths_to_zinc_urls(const QString& text) {
+    if (text.isEmpty()) return text;
+    static const QRegularExpression re(QStringLiteral(R"((?:\./)?attachments/([0-9a-fA-F-]{36})\.[A-Za-z0-9]+)"));
+
+    QString out;
+    out.reserve(text.size());
+
+    int last = 0;
+    auto it = re.globalMatch(text);
+    while (it.hasNext()) {
+        const auto m = it.next();
+        out += text.mid(last, m.capturedStart(0) - last);
+        out += QStringLiteral("image://attachments/") + m.captured(1);
+        last = m.capturedEnd(0);
+    }
+    out += text.mid(last);
+    return out;
+}
+
+std::optional<QString> extract_embedded_markdown_from_zinc_html(const QString& html) {
+    if (html.isEmpty()) return std::nullopt;
+    static const QRegularExpression re(
+        QStringLiteral(R"(<textarea[^>]*\bid\s*=\s*\"zinc-markdown\"[^>]*>([\s\S]*?)</textarea>)"));
+    const auto m = re.match(html);
+    if (!m.hasMatch()) return std::nullopt;
+
+    const auto decode_entities = [](const QString& in) -> QString {
+        if (in.isEmpty()) return in;
+        static const QRegularExpression ent(QStringLiteral(R"(&(#x[0-9A-Fa-f]+|#[0-9]+|amp|lt|gt|quot|apos);)"));
+
+        QString out;
+        out.reserve(in.size());
+
+        int last = 0;
+        auto it = ent.globalMatch(in);
+        while (it.hasNext()) {
+            const auto mm = it.next();
+            out += in.mid(last, mm.capturedStart(0) - last);
+            const auto token = mm.captured(1);
+            if (token == QStringLiteral("amp")) out += QLatin1Char('&');
+            else if (token == QStringLiteral("lt")) out += QLatin1Char('<');
+            else if (token == QStringLiteral("gt")) out += QLatin1Char('>');
+            else if (token == QStringLiteral("quot")) out += QLatin1Char('"');
+            else if (token == QStringLiteral("apos")) out += QLatin1Char('\'');
+            else if (token.startsWith(QStringLiteral("#x")) || token.startsWith(QStringLiteral("#X"))) {
+                bool ok = false;
+                const auto cp = token.mid(2).toUInt(&ok, 16);
+                const char32_t c = static_cast<char32_t>(cp);
+                out += ok ? QString::fromUcs4(&c, 1) : mm.captured(0);
+            } else if (token.startsWith(QLatin1Char('#'))) {
+                bool ok = false;
+                const auto cp = token.mid(1).toUInt(&ok, 10);
+                const char32_t c = static_cast<char32_t>(cp);
+                out += ok ? QString::fromUcs4(&c, 1) : mm.captured(0);
+            } else {
+                out += mm.captured(0);
+            }
+            last = mm.capturedEnd(0);
+        }
+        out += in.mid(last);
+        return out;
+    };
+
+    return decode_entities(m.captured(1));
+}
+
+QString normalize_import_format(const QString& format) {
+    const auto f = format.trimmed().toLower();
+    if (f.isEmpty() || f == QStringLiteral("auto")) return QStringLiteral("auto");
+    return normalize_export_format(f);
+}
+
+QString safe_resolve_export_relative_path(const QString& rootPath, const QString& relativePath) {
+    if (relativePath.isEmpty()) return {};
+    const auto cleaned = QDir::cleanPath(relativePath);
+    if (cleaned.startsWith(QLatin1Char('/')) || cleaned.startsWith(QLatin1Char('\\'))) return {};
+    if (cleaned == QStringLiteral("..") || cleaned.startsWith(QStringLiteral("../")) ||
+        cleaned.startsWith(QStringLiteral("..\\"))) {
+        return {};
+    }
+    return QDir(rootPath).filePath(cleaned);
+}
+
+QString normalize_notebook_name(const QVariant& value);
+
+QString unique_notebook_name_for_import(const QString& desired, const QSet<QString>& existingNames) {
+    const auto base = normalize_notebook_name(desired);
+    if (!existingNames.contains(base)) return base;
+    for (int i = 2;; ++i) {
+        const auto candidate = QStringLiteral("%1 (%2)").arg(base).arg(i);
+        if (!existingNames.contains(candidate)) return candidate;
+    }
+}
+
+QString strip_legacy_notebook_dir_name(const QString& dirName) {
+    // Old export used "<name>_<idprefix8>".
+    static const QRegularExpression re(QStringLiteral(R"(^(.*)_([0-9a-fA-F]{8})$)"));
+    if (const auto m = re.match(dirName); m.hasMatch()) {
+        const auto stem = m.captured(1).trimmed();
+        return stem.isEmpty() ? dirName : stem;
+    }
+    return dirName;
+}
+
+QVariantMap parse_legacy_page_file_stem(const QString& stem) {
+    // Old export used "%1-%2-%3" where:
+    // - %1 is 4-digit sort order
+    // - %2 is a sanitized title
+    // - %3 is 8-char id prefix
+    QVariantMap out;
+    static const QRegularExpression re(QStringLiteral(R"(^(\\d{4})-(.+)-[0-9a-fA-F]{8}$)"));
+    if (const auto m = re.match(stem); m.hasMatch()) {
+        out.insert(QStringLiteral("sortOrder"), m.captured(1).toInt());
+        out.insert(QStringLiteral("title"), m.captured(2).trimmed());
+        return out;
+    }
+    out.insert(QStringLiteral("title"), stem.trimmed());
+    out.insert(QStringLiteral("sortOrder"), 0);
+    return out;
+}
+
+QString normalize_imported_title_from_filename(const QString& baseName) {
+    const auto parsed = parse_legacy_page_file_stem(baseName);
+    auto raw = parsed.value(QStringLiteral("title")).toString();
+    // Old sanitize_path_component replaced spaces with underscores; try to make it readable again.
+    return raw.contains(QLatin1Char('_')) ? raw.replace(QLatin1Char('_'), QLatin1Char(' ')).trimmed() : raw;
+}
+
+int normalize_imported_sort_order_from_filename(const QString& baseName) {
+    return parse_legacy_page_file_stem(baseName).value(QStringLiteral("sortOrder")).toInt();
+}
+
+QString mime_from_extension(const QString& ext) {
+    const auto e = ext.trimmed().toLower();
+    if (e == QStringLiteral("png")) return QStringLiteral("image/png");
+    if (e == QStringLiteral("jpg") || e == QStringLiteral("jpeg")) return QStringLiteral("image/jpeg");
+    if (e == QStringLiteral("webp")) return QStringLiteral("image/webp");
+    if (e == QStringLiteral("gif")) return QStringLiteral("image/gif");
+    if (e == QStringLiteral("bmp")) return QStringLiteral("image/bmp");
+    if (e == QStringLiteral("svg")) return QStringLiteral("image/svg+xml");
+    return QStringLiteral("application/octet-stream");
+}
+
+QString rewrite_zinc_attachment_ids(const QString& markdown, const QHash<QString, QString>& oldToNew) {
+    if (markdown.isEmpty()) return markdown;
+    if (oldToNew.isEmpty()) return markdown;
+    static const QRegularExpression re(QStringLiteral(R"(image://attachments/([0-9a-fA-F-]{36}))"));
+
+    QString out;
+    out.reserve(markdown.size());
+    int last = 0;
+    auto it = re.globalMatch(markdown);
+    while (it.hasNext()) {
+        const auto m = it.next();
+        out += markdown.mid(last, m.capturedStart(0) - last);
+        const auto oldId = m.captured(1);
+        const auto mapped = oldToNew.value(oldId);
+        out += mapped.isEmpty() ? m.captured(0) : (QStringLiteral("image://attachments/") + mapped);
+        last = m.capturedEnd(0);
+    }
+    out += markdown.mid(last);
+    return out;
+}
+
+QString rewrite_zinc_page_links(const QString& markdown, const QHash<QString, QString>& oldToNew) {
+    if (markdown.isEmpty()) return markdown;
+    if (oldToNew.isEmpty()) return markdown;
+    static const QRegularExpression re(QStringLiteral(R"(zinc://page/([0-9a-fA-F-]{36}))"));
+
+    QString out;
+    out.reserve(markdown.size());
+    int last = 0;
+    auto it = re.globalMatch(markdown);
+    while (it.hasNext()) {
+        const auto m = it.next();
+        out += markdown.mid(last, m.capturedStart(0) - last);
+        const auto oldId = m.captured(1);
+        const auto mapped = oldToNew.value(oldId);
+        out += mapped.isEmpty() ? m.captured(0) : (QStringLiteral("zinc://page/") + mapped);
         last = m.capturedEnd(0);
     }
     out += markdown.mid(last);
@@ -3928,18 +4182,32 @@ bool DataStore::exportNotebooks(const QVariantList& notebookIds,
 
     const auto extension = (normalizedFormat == QStringLiteral("html")) ? QStringLiteral("html") : QStringLiteral("md");
 
+    QSet<QString> usedNotebookDirNames;
+    QJsonArray notebooksJson;
+    QJsonArray pagesJson;
+    QJsonArray attachmentsJson;
+
     for (const auto& notebookId : resolvedNotebookIds) {
         const auto nb = getNotebook(notebookId);
         const auto notebookNameRaw = nb.value(QStringLiteral("name")).toString();
-        const auto notebookName = sanitize_path_component(notebookNameRaw).isEmpty()
+        const auto notebookName = sanitize_export_component(notebookNameRaw).isEmpty()
             ? QStringLiteral("Notebook")
-            : sanitize_path_component(notebookNameRaw);
+            : sanitize_export_component(notebookNameRaw);
 
-        const auto notebookDirName = notebookName + QStringLiteral("_") + notebookId.left(8);
+        const auto notebookDirName = unique_with_counter_suffix(notebookName, usedNotebookDirNames);
+        usedNotebookDirNames.insert(notebookDirName);
         const auto notebookDirPath = QDir(rootPath).filePath(notebookDirName);
         if (!QDir().mkpath(notebookDirPath)) {
             emit error(QStringLiteral("Export failed: could not create notebook folder"));
             return false;
+        }
+
+        {
+            QJsonObject nbObj;
+            nbObj.insert(QStringLiteral("notebookId"), notebookId);
+            nbObj.insert(QStringLiteral("name"), notebookNameRaw);
+            nbObj.insert(QStringLiteral("folder"), notebookDirName);
+            notebooksJson.append(nbObj);
         }
 
         QSqlQuery q(m_db);
@@ -4013,6 +4281,13 @@ bool DataStore::exportNotebooks(const QVariantList& notebookIds,
                 }
 
                 attachmentIdToRelativePath.insert(attachmentId, QStringLiteral("attachments/%1").arg(outFileName));
+                {
+                    QJsonObject aObj;
+                    aObj.insert(QStringLiteral("attachmentId"), attachmentId);
+                    aObj.insert(QStringLiteral("mimeType"), mime);
+                    aObj.insert(QStringLiteral("file"), notebookDirName + QStringLiteral("/attachments/") + outFileName);
+                    attachmentsJson.append(aObj);
+                }
                 a.finish();
             }
         }
@@ -4020,18 +4295,24 @@ bool DataStore::exportNotebooks(const QVariantList& notebookIds,
         const auto pageIdToFileName = [&]() -> QHash<QString, QString> {
             QHash<QString, QString> out;
             out.reserve(pages.size());
+            QSet<QString> usedFileNames;
             for (const auto& row : pages) {
                 const auto pageId = row.pageId;
                 const auto title = row.title;
-                const auto fileTitle = sanitize_path_component(title).isEmpty()
+                const auto fileTitle = sanitize_export_component(title).isEmpty()
                     ? QStringLiteral("Untitled")
-                    : sanitize_path_component(title);
-                const auto fileName = QStringLiteral("%1-%2-%3.%4")
-                                          .arg(row.sortOrder, 4, 10, QLatin1Char('0'))
-                                          .arg(fileTitle)
-                                          .arg(pageId.left(8))
-                                          .arg(extension);
+                    : sanitize_export_component(title);
+                const auto fileName = unique_file_name_for_stem(fileTitle, extension, usedFileNames);
+                usedFileNames.insert(fileName);
                 out.insert(pageId, fileName);
+
+                QJsonObject pObj;
+                pObj.insert(QStringLiteral("pageId"), pageId);
+                pObj.insert(QStringLiteral("notebookId"), notebookId);
+                pObj.insert(QStringLiteral("title"), title);
+                pObj.insert(QStringLiteral("sortOrder"), row.sortOrder);
+                pObj.insert(QStringLiteral("file"), notebookDirName + QLatin1Char('/') + fileName);
+                pagesJson.append(pObj);
             }
             return out;
         }();
@@ -4043,18 +4324,11 @@ bool DataStore::exportNotebooks(const QVariantList& notebookIds,
                 ? rewrite_attachment_urls_in_markdown(row.markdown, attachmentIdToRelativePath)
                 : row.markdown;
 
-            const auto fileTitle = sanitize_path_component(title).isEmpty()
-                ? QStringLiteral("Untitled")
-                : sanitize_path_component(title);
-            const auto fileName = QStringLiteral("%1-%2-%3.%4")
-                                      .arg(row.sortOrder, 4, 10, QLatin1Char('0'))
-                                      .arg(fileTitle)
-                                      .arg(pageId.left(8))
-                                      .arg(extension);
+            const auto fileName = pageIdToFileName.value(pageId);
             const auto filePath = QDir(notebookDirPath).filePath(fileName);
 
             const auto payload = (normalizedFormat == QStringLiteral("html"))
-                ? html_document_for_page(title, markdown, pageIdToFileName)
+                ? html_document_for_page(title, markdown, pageId, notebookId, pageIdToFileName)
                 : (markdown.endsWith(QLatin1Char('\n')) ? markdown : (markdown + QLatin1Char('\n')));
 
             QString err;
@@ -4063,6 +4337,395 @@ bool DataStore::exportNotebooks(const QVariantList& notebookIds,
                 return false;
             }
         }
+    }
+
+    {
+        QJsonObject manifest;
+        manifest.insert(QStringLiteral("version"), 1);
+        manifest.insert(QStringLiteral("format"), normalizedFormat);
+        manifest.insert(QStringLiteral("includeAttachments"), includeAttachments);
+        manifest.insert(QStringLiteral("notebooks"), notebooksJson);
+        manifest.insert(QStringLiteral("pages"), pagesJson);
+        manifest.insert(QStringLiteral("attachments"), attachmentsJson);
+
+        const auto outPath = QDir(rootPath).filePath(QStringLiteral("zinc-export.json"));
+        const auto bytes = QJsonDocument(manifest).toJson(QJsonDocument::Indented);
+        QString err;
+        if (!write_text_file(outPath, QString::fromUtf8(bytes), &err)) {
+            emit error(QStringLiteral("Export failed: %1").arg(err));
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool DataStore::importNotebooks(const QUrl& sourceFolder,
+                                const QString& format,
+                                bool replaceExisting) {
+    if (!m_ready) {
+        emit error(QStringLiteral("Import failed: database not initialized"));
+        return false;
+    }
+
+    const auto normalizedFormat = normalize_import_format(format);
+    if (normalizedFormat.isEmpty()) {
+        emit error(QStringLiteral("Import failed: unsupported format"));
+        return false;
+    }
+
+    if (!sourceFolder.isValid() || !sourceFolder.isLocalFile()) {
+        emit error(QStringLiteral("Import failed: source must be a local folder"));
+        return false;
+    }
+
+    const auto rootPath = QDir(sourceFolder.toLocalFile()).absolutePath();
+    if (rootPath.isEmpty()) {
+        emit error(QStringLiteral("Import failed: invalid source folder"));
+        return false;
+    }
+    if (!QDir(rootPath).exists()) {
+        emit error(QStringLiteral("Import failed: source folder does not exist"));
+        return false;
+    }
+
+    QFile manifestFile(QDir(rootPath).filePath(QStringLiteral("zinc-export.json")));
+    QJsonObject manifest;
+    if (manifestFile.exists()) {
+        if (!manifestFile.open(QIODevice::ReadOnly)) {
+            emit error(QStringLiteral("Import failed: could not read zinc-export.json"));
+            return false;
+        }
+        const auto doc = QJsonDocument::fromJson(manifestFile.readAll());
+        if (!doc.isObject()) {
+            emit error(QStringLiteral("Import failed: invalid zinc-export.json"));
+            return false;
+        }
+        manifest = doc.object();
+    } else if (normalizedFormat == QStringLiteral("auto")) {
+        emit error(QStringLiteral("Import failed: missing zinc-export.json"));
+        return false;
+    }
+
+    const auto manifestFormat = manifest.value(QStringLiteral("format")).toString().trimmed().toLower();
+    const auto resolvedFormat = [&]() -> QString {
+        if (!manifestFormat.isEmpty()) {
+            return normalize_export_format(manifestFormat);
+        }
+        if (normalizedFormat == QStringLiteral("auto")) {
+            return {};
+        }
+        return normalizedFormat;
+    }();
+    if (resolvedFormat.isEmpty()) {
+        emit error(QStringLiteral("Import failed: could not determine format"));
+        return false;
+    }
+
+    if (replaceExisting) {
+        if (!resetDatabase()) {
+            emit error(QStringLiteral("Import failed: could not reset database"));
+            return false;
+        }
+    }
+
+    const auto now = now_timestamp_utc();
+
+    struct ReadPageMarkdownResult {
+        bool ok = false;
+        bool missingEmbeddedMarkdown = false;
+        QString markdown;
+    };
+
+    const auto read_markdown_from_file = [&](const QString& absPath) -> ReadPageMarkdownResult {
+        QFile f(absPath);
+        if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            return {};
+        }
+        const auto rawText = QString::fromUtf8(f.readAll());
+        if (resolvedFormat == QStringLiteral("markdown")) {
+            return {.ok = true, .missingEmbeddedMarkdown = false, .markdown = rawText};
+        }
+        if (resolvedFormat == QStringLiteral("html")) {
+            const auto extracted = extract_embedded_markdown_from_zinc_html(rawText);
+            if (!extracted) {
+                return {.ok = true, .missingEmbeddedMarkdown = true, .markdown = {}};
+            }
+            return {.ok = true, .missingEmbeddedMarkdown = false, .markdown = *extracted};
+        }
+        return {};
+    };
+
+    const bool hasManifest = manifestFile.exists();
+    if (hasManifest) {
+        const auto notebooksArr = manifest.value(QStringLiteral("notebooks")).toArray();
+        const auto pagesArr = manifest.value(QStringLiteral("pages")).toArray();
+        const auto attachmentsArr = manifest.value(QStringLiteral("attachments")).toArray();
+
+        QSet<QString> existingNotebookNames;
+        {
+            const auto existing = getAllNotebooks();
+            for (const auto& v : existing) {
+                const auto nb = v.toMap();
+                existingNotebookNames.insert(nb.value(QStringLiteral("name")).toString());
+            }
+        }
+
+        QHash<QString, QString> notebookIdMap;
+        notebookIdMap.reserve(notebooksArr.size());
+        if (replaceExisting) {
+            QVariantList notebookUpdates;
+            notebookUpdates.reserve(notebooksArr.size());
+            int sortOrder = 0;
+            for (const auto& v : notebooksArr) {
+                const auto obj = v.toObject();
+                const auto notebookId = obj.value(QStringLiteral("notebookId")).toString();
+                if (notebookId.isEmpty()) continue;
+                QVariantMap nb;
+                nb.insert(QStringLiteral("notebookId"), notebookId);
+                nb.insert(QStringLiteral("name"), obj.value(QStringLiteral("name")).toString());
+                nb.insert(QStringLiteral("sortOrder"), sortOrder++);
+                nb.insert(QStringLiteral("updatedAt"), now);
+                notebookUpdates.append(nb);
+                notebookIdMap.insert(notebookId, notebookId);
+            }
+            if (!notebookUpdates.isEmpty()) {
+                applyNotebookUpdates(notebookUpdates);
+            }
+        } else {
+            for (const auto& v : notebooksArr) {
+                const auto obj = v.toObject();
+                const auto oldId = obj.value(QStringLiteral("notebookId")).toString();
+                if (oldId.isEmpty()) continue;
+
+                const auto desired = obj.value(QStringLiteral("name")).toString();
+                const auto uniqueName = unique_notebook_name_for_import(desired, existingNotebookNames);
+                existingNotebookNames.insert(uniqueName);
+
+                const auto newId = createNotebook(uniqueName);
+                if (newId.isEmpty()) {
+                    emit error(QStringLiteral("Import failed: could not create notebook"));
+                    return false;
+                }
+                notebookIdMap.insert(oldId, newId);
+            }
+        }
+
+        // Precompute page id mapping for duplicate imports so internal links can be rewritten.
+        QHash<QString, QString> pageIdMap;
+        pageIdMap.reserve(pagesArr.size());
+        for (const auto& v : pagesArr) {
+            const auto obj = v.toObject();
+            const auto oldPageId = obj.value(QStringLiteral("pageId")).toString();
+            if (oldPageId.isEmpty()) continue;
+            pageIdMap.insert(oldPageId,
+                             replaceExisting ? oldPageId : QUuid::createUuid().toString(QUuid::WithoutBraces));
+        }
+
+        QHash<QString, QString> attachmentIdMap;
+        attachmentIdMap.reserve(attachmentsArr.size());
+
+        QVariantList attachmentUpdates;
+        attachmentUpdates.reserve(attachmentsArr.size());
+        for (const auto& v : attachmentsArr) {
+            const auto obj = v.toObject();
+            const auto oldId = obj.value(QStringLiteral("attachmentId")).toString();
+            const auto mimeType = obj.value(QStringLiteral("mimeType")).toString();
+            const auto rel = obj.value(QStringLiteral("file")).toString();
+            if (oldId.isEmpty() || mimeType.isEmpty() || rel.isEmpty()) continue;
+
+            const auto abs = safe_resolve_export_relative_path(rootPath, rel);
+            if (abs.isEmpty()) {
+                emit error(QStringLiteral("Import failed: invalid attachment path"));
+                return false;
+            }
+            const auto bytes = read_file_bytes(abs);
+            if (!bytes || bytes->isEmpty()) {
+                emit error(QStringLiteral("Import failed: missing attachment file %1").arg(oldId));
+                return false;
+            }
+
+            const auto newId = replaceExisting ? oldId : QUuid::createUuid().toString(QUuid::WithoutBraces);
+            attachmentIdMap.insert(oldId, newId);
+
+            QVariantMap a;
+            a.insert(QStringLiteral("attachmentId"), newId);
+            a.insert(QStringLiteral("mimeType"), mimeType);
+            a.insert(QStringLiteral("dataBase64"), QString::fromLatin1(bytes->toBase64()));
+            a.insert(QStringLiteral("updatedAt"), now);
+            attachmentUpdates.append(a);
+        }
+        if (!attachmentUpdates.isEmpty()) {
+            applyAttachmentUpdates(attachmentUpdates);
+        }
+
+        for (const auto& v : pagesArr) {
+            const auto obj = v.toObject();
+            const auto oldPageId = obj.value(QStringLiteral("pageId")).toString();
+            const auto oldNotebookId = obj.value(QStringLiteral("notebookId")).toString();
+            const auto title = obj.value(QStringLiteral("title")).toString();
+            const auto rel = obj.value(QStringLiteral("file")).toString();
+            const auto sortOrder = obj.value(QStringLiteral("sortOrder")).toInt();
+            if (oldPageId.isEmpty() || rel.isEmpty()) continue;
+
+            const auto abs = safe_resolve_export_relative_path(rootPath, rel);
+            if (abs.isEmpty()) {
+                emit error(QStringLiteral("Import failed: invalid page path"));
+                return false;
+            }
+
+            const auto read = read_markdown_from_file(abs);
+            if (!read.ok) {
+                emit error(QStringLiteral("Import failed: could not read page file"));
+                return false;
+            }
+            if (read.missingEmbeddedMarkdown) {
+                emit error(QStringLiteral("Import failed: HTML file missing embedded markdown"));
+                return false;
+            }
+
+            auto markdown = read.markdown;
+
+            markdown = rewrite_exported_attachment_paths_to_zinc_urls(markdown);
+            markdown = rewrite_zinc_attachment_ids(markdown, attachmentIdMap);
+            if (!replaceExisting) {
+                markdown = rewrite_zinc_page_links(markdown, pageIdMap);
+            }
+
+            const auto newPageId = pageIdMap.value(oldPageId, oldPageId);
+            const auto newNotebookId = notebookIdMap.value(oldNotebookId, oldNotebookId);
+
+            QVariantMap page;
+            page.insert(QStringLiteral("pageId"), newPageId);
+            if (!newNotebookId.isEmpty()) page.insert(QStringLiteral("notebookId"), newNotebookId);
+            page.insert(QStringLiteral("title"), title);
+            page.insert(QStringLiteral("parentId"), QString{});
+            page.insert(QStringLiteral("depth"), 0);
+            page.insert(QStringLiteral("sortOrder"), sortOrder);
+            page.insert(QStringLiteral("contentMarkdown"), markdown);
+            savePage(page);
+        }
+
+        return true;
+    }
+
+    // No manifest: treat the folder as a best-effort import.
+    // - Each immediate subfolder becomes a notebook.
+    // - Files in that notebook folder become pages.
+    // - attachments/ is imported if present and markdown references are rewritten.
+    if (normalizedFormat == QStringLiteral("auto")) {
+        emit error(QStringLiteral("Import failed: missing zinc-export.json"));
+        return false;
+    }
+
+    QSet<QString> existingNotebookNames;
+    {
+        const auto existing = getAllNotebooks();
+        for (const auto& v : existing) {
+            const auto nb = v.toMap();
+            existingNotebookNames.insert(nb.value(QStringLiteral("name")).toString());
+        }
+    }
+
+    const auto import_notebook_dir = [&](const QDir& nbDir, const QString& notebookNameRaw) -> bool {
+        const auto uniqueName = unique_notebook_name_for_import(notebookNameRaw, existingNotebookNames);
+        existingNotebookNames.insert(uniqueName);
+        const auto notebookId = createNotebook(uniqueName);
+        if (notebookId.isEmpty()) {
+            emit error(QStringLiteral("Import failed: could not create notebook"));
+            return false;
+        }
+
+        // Attachments (optional)
+        QHash<QString, QString> attachmentIdMap;
+        {
+            const QDir attachmentsDir(nbDir.filePath(QStringLiteral("attachments")));
+            if (attachmentsDir.exists()) {
+                const auto files = attachmentsDir.entryInfoList(QDir::Files | QDir::NoDotAndDotDot);
+                QVariantList attachmentUpdates;
+                attachmentUpdates.reserve(files.size());
+                for (const auto& info : files) {
+                    const auto base = info.baseName();
+                    const auto ext = info.suffix();
+                    if (base.size() != 36) continue; // expect UUID
+                    const auto bytes = read_file_bytes(info.absoluteFilePath());
+                    if (!bytes || bytes->isEmpty()) continue;
+
+                    const auto newId = replaceExisting ? base : QUuid::createUuid().toString(QUuid::WithoutBraces);
+                    attachmentIdMap.insert(base, newId);
+
+                    QVariantMap a;
+                    a.insert(QStringLiteral("attachmentId"), newId);
+                    a.insert(QStringLiteral("mimeType"), mime_from_extension(ext));
+                    a.insert(QStringLiteral("dataBase64"), QString::fromLatin1(bytes->toBase64()));
+                    a.insert(QStringLiteral("updatedAt"), now);
+                    attachmentUpdates.append(a);
+                }
+                if (!attachmentUpdates.isEmpty()) {
+                    applyAttachmentUpdates(attachmentUpdates);
+                }
+            }
+        }
+
+        const auto pageFiles = nbDir.entryInfoList(QStringList{QStringLiteral("*.%1").arg(resolvedFormat == QStringLiteral("html") ? "html" : "md")},
+                                                   QDir::Files | QDir::NoDotAndDotDot);
+        for (const auto& info : pageFiles) {
+            const auto read = read_markdown_from_file(info.absoluteFilePath());
+            if (!read.ok) {
+                emit error(QStringLiteral("Import failed: could not read page file"));
+                return false;
+            }
+            if (read.missingEmbeddedMarkdown) {
+                emit error(QStringLiteral("Import failed: HTML file missing embedded markdown"));
+                return false;
+            }
+            auto markdown = read.markdown;
+
+            markdown = rewrite_exported_attachment_paths_to_zinc_urls(markdown);
+            markdown = rewrite_zinc_attachment_ids(markdown, attachmentIdMap);
+
+            const auto title = normalize_imported_title_from_filename(info.completeBaseName());
+            const auto sortOrder = normalize_imported_sort_order_from_filename(info.completeBaseName());
+            const auto pageId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+
+            QVariantMap page;
+            page.insert(QStringLiteral("pageId"), pageId);
+            page.insert(QStringLiteral("notebookId"), notebookId);
+            page.insert(QStringLiteral("title"), title);
+            page.insert(QStringLiteral("parentId"), QString{});
+            page.insert(QStringLiteral("depth"), 0);
+            page.insert(QStringLiteral("sortOrder"), sortOrder);
+            page.insert(QStringLiteral("contentMarkdown"), markdown);
+            savePage(page);
+        }
+        return true;
+    };
+
+    QDir rootDir(rootPath);
+    const auto notebookDirs = rootDir.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot);
+    bool importedAny = false;
+    for (const auto& dirInfo : notebookDirs) {
+        QDir nbDir(dirInfo.absoluteFilePath());
+        const auto rawName = strip_legacy_notebook_dir_name(dirInfo.fileName());
+        if (import_notebook_dir(nbDir, rawName)) {
+            importedAny = true;
+        } else {
+            return false;
+        }
+    }
+
+    // If there are no notebook subdirectories, treat the root folder itself as a single notebook.
+    if (!importedAny) {
+        const auto rawName = QFileInfo(rootPath).fileName().isEmpty() ? QStringLiteral("Imported") : QFileInfo(rootPath).fileName();
+        if (!import_notebook_dir(rootDir, rawName)) {
+            return false;
+        }
+        importedAny = true;
+    }
+
+    if (!importedAny) {
+        emit error(QStringLiteral("Import failed: no notebooks found"));
+        return false;
     }
 
     return true;

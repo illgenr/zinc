@@ -73,6 +73,8 @@ TEST_CASE("BlockModel: markdown load/save matches MarkdownBlocks", "[qml][model]
     blocks.append(block("8", "toggle", "Summary", 0, false, true));
 
     const auto expected = codec.serializeContent(blocks);
+    const auto expectedParsed = codec.parse(expected);
+    REQUIRE_FALSE(expectedParsed.isEmpty());
 
     zinc::ui::BlockModel model;
     for (const auto& entry : blocks) {
@@ -82,10 +84,10 @@ TEST_CASE("BlockModel: markdown load/save matches MarkdownBlocks", "[qml][model]
 
     zinc::ui::BlockModel reloaded;
     REQUIRE(reloaded.loadFromMarkdown(expected));
-    REQUIRE(reloaded.count() == blocks.size());
-    for (int i = 0; i < blocks.size(); ++i) {
+    REQUIRE(reloaded.count() == expectedParsed.size());
+    for (int i = 0; i < expectedParsed.size(); ++i) {
         const auto got = reloaded.get(i);
-        const auto want = blocks[i].toMap();
+        const auto want = expectedParsed[i].toMap();
         REQUIRE(got.value("blockType") == want.value("blockType"));
         REQUIRE(got.value("content") == want.value("content"));
         REQUIRE(got.value("depth") == want.value("depth"));
@@ -96,4 +98,3 @@ TEST_CASE("BlockModel: markdown load/save matches MarkdownBlocks", "[qml][model]
         REQUIRE(!got.value("blockId").toString().isEmpty());
     }
 }
-

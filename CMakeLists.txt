@@ -575,10 +575,11 @@ if(ZINC_BUILD_TESTS)
 			        tests/qml/test_feature_flags.cpp
 			        tests/qml/test_datastore_sync.cpp
                     tests/qml/test_datastore_lifetime.cpp
-		        tests/qml/test_datastore_notebooks.cpp
-		        tests/qml/test_datastore_export.cpp
-		        tests/qml/test_export_folder_settings.cpp
-		        tests/qml/test_attachments_disk_storage.cpp
+			        tests/qml/test_datastore_notebooks.cpp
+			        tests/qml/test_datastore_export.cpp
+			        tests/qml/test_datastore_import.cpp
+			        tests/qml/test_export_folder_settings.cpp
+			        tests/qml/test_attachments_disk_storage.cpp
 			        tests/qml/test_block_editor_cursor_visibility_qml.cpp
 			        tests/qml/test_block_editor_enter_logic_qml.cpp
 			        tests/qml/test_block_editor_backspace_delete_empty_block_qml.cpp

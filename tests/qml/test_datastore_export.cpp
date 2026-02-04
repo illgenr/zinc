@@ -2,6 +2,7 @@
 
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QTemporaryDir>
 #include <QUrl>
 
@@ -48,6 +49,23 @@ QStringList listFilesRecursively(const QString& rootPath) {
     return files;
 }
 
+QStringList fileNamesOnly(const QStringList& paths) {
+    QStringList names;
+    names.reserve(paths.size());
+    for (const auto& p : paths) {
+        names.append(QFileInfo(p).fileName());
+    }
+    return names;
+}
+
+QStringList filterBySuffix(const QStringList& paths, const QString& suffix) {
+    QStringList out;
+    for (const auto& p : paths) {
+        if (p.endsWith(suffix)) out.append(p);
+    }
+    return out;
+}
+
 } // namespace
 
 TEST_CASE("DataStore: export notebooks as markdown", "[qml][datastore][export]") {
@@ -69,11 +87,18 @@ TEST_CASE("DataStore: export notebooks as markdown", "[qml][datastore][export]")
     REQUIRE(ok);
 
     const auto files = listFilesRecursively(tmp.path());
-    REQUIRE(files.size() == 2);
-    REQUIRE(readAllText(files[0]).size() > 0);
-    REQUIRE(readAllText(files[1]).size() > 0);
+    REQUIRE(files.size() == 3); // pages + manifest
 
-    const auto allText = readAllText(files[0]) + "\n" + readAllText(files[1]);
+    const auto mdFiles = filterBySuffix(files, QStringLiteral(".md"));
+    REQUIRE(mdFiles.size() == 2);
+
+    const auto names = fileNamesOnly(mdFiles);
+    REQUIRE(names.contains(QStringLiteral("Meeting Notes.md")));
+    REQUIRE(names.contains(QStringLiteral("Todo.md")));
+    REQUIRE(readAllText(mdFiles[0]).size() > 0);
+    REQUIRE(readAllText(mdFiles[1]).size() > 0);
+
+    const auto allText = readAllText(mdFiles[0]) + "\n" + readAllText(mdFiles[1]);
     REQUIRE(allText.contains(QStringLiteral("# Meeting")));
     REQUIRE(allText.contains(QStringLiteral("- A")));
 }
@@ -98,8 +123,10 @@ TEST_CASE("DataStore: export notebooks as html", "[qml][datastore][export]") {
     REQUIRE(ok);
 
     const auto files = listFilesRecursively(tmp.path());
-    REQUIRE(files.size() == 1);
-    const auto html = readAllText(files[0]);
+    REQUIRE(files.size() == 2); // page + manifest
+    const auto htmlFiles = filterBySuffix(files, QStringLiteral(".html"));
+    REQUIRE(htmlFiles.size() == 1);
+    const auto html = readAllText(htmlFiles[0]);
     REQUIRE(html.contains(QStringLiteral("Hello")));
     REQUIRE(html.contains(QStringLiteral("<")));
     REQUIRE(html.contains(QStringLiteral("<style>")));
@@ -133,20 +160,22 @@ TEST_CASE("DataStore: html export rewrites zinc page links", "[qml][datastore][e
     REQUIRE(ok);
 
     const auto files = listFilesRecursively(tmp.path());
-    REQUIRE(files.size() == 2);
+    REQUIRE(files.size() == 3); // pages + manifest
+    const auto htmlFiles = filterBySuffix(files, QStringLiteral(".html"));
+    REQUIRE(htmlFiles.size() == 2);
 
     QString sourceHtml;
-    for (const auto& f : files) {
-        if (f.contains(pageA.left(8))) {
+    for (const auto& f : htmlFiles) {
+        if (QFileInfo(f).fileName() == QStringLiteral("Source.html")) {
             sourceHtml = readAllText(f);
             break;
         }
     }
     REQUIRE_FALSE(sourceHtml.isEmpty());
 
-    const auto expectedTarget = QStringLiteral("0000-Target-%1.html").arg(pageB.left(8));
+    const auto expectedTarget = QStringLiteral("Target.html");
     REQUIRE(sourceHtml.contains(expectedTarget));
-    REQUIRE_FALSE(sourceHtml.contains(QStringLiteral("zinc://page/")));
+    REQUIRE_FALSE(sourceHtml.contains(QStringLiteral("href=\"zinc://page/")));
 }
 
 TEST_CASE("DataStore: export respects selected notebooks", "[qml][datastore][export]") {
@@ -167,8 +196,10 @@ TEST_CASE("DataStore: export respects selected notebooks", "[qml][datastore][exp
 
     REQUIRE(store.exportNotebooks(QVariantList{aId}, QUrl::fromLocalFile(tmp.path()), QStringLiteral("markdown"), false));
     const auto files = listFilesRecursively(tmp.path());
-    REQUIRE(files.size() == 1);
-    const auto text = readAllText(files[0]);
+    REQUIRE(files.size() == 2); // page + manifest
+    const auto mdFiles = filterBySuffix(files, QStringLiteral(".md"));
+    REQUIRE(mdFiles.size() == 1);
+    const auto text = readAllText(mdFiles[0]);
     REQUIRE(text.contains(QStringLiteral("A")));
     REQUIRE_FALSE(text.contains(QStringLiteral("B")));
 }
@@ -196,7 +227,7 @@ TEST_CASE("DataStore: export rewrites attachment URLs and copies bytes", "[qml][
     REQUIRE(store.exportNotebooks(QVariantList{nbId}, QUrl::fromLocalFile(tmp.path()), QStringLiteral("markdown"), true));
 
     const auto files = listFilesRecursively(tmp.path());
-    REQUIRE(files.size() == 2); // one page + one attachment
+    REQUIRE(files.size() == 3); // one page + one attachment + manifest
 
     QString pagePath;
     QString attachmentPath;
