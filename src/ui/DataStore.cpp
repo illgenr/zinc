@@ -4731,6 +4731,41 @@ bool DataStore::importNotebooks(const QUrl& sourceFolder,
     return true;
 }
 
+QUrl DataStore::createFolder(const QUrl& parentFolder, const QString& name) {
+    if (!parentFolder.isValid() || !parentFolder.isLocalFile()) {
+        emit error(QStringLiteral("Create folder failed: invalid parent folder"));
+        return {};
+    }
+
+    const auto parentPath = QDir(parentFolder.toLocalFile()).absolutePath();
+    if (parentPath.isEmpty() || !QDir(parentPath).exists()) {
+        emit error(QStringLiteral("Create folder failed: parent folder does not exist"));
+        return {};
+    }
+
+    const auto raw = name.trimmed();
+    const auto cleaned = sanitize_export_component(raw);
+    if (cleaned.isEmpty() || cleaned == QStringLiteral(".") || cleaned == QStringLiteral("..")) {
+        emit error(QStringLiteral("Create folder failed: invalid folder name"));
+        return {};
+    }
+    if (cleaned.contains('/') || cleaned.contains('\\')) {
+        emit error(QStringLiteral("Create folder failed: invalid folder name"));
+        return {};
+    }
+
+    QDir dir(parentPath);
+    const auto full = dir.filePath(cleaned);
+    if (QDir(full).exists()) {
+        return QUrl::fromLocalFile(QDir(full).absolutePath());
+    }
+    if (!dir.mkdir(cleaned)) {
+        emit error(QStringLiteral("Create folder failed: could not create folder"));
+        return {};
+    }
+    return QUrl::fromLocalFile(QDir(full).absolutePath());
+}
+
 QString DataStore::ensureDefaultNotebook() {
     if (!m_ready) return QString::fromLatin1(kDefaultNotebookId);
 

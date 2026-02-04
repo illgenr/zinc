@@ -44,3 +44,13 @@ TEST_CASE("Export folder setting: persists selected folder", "[qml][settings][ex
     }
 }
 
+TEST_CASE("DataStore: createFolder creates a child directory", "[qml][settings][export]") {
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+
+    zinc::ui::DataStore store;
+    const auto created = store.createFolder(QUrl::fromLocalFile(tmp.path()), QStringLiteral("Child Folder"));
+    REQUIRE(created.isValid());
+    REQUIRE(created.isLocalFile());
+    REQUIRE(QDir(created.toLocalFile()).exists());
+}

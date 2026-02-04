@@ -962,6 +962,7 @@ Dialog {
         property int exportFormatIndex: 0 // 0=markdown, 1=html
         property string exportStatus: ""
         property bool exportSucceeded: false
+        property string exportFolderPickerStatus: ""
         property url folderPickerCurrentFolder: ""
         property url folderPickerSelectedFolder: ""
         property url importSourceFolder: ""
@@ -969,8 +970,11 @@ Dialog {
         property bool importReplaceExisting: false
         property string importStatus: ""
         property bool importSucceeded: false
+        property string importFolderPickerStatus: ""
         property url importFolderPickerCurrentFolder: ""
         property url importFolderPickerSelectedFolder: ""
+        property string newFolderName: ""
+        property bool newFolderIsImport: false
 
         function refreshNotebooks() {
             notebooksModel.clear()
@@ -1010,6 +1014,7 @@ Dialog {
 
         function openFolderPicker() {
             ensureExportDestinationFolder()
+            exportFolderPickerStatus = ""
             folderPickerCurrentFolder = exportDestinationFolder
             folderPickerSelectedFolder = ""
             exportFolderPickerDialog.open()
@@ -1024,6 +1029,7 @@ Dialog {
 
         function openImportFolderPicker() {
             ensureImportSourceFolder()
+            importFolderPickerStatus = ""
             importFolderPickerCurrentFolder = importSourceFolder
             importFolderPickerSelectedFolder = ""
             importFolderPickerDialog.open()
@@ -1039,6 +1045,22 @@ Dialog {
             target: DataStore
             function onNotebooksChanged() { refreshNotebooks() }
             function onError(message) {
+                if (newFolderDialog && newFolderDialog.visible) {
+                    if (newFolderIsImport) {
+                        importFolderPickerStatus = message
+                    } else {
+                        exportFolderPickerStatus = message
+                    }
+                    return
+                }
+                if (importFolderPickerDialog && importFolderPickerDialog.visible) {
+                    importFolderPickerStatus = message
+                    return
+                }
+                if (exportFolderPickerDialog && exportFolderPickerDialog.visible) {
+                    exportFolderPickerStatus = message
+                    return
+                }
                 if (importDialog && importDialog.visible) {
                     importStatus = message
                     importSucceeded = false
@@ -1261,7 +1283,11 @@ Dialog {
 
                     Button {
                         text: "Choose Folder…"
-                        onClicked: openFolderPicker()
+                        onClicked: {
+                            exportStatus = ""
+                            exportSucceeded = false
+                            openFolderPicker()
+                        }
                     }
 
                     Text {
@@ -1370,7 +1396,11 @@ Dialog {
 
                     Button {
                         text: "Choose Folder…"
-                        onClicked: openImportFolderPicker()
+                        onClicked: {
+                            importStatus = ""
+                            importSucceeded = false
+                            openImportFolderPicker()
+                        }
                     }
 
                     Text {
@@ -1444,12 +1474,12 @@ Dialog {
                 anchors.margins: ThemeManager.spacingMedium
                 spacing: ThemeManager.spacingSmall
 
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: ThemeManager.spacingSmall
+	                RowLayout {
+	                    Layout.fillWidth: true
+	                    spacing: ThemeManager.spacingSmall
 
-                    Button {
-                        text: "Up"
+	                    Button {
+	                        text: "Up"
                         enabled: DataStore && folderPickerCurrentFolder !== "" &&
                             DataStore.parentFolder(folderPickerCurrentFolder).toString() !== folderPickerCurrentFolder.toString()
                         onClicked: {
@@ -1457,12 +1487,23 @@ Dialog {
                             folderPickerCurrentFolder = DataStore.parentFolder(folderPickerCurrentFolder)
                             folderPickerSelectedFolder = ""
                         }
-                    }
+	                    }
 
-                    Text {
-                        Layout.fillWidth: true
-                        text: folderPickerCurrentFolder && folderPickerCurrentFolder !== ""
-                            ? folderPickerCurrentFolder.toString().replace("file://", "")
+	                    Button {
+	                        text: "New Folder…"
+	                        enabled: folderPickerCurrentFolder && folderPickerCurrentFolder !== ""
+	                        onClicked: {
+	                            newFolderName = ""
+	                            newFolderIsImport = false
+	                            exportFolderPickerStatus = ""
+	                            newFolderDialog.open()
+	                        }
+	                    }
+
+	                    Text {
+	                        Layout.fillWidth: true
+	                        text: folderPickerCurrentFolder && folderPickerCurrentFolder !== ""
+	                            ? folderPickerCurrentFolder.toString().replace("file://", "")
                             : ""
                         color: ThemeManager.textSecondary
                         font.pixelSize: ThemeManager.fontSizeSmall
@@ -1534,11 +1575,11 @@ Dialog {
                     }
                 }
 
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: ThemeManager.spacingSmall
+	                RowLayout {
+	                    Layout.fillWidth: true
+	                    spacing: ThemeManager.spacingSmall
 
-                    Text {
+	                    Text {
                         Layout.fillWidth: true
                         text: folderPickerSelectedFolder && folderPickerSelectedFolder !== ""
                             ? ("Selected: " + folderPickerSelectedFolder.toString().replace("file://", ""))
@@ -1546,8 +1587,17 @@ Dialog {
                         color: ThemeManager.textSecondary
                         font.pixelSize: ThemeManager.fontSizeSmall
                         elide: Text.ElideMiddle
-                    }
-                }
+	                    }
+	                }
+
+	                Text {
+	                    Layout.fillWidth: true
+	                    visible: exportFolderPickerStatus && exportFolderPickerStatus.length > 0
+	                    text: exportFolderPickerStatus
+	                    color: ThemeManager.danger
+	                    font.pixelSize: ThemeManager.fontSizeSmall
+	                    wrapMode: Text.Wrap
+	                }
 
                 RowLayout {
                     Layout.fillWidth: true
@@ -1570,6 +1620,73 @@ Dialog {
                             exportDestinationFolder = chosen
                             if (DataStore) DataStore.setExportLastFolder(chosen)
                             exportFolderPickerDialog.close()
+                        }
+                    }
+                }
+            }
+        }
+
+        property Dialog _newFolderDialog: Dialog {
+            id: newFolderDialog
+            title: "New Folder"
+            anchors.centerIn: parent
+            modal: true
+            standardButtons: Dialog.NoButton
+
+            width: isMobile ? parent.width * 0.95 : Math.min(420, parent.width * 0.9)
+
+            background: Rectangle {
+                color: ThemeManager.surface
+                border.width: isMobile ? 0 : 1
+                border.color: ThemeManager.border
+                radius: ThemeManager.radiusLarge
+            }
+
+            contentItem: ColumnLayout {
+                anchors.margins: ThemeManager.spacingMedium
+                spacing: ThemeManager.spacingMedium
+
+                TextField {
+                    Layout.fillWidth: true
+                    placeholderText: "Folder name"
+                    text: newFolderName
+                    onTextChanged: newFolderName = text
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: ThemeManager.spacingSmall
+
+                    Item { Layout.fillWidth: true }
+
+                    Button {
+                        text: "Cancel"
+                        onClicked: newFolderDialog.close()
+                    }
+
+                    Button {
+                        text: "Create"
+                        enabled: newFolderName && newFolderName.trim().length > 0
+                        onClicked: {
+                            if (!DataStore) return
+                            const parentUrl = newFolderIsImport ? importFolderPickerCurrentFolder : folderPickerCurrentFolder
+                            const created = DataStore.createFolder(parentUrl, newFolderName)
+                            if (created && created.toString && created.toString() !== "") {
+                                if (newFolderIsImport) {
+                                    importFolderPickerCurrentFolder = created
+                                    importFolderPickerSelectedFolder = ""
+                                    importFolderPickerStatus = ""
+                                } else {
+                                    folderPickerCurrentFolder = created
+                                    folderPickerSelectedFolder = ""
+                                    exportFolderPickerStatus = ""
+                                }
+                            } else {
+                                const msg = "Could not create folder."
+                                if (newFolderIsImport) importFolderPickerStatus = msg
+                                else exportFolderPickerStatus = msg
+                            }
+                            newFolderDialog.close()
                         }
                     }
                 }
@@ -1609,12 +1726,23 @@ Dialog {
                             importFolderPickerCurrentFolder = DataStore.parentFolder(importFolderPickerCurrentFolder)
                             importFolderPickerSelectedFolder = ""
                         }
-                    }
+	                    }
 
-                    Text {
-                        Layout.fillWidth: true
-                        text: importFolderPickerCurrentFolder && importFolderPickerCurrentFolder !== ""
-                            ? importFolderPickerCurrentFolder.toString().replace("file://", "")
+	                    Button {
+	                        text: "New Folder…"
+	                        enabled: importFolderPickerCurrentFolder && importFolderPickerCurrentFolder !== ""
+	                        onClicked: {
+	                            newFolderName = ""
+	                            newFolderIsImport = true
+	                            importFolderPickerStatus = ""
+	                            newFolderDialog.open()
+	                        }
+	                    }
+
+	                    Text {
+	                        Layout.fillWidth: true
+	                        text: importFolderPickerCurrentFolder && importFolderPickerCurrentFolder !== ""
+	                            ? importFolderPickerCurrentFolder.toString().replace("file://", "")
                             : ""
                         color: ThemeManager.textSecondary
                         font.pixelSize: ThemeManager.fontSizeSmall
@@ -1685,11 +1813,11 @@ Dialog {
                     }
                 }
 
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: ThemeManager.spacingSmall
+	                RowLayout {
+	                    Layout.fillWidth: true
+	                    spacing: ThemeManager.spacingSmall
 
-                    Text {
+	                    Text {
                         Layout.fillWidth: true
                         text: importFolderPickerSelectedFolder && importFolderPickerSelectedFolder !== ""
                             ? ("Selected: " + importFolderPickerSelectedFolder.toString().replace("file://", ""))
@@ -1697,12 +1825,21 @@ Dialog {
                         color: ThemeManager.textSecondary
                         font.pixelSize: ThemeManager.fontSizeSmall
                         elide: Text.ElideMiddle
-                    }
-                }
+	                    }
+	                }
 
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: ThemeManager.spacingSmall
+	                Text {
+	                    Layout.fillWidth: true
+	                    visible: importFolderPickerStatus && importFolderPickerStatus.length > 0
+	                    text: importFolderPickerStatus
+	                    color: ThemeManager.danger
+	                    font.pixelSize: ThemeManager.fontSizeSmall
+	                    wrapMode: Text.Wrap
+	                }
+
+	                RowLayout {
+	                    Layout.fillWidth: true
+	                    spacing: ThemeManager.spacingSmall
 
                     Item { Layout.fillWidth: true }
 

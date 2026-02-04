@@ -175,6 +175,10 @@ public:
     Q_INVOKABLE bool importNotebooks(const QUrl& sourceFolder,
                                      const QString& format,
                                      bool replaceExisting);
+
+    // Filesystem helpers (used by custom folder pickers)
+    // - returns the created folder URL, or an invalid URL on error
+    Q_INVOKABLE QUrl createFolder(const QUrl& parentFolder, const QString& name);
     
 signals:
     void pagesChanged();
