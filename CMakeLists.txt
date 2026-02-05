@@ -236,6 +236,10 @@ add_library(zinc_ui STATIC
     src/ui/qml_types.cpp
     src/ui/logging.hpp
     src/ui/logging.cpp
+    src/ui/cli/list_tree.hpp
+    src/ui/cli/list_tree.cpp
+    src/ui/cli/note.hpp
+    src/ui/cli/note.cpp
     src/ui/FontUtils.hpp
     src/ui/FontUtils.cpp
     src/ui/Clipboard.hpp
@@ -587,6 +591,8 @@ if(ZINC_BUILD_TESTS)
 			    add_executable(zinc_qml_tests
 			        tests/qml/test_main.cpp
 			        tests/qml/test_feature_flags.cpp
+			        tests/qml/test_cli_list_tree.cpp
+			        tests/qml/test_cli_note.cpp
 			        tests/qml/test_datastore_sync.cpp
                     tests/qml/test_datastore_lifetime.cpp
 			        tests/qml/test_datastore_notebooks.cpp
