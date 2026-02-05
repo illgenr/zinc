@@ -2,6 +2,7 @@
 #include <QDebug>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QMetaObject>
 #include <QPointer>
 #include <algorithm>
 
@@ -14,6 +15,22 @@ bool sync_debug_enabled() {
 
 bool sync_discovery_disabled() {
     return qEnvironmentVariableIsSet("ZINC_SYNC_DISABLE_DISCOVERY");
+}
+
+QByteArray to_bytes(const QJsonObject& obj) {
+    return QJsonDocument(obj).toJson(QJsonDocument::Compact);
+}
+
+std::optional<QJsonObject> parse_object(const std::vector<uint8_t>& payload, QJsonParseError* outErr) {
+    const QByteArray bytes(reinterpret_cast<const char*>(payload.data()),
+                           static_cast<int>(payload.size()));
+    QJsonParseError err{};
+    const auto doc = QJsonDocument::fromJson(bytes, &err);
+    if (outErr) *outErr = err;
+    if (err.error != QJsonParseError::NoError || !doc.isObject()) {
+        return std::nullopt;
+    }
+    return doc.object();
 }
 } // namespace
 
@@ -70,7 +87,7 @@ bool SyncManager::start(uint16_t port) {
                 << "workspace_id=" << QString::fromStdString(workspace_id_.to_string());
     }
 
-    if (sync_discovery_disabled()) {
+    if (sync_discovery_disabled() || workspace_id_.is_nil()) {
         started_ = true;
         syncing_ = true;
         emit syncingChanged();
@@ -201,11 +218,133 @@ void SyncManager::connectToEndpoint(const Uuid& device_id,
     peer->connection = std::make_unique<Connection>(this);
     peer->sync_state = SyncState::Connecting;
     peer->initiated_by_us = true;
+    peer->approved = true;
     
     setupConnection(*peer);
     peer->connection->connectToPeer(host, port, identity_);
     
     peers_[device_id] = std::move(peer);
+}
+
+void SyncManager::connectToEndpoint(const Uuid& device_id,
+                                    const QString& host,
+                                    uint16_t port) {
+    if (device_id.is_nil()) {
+        emit error("Invalid peer device ID");
+        return;
+    }
+    if (device_id == device_id_) {
+        return;
+    }
+    if (host.trimmed().isEmpty()) {
+        emit error("Invalid peer host");
+        return;
+    }
+    if (sync_debug_enabled()) {
+        qInfo() << "SYNC: connectToEndpoint(hostname) device_id=" << QString::fromStdString(device_id.to_string())
+                << "host=" << host
+                << "port=" << port;
+    }
+
+    // Check if already connected
+    auto it = peers_.find(device_id);
+    if (it != peers_.end() && it->second->connection) {
+        const auto state = it->second->connection->state();
+        if (state == Connection::State::Connected ||
+            state == Connection::State::Connecting ||
+            state == Connection::State::Handshaking) {
+            return;
+        }
+    }
+
+    auto peer = std::make_unique<PeerConnection>();
+    peer->device_id = device_id;
+    peer->connection = std::make_unique<Connection>(this);
+    peer->sync_state = SyncState::Connecting;
+    peer->initiated_by_us = true;
+    peer->approved = true;
+
+    setupConnection(*peer);
+    peer->connection->connectToPeer(host.trimmed(), port, identity_);
+
+    peers_[device_id] = std::move(peer);
+}
+
+void SyncManager::approvePeer(const Uuid& device_id, bool approved) {
+    auto it = peers_.find(device_id);
+    if (it == peers_.end() || !it->second) {
+        return;
+    }
+    auto& peer = *it->second;
+    if (approved) {
+        if (peer.approved) {
+            return;
+        }
+        if (!peer.connection || !peer.connection->isConnected() || !peer.hello_received) {
+            return;
+        }
+        if (sync_debug_enabled()) {
+            qInfo() << "SYNC: peer approved device_id=" << QString::fromStdString(device_id.to_string());
+        }
+        peer.approved = true;
+        emit peerConnected(device_id);
+        emit peersChanged();
+        return;
+    }
+
+    if (sync_debug_enabled()) {
+        qInfo() << "SYNC: peer rejected device_id=" << QString::fromStdString(device_id.to_string());
+    }
+    disconnectFromPeer(device_id);
+}
+
+void SyncManager::sendPairingRequest(const Uuid& device_id,
+                                     const Uuid& workspace_id) {
+    auto it = peers_.find(device_id);
+    if (it == peers_.end() || !it->second || !it->second->connection || !it->second->connection->isConnected()) {
+        emit error("Pairing failed: peer not connected");
+        return;
+    }
+
+    QJsonObject obj;
+    obj["v"] = 1;
+    obj["ws"] = QString::fromStdString(workspace_id.to_string());
+    obj["name"] = device_name_;
+    obj["id"] = QString::fromStdString(device_id_.to_string());
+
+    const auto bytes = to_bytes(obj);
+    const std::vector<uint8_t> payload(bytes.begin(), bytes.end());
+    if (sync_debug_enabled()) {
+        qInfo() << "SYNC: send PairingRequest to" << QString::fromStdString(device_id.to_string())
+                << "ws=" << QString::fromStdString(workspace_id.to_string());
+    }
+    it->second->connection->send(MessageType::PairingRequest, payload);
+}
+
+void SyncManager::sendPairingResponse(const Uuid& device_id,
+                                      bool accepted,
+                                      const QString& reason,
+                                      const Uuid& workspace_id) {
+    auto it = peers_.find(device_id);
+    if (it == peers_.end() || !it->second || !it->second->connection || !it->second->connection->isConnected()) {
+        return;
+    }
+
+    QJsonObject obj;
+    obj["v"] = 1;
+    obj["ok"] = accepted;
+    obj["reason"] = reason;
+    obj["ws"] = QString::fromStdString(workspace_id.to_string());
+
+    const auto bytes = to_bytes(obj);
+    const std::vector<uint8_t> payload(bytes.begin(), bytes.end());
+    if (sync_debug_enabled()) {
+        qInfo() << "SYNC: send PairingResponse to" << QString::fromStdString(device_id.to_string())
+                << "ok=" << accepted
+                << "ws=" << QString::fromStdString(workspace_id.to_string())
+                << "reason=" << reason;
+    }
+    it->second->connection->send(MessageType::PairingResponse, payload);
 }
 
 void SyncManager::disconnectFromPeer(const Uuid& device_id) {
@@ -276,7 +415,7 @@ void SyncManager::requestSync(const Uuid& device_id, const std::string& doc_id) 
 int SyncManager::connectedPeerCount() const {
     int count = 0;
     for (const auto& [id, peer] : peers_) {
-        if (peer->connection && peer->connection->isConnected()) {
+        if (peer && peer->approved && peer->connection && peer->connection->isConnected()) {
             ++count;
         }
     }
@@ -339,6 +478,7 @@ void SyncManager::onNewConnection(QTcpSocket* socket) {
     peer->connection = std::make_unique<Connection>(this);
     peer->sync_state = SyncState::Connecting;
     peer->initiated_by_us = false;
+    peer->approved = false;
     
     setupConnection(*peer);
     peer->connection->acceptConnection(socket, identity_);
@@ -428,17 +568,123 @@ void SyncManager::onMessageReceived(MessageType type,
     
     // Find the peer
     Uuid peer_id;
+    PeerConnection* peer_ptr = nullptr;
     for (const auto& [id, peer] : peers_) {
         if (peer->connection.get() == conn) {
             peer_id = id;
+            peer_ptr = peer.get();
             break;
         }
+    }
+
+    if (peer_ptr && !peer_ptr->approved &&
+        type != MessageType::Hello &&
+        type != MessageType::PairingRequest &&
+        type != MessageType::PairingResponse &&
+        type != MessageType::PairingComplete &&
+        type != MessageType::PairingReject) {
+        // Ignore all non-Hello traffic until the user confirms the pairing.
+        return;
     }
     
     switch (type) {
         case MessageType::Hello:
             handleHello(*conn, payload);
             break;
+        case MessageType::PairingRequest: {
+            QJsonParseError err{};
+            const auto objOpt = parse_object(payload, &err);
+            if (!objOpt) {
+                if (sync_debug_enabled()) {
+                    qInfo() << "SYNC: PairingRequest parse failed:" << err.errorString();
+                }
+                return;
+            }
+            const auto obj = *objOpt;
+            const auto wsStr = obj.value("ws").toString();
+            const auto name = obj.value("name").toString();
+            const auto wsParsed = Uuid::parse(wsStr.toStdString());
+            if (!wsParsed) {
+                return;
+            }
+
+            // Find peer id by connection pointer.
+            Uuid pid;
+            PeerConnection* peer = nullptr;
+            for (auto& [id, p] : peers_) {
+                if (p && p->connection.get() == conn) {
+                    pid = id;
+                    peer = p.get();
+                    break;
+                }
+            }
+            if (peer == nullptr || pid.is_nil()) {
+                return;
+            }
+
+            const auto requestedWs = *wsParsed;
+            if (!workspace_id_.is_nil() && requestedWs != workspace_id_) {
+                qInfo() << "SYNC: PairingRequest rejected (already configured for different workspace)"
+                        << "remote_id=" << QString::fromStdString(pid.to_string())
+                        << "requested_ws=" << QString::fromStdString(requestedWs.to_string())
+                        << "local_ws=" << QString::fromStdString(workspace_id_.to_string());
+                sendPairingResponse(pid, false, QStringLiteral("Device is already paired to a different workspace"), requestedWs);
+                return;
+            }
+            if (!workspace_id_.is_nil() && requestedWs == workspace_id_) {
+                if (sync_debug_enabled()) {
+                    qInfo() << "SYNC: PairingRequest no-op (already in requested workspace)"
+                            << "remote_id=" << QString::fromStdString(pid.to_string())
+                            << "requested_ws=" << QString::fromStdString(requestedWs.to_string());
+                }
+                sendPairingResponse(pid, true, QString{}, requestedWs);
+                return;
+            }
+
+            qInfo() << "SYNC: PairingRequest received"
+                    << "remote_id=" << QString::fromStdString(pid.to_string())
+                    << "remote_name=" << name
+                    << "endpoint=" << peer->host.toString()
+                    << "port=" << peer->port
+                    << "requested_ws=" << QString::fromStdString(requestedWs.to_string());
+            emit pairingRequestReceived(pid, name, peer->host.toString(), peer->port, requestedWs);
+            break;
+        }
+        case MessageType::PairingResponse: {
+            QJsonParseError err{};
+            const auto objOpt = parse_object(payload, &err);
+            if (!objOpt) {
+                if (sync_debug_enabled()) {
+                    qInfo() << "SYNC: PairingResponse parse failed:" << err.errorString();
+                }
+                return;
+            }
+            const auto obj = *objOpt;
+            const auto ok = obj.value("ok").toBool(false);
+            const auto reason = obj.value("reason").toString();
+            const auto wsStr = obj.value("ws").toString();
+            const auto wsParsed = Uuid::parse(wsStr.toStdString());
+            if (!wsParsed) {
+                return;
+            }
+
+            Uuid pid;
+            for (const auto& [id, p] : peers_) {
+                if (p && p->connection.get() == conn) {
+                    pid = id;
+                    break;
+                }
+            }
+            if (pid.is_nil()) return;
+
+            qInfo() << "SYNC: PairingResponse received"
+                    << "remote_id=" << QString::fromStdString(pid.to_string())
+                    << "ok=" << ok
+                    << "ws=" << wsStr
+                    << "reason=" << reason;
+            emit pairingResponseReceived(pid, ok, reason, *wsParsed);
+            break;
+        }
         case MessageType::PagesSnapshot: {
             if (sync_debug_enabled()) {
                 qInfo() << "SYNC: msg PagesSnapshot bytes=" << payload.size();
@@ -508,6 +754,9 @@ void SyncManager::handleHello(Connection& conn, const std::vector<uint8_t>& payl
     QJsonParseError err{};
     const auto doc = QJsonDocument::fromJson(bytes, &err);
     if (err.error != QJsonParseError::NoError || !doc.isObject()) {
+        if (sync_debug_enabled()) {
+            qInfo() << "SYNC: Hello parse failed:" << err.errorString();
+        }
         return;
     }
 
@@ -520,40 +769,84 @@ void SyncManager::handleHello(Connection& conn, const std::vector<uint8_t>& payl
     const auto remoteIdParsed = Uuid::parse(idStr.toStdString());
     const auto remoteWsParsed = Uuid::parse(wsStr.toStdString());
     if (!remoteIdParsed || !remoteWsParsed) {
+        if (sync_debug_enabled()) {
+            qInfo() << "SYNC: Hello invalid id/ws id=" << idStr << "ws=" << wsStr;
+        }
         return;
     }
 
     const auto remoteId = *remoteIdParsed;
     const auto remoteWs = *remoteWsParsed;
     if (remoteId == device_id_) {
+        if (sync_debug_enabled()) {
+            qInfo() << "SYNC: Hello from self, disconnecting";
+        }
         conn.disconnect();
         return;
     }
     if (remoteWs != workspace_id_) {
-        conn.disconnect();
-        return;
+        // Allow pairing bootstrapping if either side is unconfigured (nil workspace id).
+        const bool pairing_bootstrap = remoteWs.is_nil() || workspace_id_.is_nil();
+        if (!pairing_bootstrap) {
+            qInfo() << "SYNC: Hello workspace mismatch; disconnecting"
+                    << "remote_id=" << QString::fromStdString(remoteId.to_string())
+                    << "remote_ws=" << QString::fromStdString(remoteWs.to_string())
+                    << "local_ws=" << QString::fromStdString(workspace_id_.to_string())
+                    << "remote_name=" << name;
+            conn.disconnect();
+            return;
+        }
+        qInfo() << "SYNC: Hello workspace mismatch (pairing bootstrap allowed)"
+                << "remote_id=" << QString::fromStdString(remoteId.to_string())
+                << "remote_ws=" << QString::fromStdString(remoteWs.to_string())
+                << "local_ws=" << QString::fromStdString(workspace_id_.to_string())
+                << "remote_name=" << name;
     }
 
     // Find current peer entry by connection pointer.
-    auto currentIt = std::find_if(peers_.begin(), peers_.end(),
-                                  [&](const auto& entry) { return entry.second->connection.get() == &conn; });
-    if (currentIt == peers_.end()) {
+    const auto currentIt = std::find_if(peers_.begin(), peers_.end(),
+                                        [&](const auto& entry) {
+                                            return entry.second && entry.second->connection.get() == &conn;
+                                        });
+    if (currentIt == peers_.end() || !currentIt->second) {
         return;
     }
 
-    auto& currentPeer = *currentIt->second;
-    currentPeer.hello_received = true;
-    currentPeer.device_name = name;
-    currentPeer.host = conn.peerAddress();
-    currentPeer.port = port > 0 && port <= 65535 ? static_cast<uint16_t>(port) : conn.peerPort();
+    // Hold onto the current key before any map mutation.
+    const auto currentKey = currentIt->first;
+    {
+        auto& peer = *currentIt->second;
+        peer.hello_received = true;
+        peer.device_name = name;
+        peer.host = conn.peerAddress();
+        peer.port = port > 0 && port <= 65535 ? static_cast<uint16_t>(port) : conn.peerPort();
+
+        if (sync_debug_enabled()) {
+            qInfo() << "SYNC: Hello received"
+                    << "remote_id=" << QString::fromStdString(remoteId.to_string())
+                    << "remote_name=" << name
+                    << "host=" << peer.host.toString()
+                    << "port=" << peer.port
+                    << "initiated_by_us=" << peer.initiated_by_us
+                    << "current_key=" << QString::fromStdString(currentKey.to_string());
+        }
+    }
 
     // If we already have an entry for this remoteId, dedupe.
     auto existingIt = peers_.find(remoteId);
-    if (existingIt != peers_.end() && existingIt != currentIt) {
+    if (existingIt != peers_.end() && existingIt->second && existingIt->first != currentKey) {
         auto& existingPeer = *existingIt->second;
 
-        const auto existingRank = connection_rank(existingPeer.connection ? existingPeer.connection->state() : Connection::State::Disconnected);
-        const auto currentRank = connection_rank(currentPeer.connection ? currentPeer.connection->state() : Connection::State::Disconnected);
+        const auto currentPeerIt = peers_.find(currentKey);
+        if (currentPeerIt == peers_.end() || !currentPeerIt->second) {
+            return;
+        }
+        auto& currentPeer = *currentPeerIt->second;
+
+        const auto existingRank = connection_rank(existingPeer.connection ? existingPeer.connection->state()
+                                                                         : Connection::State::Disconnected);
+        const auto currentRank = connection_rank(currentPeer.connection ? currentPeer.connection->state()
+                                                                       : Connection::State::Disconnected);
 
         const auto existingInitiator = existingPeer.initiated_by_us ? device_id_ : remoteId;
         const auto currentInitiator = currentPeer.initiated_by_us ? device_id_ : remoteId;
@@ -564,7 +857,7 @@ void SyncManager::handleHello(Connection& conn, const std::vector<uint8_t>& payl
 
         if (keepExisting) {
             currentPeer.connection->disconnect();
-            peers_.erase(currentIt);
+            peers_.erase(currentKey);
             return;
         }
 
@@ -573,12 +866,49 @@ void SyncManager::handleHello(Connection& conn, const std::vector<uint8_t>& payl
     }
 
     // Rekey the map entry to the real remoteId if needed (incoming connections start with a temp id).
-    if (currentIt->first != remoteId) {
-        auto node = peers_.extract(currentIt->first);
+    if (currentKey != remoteId) {
+        auto node = peers_.extract(currentKey);
         node.key() = remoteId;
         peers_.insert(std::move(node));
     }
 
+    // Re-acquire the peer after potential rekey/dedup.
+    auto updatedIt = peers_.find(remoteId);
+    if (updatedIt == peers_.end() || !updatedIt->second) {
+        return;
+    }
+    auto& updatedPeer = *updatedIt->second;
+    const auto hostStr = updatedPeer.host.toString();
+    const auto peerPort = updatedPeer.port;
+    const bool initiatedByUs = updatedPeer.initiated_by_us;
+
+    // Use queued emission to avoid re-entrancy hazards (slots may trigger additional sync actions).
+    QMetaObject::invokeMethod(this, [this, remoteId, name, hostStr, peerPort]() {
+        emit peerHelloReceived(remoteId, name, hostStr, peerPort);
+    }, Qt::QueuedConnection);
+
+    // If we're not yet in the same workspace, treat this connection as pairing-only.
+    if (remoteWs != workspace_id_) {
+        updatedPeer.approved = false;
+        return;
+    }
+
+    // For inbound connections that were not discovered locally (e.g. manual/Tailscale), require
+    // an explicit confirmation from the user before treating the peer as connected.
+    const bool discovered =
+        discovery_ && discovery_->peer(remoteId).has_value();
+    if (!initiatedByUs && !discovered) {
+        qInfo() << "SYNC: peer approval required"
+                << "remote_id=" << QString::fromStdString(remoteId.to_string())
+                << "remote_name=" << name
+                << "endpoint=" << hostStr
+                << "port=" << peerPort;
+        updatedPeer.approved = false;
+        emit peerApprovalRequired(remoteId, name, hostStr, peerPort);
+        return;
+    }
+
+    updatedPeer.approved = true;
     emit peerConnected(remoteId);
     emit peersChanged();
 }

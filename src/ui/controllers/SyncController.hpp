@@ -45,10 +45,19 @@ public:
     Q_INVOKABLE bool configure(const QString& workspaceId, const QString& deviceName);
     Q_INVOKABLE bool tryAutoStart(const QString& defaultDeviceName);
     Q_INVOKABLE bool startSync();
+    Q_INVOKABLE bool startPairingListener(const QString& defaultDeviceName);
     Q_INVOKABLE void stopSync();
     Q_INVOKABLE void connectToPeer(const QString& deviceId,
                                    const QString& host,
                                    int port);
+    Q_INVOKABLE void connectToHost(const QString& host);
+    Q_INVOKABLE void connectToHostWithPort(const QString& host, int port);
+    Q_INVOKABLE void pairToHostWithPort(const QString& host, int port);
+    Q_INVOKABLE void sendPairingResponse(const QString& deviceId,
+                                         bool accepted,
+                                         const QString& reason,
+                                         const QString& workspaceId);
+    Q_INVOKABLE void approvePeer(const QString& deviceId, bool approved);
     Q_INVOKABLE int listeningPort() const;
     Q_INVOKABLE void sendPageSnapshot(const QString& jsonPayload);
     Q_INVOKABLE void sendPresence(const QString& pageId, int blockIndex, int cursorPos, bool autoSyncEnabled);
@@ -66,6 +75,23 @@ signals:
                         int port);
     void peerConnected(const QString& deviceName);
     void peerDisconnected(const QString& deviceName);
+    void peerHelloReceived(const QString& deviceId,
+                           const QString& deviceName,
+                           const QString& host,
+                           int port);
+    void pairingRequestReceived(const QString& deviceId,
+                                const QString& deviceName,
+                                const QString& host,
+                                int port,
+                                const QString& workspaceId);
+    void pairingResponseReceived(const QString& deviceId,
+                                 bool accepted,
+                                 const QString& reason,
+                                 const QString& workspaceId);
+    void peerApprovalRequired(const QString& deviceId,
+                              const QString& deviceName,
+                              const QString& host,
+                              int port);
     void pageSnapshotReceived(const QString& jsonPayload);
     void pageSnapshotReceivedPages(const QVariantList& pages);
     void blockSnapshotReceivedBlocks(const QVariantList& blocks);
@@ -82,6 +108,13 @@ private:
     QString workspace_id_;
     QVariantList discovered_peers_;
     std::optional<SyncPresence> remote_presence_;
+
+    struct PendingPairToHost {
+        QString host;
+        int port = 0;
+        qint64 started_ms = 0;
+    };
+    std::optional<PendingPairToHost> pending_pair_to_host_;
 };
 
 } // namespace zinc::ui

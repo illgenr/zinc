@@ -85,6 +85,13 @@ public:
      */
     void connectToPeer(const QHostAddress& host, uint16_t port,
                        const crypto::KeyPair& local_keys);
+
+    /**
+     * Connect to a peer by hostname (as initiator).
+     * Useful for DNS-resolved endpoints like Tailscale MagicDNS.
+     */
+    void connectToPeer(const QString& host, uint16_t port,
+                       const crypto::KeyPair& local_keys);
     
     /**
      * Accept a connection (as responder).
@@ -141,6 +148,7 @@ private:
     crypto::KeyPair local_keys_;
     QByteArray read_buffer_;
     QHostAddress connect_host_;
+    QString connect_host_name_;
     uint16_t connect_port_ = 0;
     
     void setState(State state);

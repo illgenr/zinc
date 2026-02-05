@@ -9,6 +9,7 @@ Dialog {
     id: root
     
     signal pairDeviceRequested()
+    signal manualDeviceAddRequested(string host, int port)
     property var syncController: null
 
     ListModel {
@@ -64,7 +65,35 @@ Dialog {
         function onConfiguredChanged() {
             refreshAvailableDevices()
         }
+
+        function onError(message) {
+            console.log("SettingsDialog: sync error:", message)
+            if (manualAddDialog.visible) manualAddDialog.statusText = message
+            if (endpointEditDialog.visible) endpointEditDialog.statusText = message
+
+            if (manualAddDialog.visible && manualAddDialog.pending && message && message.indexOf("closed the connection") >= 0) {
+                manualAddDialog.statusText =
+                    message + "\n\nTip: manual connections require both devices to already be in the same workspace (paired)."
+            }
+        }
+
+        function onPeerApprovalRequired(deviceId, deviceName, host, port) {
+            console.log("SettingsDialog: peerApprovalRequired", deviceId, deviceName, host, port)
+            if (manualAddDialog.visible && manualAddDialog.pending) {
+                manualAddDialog.statusText = "Awaiting confirmation on the other device…"
+            }
+        }
+
+        function onPeerHelloReceived(deviceId, deviceName, host, port) {
+            console.log("SettingsDialog: peerHelloReceived", deviceId, deviceName, host, port)
+            if (!manualAddDialog.visible) return
+            if (!manualAddDialog.pending) return
+            manualAddDialog.statusText = "Device responded. Check the other device for confirmation."
+            manualAddDialog.pending = null
+            manualAddDialog.close()
+        }
     }
+
     
     title: "Settings"
     anchors.centerIn: parent
@@ -306,6 +335,8 @@ Dialog {
     }
     
     onOpened: {
+        refreshPairedDevices()
+        refreshAvailableDevices()
         if (isMobile) {
             settingsTabs.currentIndex = -1  // Show menu first on mobile
         } else {
@@ -709,6 +740,17 @@ Dialog {
     // Devices Settings
     component DevicesSettings: SettingsPage {
         signal pairDevice()
+
+        function trimmed(text) { return text ? text.trim() : "" }
+
+        function isDevicePaired(deviceId) {
+            if (!deviceId) return false
+            for (let i = 0; i < pairedDevicesModel.count; i++) {
+                const d = pairedDevicesModel.get(i)
+                if (d && d.deviceId === deviceId) return true
+            }
+            return false
+        }
         
         Component.onCompleted: {
             root.refreshPairedDevices()
@@ -772,6 +814,65 @@ Dialog {
                                 wrapMode: Text.NoWrap
                                 maximumLineCount: 1
                                 text: (host && host !== "" && port && port > 0) ? (host + ":" + port) : "unknown"
+                            }
+                        }
+
+                        Button {
+                            text: "Endpoint…"
+                            enabled: DataStore && deviceId && deviceId !== ""
+                            Layout.preferredHeight: 28
+                            Layout.preferredWidth: 92
+                            Layout.minimumWidth: 92
+
+                            background: Rectangle {
+                                radius: ThemeManager.radiusSmall
+                                color: parent.pressed ? ThemeManager.surfaceActive : ThemeManager.surface
+                                border.width: 1
+                                border.color: ThemeManager.border
+                            }
+
+                            contentItem: Text {
+                                text: parent.text
+                                color: ThemeManager.text
+                                font.pixelSize: ThemeManager.fontSizeSmall
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                            }
+
+                            onClicked: {
+                                endpointEditDialog.deviceId = deviceId
+                                endpointEditDialog.deviceName = deviceName && deviceName !== "" ? deviceName : deviceId
+                                endpointEditDialog.hostText = host && host !== "" ? host : ""
+                                endpointEditDialog.portText = port && port > 0 ? ("" + port) : ""
+                                endpointEditDialog.open()
+                            }
+                        }
+
+                        Button {
+                            text: "Connect"
+                            enabled: syncController && syncController.syncing &&
+                                     deviceId && deviceId !== "" &&
+                                     host && host !== "" && port && port > 0
+                            Layout.preferredHeight: 28
+                            Layout.preferredWidth: 80
+                            Layout.minimumWidth: 80
+
+                            background: Rectangle {
+                                radius: ThemeManager.radiusSmall
+                                color: parent.pressed ? ThemeManager.accentHover : ThemeManager.accent
+                            }
+
+                            contentItem: Text {
+                                text: parent.text
+                                color: "white"
+                                font.pixelSize: ThemeManager.fontSizeSmall
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                            }
+
+                            onClicked: {
+                                console.log("SettingsDialog: connect to discovered peer", deviceId, host, port)
+                                syncController.connectToPeer(deviceId, host, port)
                             }
                         }
                     }
@@ -928,7 +1029,320 @@ Dialog {
                     verticalAlignment: Text.AlignVCenter
                 }
                 
-                onClicked: pairDevice()
+                onClicked: pairOrManualDialog.open()
+            }
+        }
+    }
+
+    Dialog {
+        id: endpointEditDialog
+        objectName: "endpointEditDialog"
+        title: "Set Manual Endpoint"
+        modal: true
+        anchors.centerIn: parent
+        width: Math.min(420, root.width - 40)
+        standardButtons: Dialog.NoButton
+
+        property string deviceId: ""
+        property string deviceName: ""
+        property string hostText: ""
+        property string portText: ""
+        property string statusText: ""
+
+        function trimmed(text) { return text ? text.trim() : "" }
+        function parsedPortOrDefault() {
+            const t = trimmed(portText)
+            if (t === "") return 47888
+            const n = parseInt(t, 10)
+            if (isNaN(n)) return -1
+            return n
+        }
+
+        background: Rectangle {
+            color: ThemeManager.surface
+            border.width: 1
+            border.color: ThemeManager.border
+            radius: ThemeManager.radiusMedium
+        }
+
+        contentItem: ColumnLayout {
+            spacing: ThemeManager.spacingMedium
+            anchors.margins: ThemeManager.spacingMedium
+
+            Text {
+                Layout.fillWidth: true
+                text: endpointEditDialog.deviceName
+                color: ThemeManager.text
+                font.pixelSize: ThemeManager.fontSizeNormal
+                font.weight: Font.Medium
+                wrapMode: Text.Wrap
+            }
+
+            TextField {
+                Layout.fillWidth: true
+                placeholderText: "Host (MagicDNS or Tailscale IP)"
+                text: endpointEditDialog.hostText
+                onTextChanged: endpointEditDialog.hostText = text
+            }
+
+            TextField {
+                Layout.fillWidth: true
+                placeholderText: "Port (optional)"
+                inputMethodHints: Qt.ImhDigitsOnly
+                text: endpointEditDialog.portText
+                onTextChanged: endpointEditDialog.portText = text
+            }
+
+            Text {
+                Layout.fillWidth: true
+                text: endpointEditDialog.statusText
+                visible: endpointEditDialog.statusText !== ""
+                color: ThemeManager.textMuted
+                font.pixelSize: ThemeManager.fontSizeSmall
+                wrapMode: Text.Wrap
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: ThemeManager.spacingSmall
+
+                Button {
+                    Layout.fillWidth: true
+                    text: "Cancel"
+                    onClicked: endpointEditDialog.close()
+                }
+
+                Button {
+                    Layout.fillWidth: true
+                    text: "Save"
+                    objectName: "endpointEditSaveButton"
+                    enabled: DataStore && endpointEditDialog.trimmed(endpointEditDialog.hostText).length > 0
+                    onClicked: {
+                        const host = endpointEditDialog.trimmed(endpointEditDialog.hostText)
+                        const port = endpointEditDialog.parsedPortOrDefault()
+                        if (port <= 0 || port > 65535) {
+                            endpointEditDialog.statusText = "Invalid port"
+                            return
+                        }
+                        // Only meaningful for previously paired devices.
+                        const paired = (function() {
+                            for (let i = 0; i < pairedDevicesModel.count; i++) {
+                                const d = pairedDevicesModel.get(i)
+                                if (d && d.deviceId === endpointEditDialog.deviceId) return true
+                            }
+                            return false
+                        })()
+                        if (!paired) {
+                            endpointEditDialog.statusText = "Device is not paired yet. Pair first, then set a manual endpoint."
+                            return
+                        }
+                        DataStore.updatePairedDeviceEndpoint(endpointEditDialog.deviceId, host, port)
+                        endpointEditDialog.close()
+                    }
+                }
+
+                Button {
+                    Layout.fillWidth: true
+                    text: "Save & Connect"
+                    enabled: DataStore && syncController && syncController.syncing &&
+                             endpointEditDialog.trimmed(endpointEditDialog.hostText).length > 0
+                    onClicked: {
+                        const host = endpointEditDialog.trimmed(endpointEditDialog.hostText)
+                        const port = endpointEditDialog.parsedPortOrDefault()
+                        if (port <= 0 || port > 65535) {
+                            endpointEditDialog.statusText = "Invalid port"
+                            return
+                        }
+                        const paired = (function() {
+                            for (let i = 0; i < pairedDevicesModel.count; i++) {
+                                const d = pairedDevicesModel.get(i)
+                                if (d && d.deviceId === endpointEditDialog.deviceId) return true
+                            }
+                            return false
+                        })()
+                        if (!paired) {
+                            endpointEditDialog.statusText = "Device is not paired yet. Pair first, then connect."
+                            return
+                        }
+                        DataStore.updatePairedDeviceEndpoint(endpointEditDialog.deviceId, host, port)
+                        syncController.connectToPeer(endpointEditDialog.deviceId, host, port)
+                        endpointEditDialog.close()
+                    }
+                }
+            }
+        }
+    }
+
+    Dialog {
+        id: pairOrManualDialog
+        title: "Add Device"
+        modal: true
+        anchors.centerIn: parent
+        width: Math.min(360, root.width - 40)
+        standardButtons: Dialog.NoButton
+
+        background: Rectangle {
+            color: ThemeManager.surface
+            border.width: 1
+            border.color: ThemeManager.border
+            radius: ThemeManager.radiusMedium
+        }
+
+        contentItem: Item {
+            implicitWidth: 360
+            implicitHeight: pairOrManualContentLayout.implicitHeight + ThemeManager.spacingMedium * 2
+
+            ColumnLayout {
+                id: pairOrManualContentLayout
+                anchors.fill: parent
+                anchors.margins: ThemeManager.spacingMedium
+                spacing: ThemeManager.spacingMedium
+
+                Text {
+                    Layout.fillWidth: true
+                    text: "Choose how to add a device"
+                    color: ThemeManager.text
+                    font.pixelSize: ThemeManager.fontSizeNormal
+                    wrapMode: Text.Wrap
+                }
+
+                Button {
+                    Layout.fillWidth: true
+                    text: "Pair via Code/QR"
+                    onClicked: {
+                        pairOrManualDialog.close()
+                        root.pairDeviceRequested()
+                        root.close()
+                    }
+                }
+
+                Button {
+                    Layout.fillWidth: true
+                    text: "Add via Hostname (Tailscale)"
+                    onClicked: {
+                        pairOrManualDialog.close()
+                        manualAddDialog.hostText = ""
+                        manualAddDialog.portText = ""
+                        manualAddDialog.statusText = ""
+                        manualAddDialog.open()
+                    }
+                }
+
+                Button {
+                    Layout.fillWidth: true
+                    text: "Cancel"
+                    onClicked: pairOrManualDialog.close()
+                }
+            }
+        }
+    }
+
+    Dialog {
+        id: manualAddDialog
+        title: "Add via Hostname"
+        modal: true
+        anchors.centerIn: parent
+        width: Math.min(420, root.width - 40)
+        standardButtons: Dialog.NoButton
+
+        property string hostText: ""
+        property string portText: ""
+        property string statusText: ""
+        property var pending: null
+
+        function trimmed(text) { return text ? text.trim() : "" }
+        function parsedPortOrDefault() {
+            const t = trimmed(portText)
+            if (t === "") return 47888
+            const n = parseInt(t, 10)
+            if (isNaN(n)) return -1
+            return n
+        }
+
+        background: Rectangle {
+            color: ThemeManager.surface
+            border.width: 1
+            border.color: ThemeManager.border
+            radius: ThemeManager.radiusMedium
+        }
+
+        contentItem: Item {
+            implicitWidth: 420
+            implicitHeight: manualAddContentLayout.implicitHeight + ThemeManager.spacingMedium * 2
+
+            ColumnLayout {
+                id: manualAddContentLayout
+                anchors.fill: parent
+                anchors.margins: ThemeManager.spacingMedium
+                spacing: ThemeManager.spacingMedium
+
+                Text {
+                    Layout.fillWidth: true
+                    text: "Enter a DNS name resolvable on this device (e.g. MagicDNS). If port is empty, 47888 is used."
+                    color: ThemeManager.textSecondary
+                    font.pixelSize: ThemeManager.fontSizeSmall
+                    wrapMode: Text.Wrap
+                }
+
+                TextField {
+                    Layout.fillWidth: true
+                    placeholderText: "devicename or devicename.tailnet.ts.net"
+                    text: manualAddDialog.hostText
+                    onTextChanged: manualAddDialog.hostText = text
+                }
+
+                TextField {
+                    Layout.fillWidth: true
+                    placeholderText: "Port (optional)"
+                    inputMethodHints: Qt.ImhDigitsOnly
+                    text: manualAddDialog.portText
+                    onTextChanged: manualAddDialog.portText = text
+                }
+
+                Text {
+                    Layout.fillWidth: true
+                    text: manualAddDialog.statusText
+                    visible: manualAddDialog.statusText !== ""
+                    color: ThemeManager.textMuted
+                    font.pixelSize: ThemeManager.fontSizeSmall
+                    wrapMode: Text.Wrap
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: ThemeManager.spacingSmall
+
+                    Button {
+                        Layout.fillWidth: true
+                        text: "Cancel"
+                        onClicked: {
+                            manualAddDialog.pending = null
+                            manualAddDialog.close()
+                        }
+                    }
+
+                    Button {
+                        Layout.fillWidth: true
+                        text: "Add Device"
+                        enabled: manualAddDialog.trimmed(manualAddDialog.hostText).length > 0
+                        onClicked: {
+                            if (!syncController || !syncController.syncing) {
+                                manualAddDialog.statusText = "Sync is not running. Pair devices first, then try again."
+                                return
+                            }
+                            const host = manualAddDialog.trimmed(manualAddDialog.hostText)
+                            const port = manualAddDialog.parsedPortOrDefault()
+                            if (port <= 0 || port > 65535) {
+                                manualAddDialog.statusText = "Invalid port"
+                                return
+                            }
+                            console.log("SettingsDialog: manualDeviceAddRequested host=", host, "port=", port)
+                            manualAddDialog.pending = { host: host, port: port, startedAt: Date.now() }
+                            manualAddDialog.statusText = "Connecting…"
+                            root.manualDeviceAddRequested(host, port)
+                        }
+                    }
+                }
             }
         }
     }

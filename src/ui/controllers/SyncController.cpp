@@ -6,7 +6,6 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
-#include <QHostAddress>
 #include <QSettings>
 #include <QDateTime>
 
@@ -17,6 +16,20 @@ namespace {
 constexpr const char* kSettingsDeviceId = "sync/device_id";
 constexpr const char* kSettingsWorkspaceId = "sync/workspace_id";
 constexpr const char* kSettingsDeviceName = "sync/device_name";
+
+Uuid get_or_create_device_id(QSettings& settings) {
+    const QString device_id_key = QString::fromLatin1(kSettingsDeviceId);
+    QString stored_id = settings.value(device_id_key).toString();
+    if (!stored_id.isEmpty()) {
+        auto parsed_id = Uuid::parse(stored_id.toStdString());
+        if (parsed_id) {
+            return *parsed_id;
+        }
+    }
+    auto id = Uuid::generate();
+    settings.setValue(device_id_key, QString::fromStdString(id.to_string()));
+    return id;
+}
 
 } // namespace
 
@@ -78,6 +91,67 @@ SyncController::SyncController(QObject* parent)
                     discovered_peers_.append(device);
                 }
                 emit discoveredPeersChanged();
+            });
+    connect(sync_manager_.get(), &network::SyncManager::peerHelloReceived,
+            this, [this](const Uuid& device_id,
+                         const QString& device_name,
+                         const QString& host,
+                         uint16_t port) {
+                // If we're in the middle of a "pair to host" attempt and the remote isn't yet in our workspace,
+                // send an explicit pairing request.
+                if (pending_pair_to_host_.has_value() && !workspace_id_.isEmpty()) {
+                    const auto ageMs = QDateTime::currentDateTimeUtc().toMSecsSinceEpoch() - pending_pair_to_host_->started_ms;
+                    if (ageMs >= 0 && ageMs < 30000) {
+                        const auto wsParsed = Uuid::parse(workspace_id_.toStdString());
+                        if (wsParsed) {
+                            qInfo() << "SYNC: pairToHost hello received; sending PairingRequest"
+                                    << "peer=" << QString::fromStdString(device_id.to_string())
+                                    << "ws=" << workspace_id_;
+                            sync_manager_->sendPairingRequest(device_id, *wsParsed);
+                        }
+                    }
+                    pending_pair_to_host_.reset();
+                }
+                emit peerHelloReceived(
+                    QString::fromStdString(device_id.to_string()),
+                    device_name,
+                    host,
+                    static_cast<int>(port));
+            });
+    connect(sync_manager_.get(), &network::SyncManager::peerApprovalRequired,
+            this, [this](const Uuid& device_id,
+                         const QString& device_name,
+                         const QString& host,
+                         uint16_t port) {
+                emit peerApprovalRequired(
+                    QString::fromStdString(device_id.to_string()),
+                    device_name,
+                    host,
+                    static_cast<int>(port));
+            });
+    connect(sync_manager_.get(), &network::SyncManager::pairingRequestReceived,
+            this, [this](const Uuid& device_id,
+                         const QString& device_name,
+                         const QString& host,
+                         uint16_t port,
+                         const Uuid& workspace_id) {
+                emit pairingRequestReceived(
+                    QString::fromStdString(device_id.to_string()),
+                    device_name,
+                    host,
+                    static_cast<int>(port),
+                    QString::fromStdString(workspace_id.to_string()));
+            });
+    connect(sync_manager_.get(), &network::SyncManager::pairingResponseReceived,
+            this, [this](const Uuid& device_id,
+                         bool accepted,
+                         const QString& reason,
+                         const Uuid& workspace_id) {
+                emit pairingResponseReceived(
+                    QString::fromStdString(device_id.to_string()),
+                    accepted,
+                    reason,
+                    QString::fromStdString(workspace_id.to_string()));
             });
     connect(sync_manager_.get(), &network::SyncManager::pageSnapshotReceived,
             this, [this](const QByteArray& payload) {
@@ -206,19 +280,7 @@ bool SyncController::configure(const QString& workspaceId, const QString& device
         : deviceName;
     auto keys = crypto::generate_keypair();
     QSettings settings;
-    const QString device_id_key = QString::fromLatin1(kSettingsDeviceId);
-    QString stored_id = settings.value(device_id_key).toString();
-    Uuid device_id{};
-    if (!stored_id.isEmpty()) {
-        auto parsed_id = Uuid::parse(stored_id.toStdString());
-        if (parsed_id) {
-            device_id = *parsed_id;
-        }
-    }
-    if (device_id.is_nil()) {
-        device_id = Uuid::generate();
-        settings.setValue(device_id_key, QString::fromStdString(device_id.to_string()));
-    }
+    const auto device_id = get_or_create_device_id(settings);
     settings.setValue(QString::fromLatin1(kSettingsWorkspaceId), workspaceId);
     settings.setValue(QString::fromLatin1(kSettingsDeviceName), resolved_name);
     sync_manager_->initialize(keys, *parsed, resolved_name, device_id);
@@ -254,6 +316,22 @@ bool SyncController::startSync() {
     return sync_manager_->start(preferred_port);
 }
 
+bool SyncController::startPairingListener(const QString& defaultDeviceName) {
+    if (sync_manager_->isSyncing()) {
+        return true;
+    }
+    const auto name = defaultDeviceName.isEmpty()
+        ? QStringLiteral("This Device")
+        : defaultDeviceName;
+    auto keys = crypto::generate_keypair();
+    QSettings settings;
+    const auto device_id = get_or_create_device_id(settings);
+    // Unconfigured listener uses nil workspace id and does not advertise/browse.
+    sync_manager_->initialize(keys, Uuid{}, name, device_id);
+    static constexpr uint16_t preferred_port = 47888;
+    return sync_manager_->start(preferred_port);
+}
+
 void SyncController::stopSync() {
     sync_manager_->stop();
 }
@@ -280,13 +358,82 @@ void SyncController::connectToPeer(const QString& deviceId,
         emit error("Invalid peer port");
         return;
     }
-    QHostAddress address(host);
-    if (address.isNull()) {
-        emit error("Invalid peer address");
+    const auto trimmedHost = host.trimmed();
+    if (trimmedHost.isEmpty()) {
+        emit error("Invalid peer host");
         return;
     }
-    sync_manager_->connectToEndpoint(*parsed, address,
+    qInfo() << "SYNC: connectToPeer deviceId=" << deviceId << "host=" << trimmedHost << "port=" << port;
+    sync_manager_->connectToEndpoint(*parsed, trimmedHost,
                                      static_cast<uint16_t>(port));
+}
+
+void SyncController::connectToHost(const QString& host) {
+    connectToHostWithPort(host, 47888);
+}
+
+void SyncController::connectToHostWithPort(const QString& host, int port) {
+    if (port <= 0 || port > 65535) {
+        emit error("Invalid peer port");
+        return;
+    }
+    const auto trimmedHost = host.trimmed();
+    if (trimmedHost.isEmpty()) {
+        emit error("Invalid peer host");
+        return;
+    }
+    qInfo() << "SYNC: connectToHost host=" << trimmedHost << "port=" << port;
+    sync_manager_->connectToEndpoint(Uuid::generate(), trimmedHost,
+                                     static_cast<uint16_t>(port));
+}
+
+void SyncController::pairToHostWithPort(const QString& host, int port) {
+    if (!configured_ || workspace_id_.isEmpty()) {
+        emit error("Sync not configured. Pairing requires an existing workspace.");
+        return;
+    }
+    if (!sync_manager_->isSyncing()) {
+        emit error("Sync is not running");
+        return;
+    }
+    if (port <= 0 || port > 65535) {
+        emit error("Invalid peer port");
+        return;
+    }
+    const auto trimmedHost = host.trimmed();
+    if (trimmedHost.isEmpty()) {
+        emit error("Invalid peer host");
+        return;
+    }
+    pending_pair_to_host_ = PendingPairToHost{
+        .host = trimmedHost,
+        .port = port,
+        .started_ms = QDateTime::currentDateTimeUtc().toMSecsSinceEpoch(),
+    };
+    qInfo() << "SYNC: pairToHost connect host=" << trimmedHost << "port=" << port;
+    sync_manager_->connectToEndpoint(Uuid::generate(), trimmedHost, static_cast<uint16_t>(port));
+}
+
+void SyncController::sendPairingResponse(const QString& deviceId,
+                                        bool accepted,
+                                        const QString& reason,
+                                        const QString& workspaceId) {
+    auto parsedPeer = Uuid::parse(deviceId.toStdString());
+    auto parsedWs = Uuid::parse(workspaceId.toStdString());
+    if (!parsedPeer || !parsedWs) {
+        emit error("Invalid pairing response parameters");
+        return;
+    }
+    sync_manager_->sendPairingResponse(*parsedPeer, accepted, reason, *parsedWs);
+}
+
+void SyncController::approvePeer(const QString& deviceId, bool approved) {
+    auto parsed = Uuid::parse(deviceId.toStdString());
+    if (!parsed) {
+        emit error("Invalid peer ID");
+        return;
+    }
+    sync_manager_->approvePeer(*parsed, approved);
 }
 
 int SyncController::listeningPort() const {

@@ -1,6 +1,8 @@
 #include <QGuiApplication>
 #include <QCommandLineParser>
 #include <QIcon>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QLoggingCategory>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
@@ -14,6 +16,7 @@
 #include "ui/DataStore.hpp"
 #include "ui/cli/list_tree.hpp"
 #include "ui/cli/note.hpp"
+#include "ui/cli/mutations.hpp"
 #include "crypto/keys.hpp"
 
 int main(int argc, char *argv[])
@@ -66,6 +69,34 @@ int main(int argc, char *argv[])
         QStringLiteral("Render note output as HTML (default is markdown)."));
     parser.addOption(noteHtmlOption);
 
+    const QCommandLineOption pageTitleOption(
+        QStringList{QStringLiteral("title")},
+        QStringLiteral("Page title for 'page-create' command."),
+        QStringLiteral("title"));
+    parser.addOption(pageTitleOption);
+
+    const QCommandLineOption pageNotebookOption(
+        QStringList{QStringLiteral("notebook")},
+        QStringLiteral("Notebook id for 'page-create' command."),
+        QStringLiteral("notebookId"));
+    parser.addOption(pageNotebookOption);
+
+    const QCommandLineOption pageParentOption(
+        QStringList{QStringLiteral("parent")},
+        QStringLiteral("Parent page id for 'page-create' command."),
+        QStringLiteral("pageId"));
+    parser.addOption(pageParentOption);
+
+    const QCommandLineOption pageLooseOption(
+        QStringList{QStringLiteral("loose")},
+        QStringLiteral("Create page as a loose note (not in a notebook)."));
+    parser.addOption(pageLooseOption);
+
+    const QCommandLineOption deletePagesOption(
+        QStringList{QStringLiteral("delete-pages")},
+        QStringLiteral("For notebook deletion: also delete pages and tombstone them."));
+    parser.addOption(deletePagesOption);
+
     const QCommandLineOption debugAttachmentsOption(
         QStringList{QStringLiteral("debug-attachments")},
         QStringLiteral("Enable attachment debug logging (also sets ZINC_DEBUG_ATTACHMENTS=1)."));
@@ -96,6 +127,10 @@ int main(int argc, char *argv[])
     }
 
     const auto positional = parser.positionalArguments();
+    const auto emit_json = [&](const QJsonObject& obj) {
+        QTextStream(stdout) << QString::fromUtf8(QJsonDocument(obj).toJson(QJsonDocument::Compact)) << QLatin1Char('\n');
+    };
+
     if (!positional.isEmpty() && positional.first() == QStringLiteral("list")) {
         zinc::ui::DataStore store;
         if (!store.initialize()) {
@@ -128,6 +163,101 @@ int main(int argc, char *argv[])
         }
 
         QTextStream(stdout) << result.unwrap();
+        return 0;
+    }
+
+    if (!positional.isEmpty() && positional.first() == QStringLiteral("notebook-create")) {
+        zinc::ui::DataStore store;
+        if (!store.initialize()) {
+            return 1;
+        }
+
+        const auto created = zinc::ui::create_notebook(
+            store, zinc::ui::CreateNotebookOptions{.name = parser.value(noteNameOption)});
+        if (created.is_err()) {
+            QTextStream(stderr) << QString::fromStdString(created.unwrap_err().message) << QLatin1Char('\n');
+            return 1;
+        }
+
+        const auto notebookId = created.unwrap();
+        if (parser.isSet(jsonOption)) {
+            emit_json(QJsonObject{{QStringLiteral("notebookId"), notebookId}});
+        } else {
+            QTextStream(stdout) << notebookId << QLatin1Char('\n');
+        }
+        return 0;
+    }
+
+    if (!positional.isEmpty() && positional.first() == QStringLiteral("notebook-delete")) {
+        zinc::ui::DataStore store;
+        if (!store.initialize()) {
+            return 1;
+        }
+
+        const auto deleted = zinc::ui::delete_notebook(
+            store,
+            zinc::ui::DeleteNotebookOptions{.notebookId = parser.value(noteIdOption),
+                                           .deletePages = parser.isSet(deletePagesOption)});
+        if (deleted.is_err()) {
+            QTextStream(stderr) << QString::fromStdString(deleted.unwrap_err().message) << QLatin1Char('\n');
+            return 1;
+        }
+
+        const auto id = parser.value(noteIdOption).trimmed();
+        if (parser.isSet(jsonOption)) {
+            emit_json(QJsonObject{{QStringLiteral("notebookId"), id}, {QStringLiteral("deleted"), true}});
+        } else if (!id.isEmpty()) {
+            QTextStream(stdout) << id << QLatin1Char('\n');
+        }
+        return 0;
+    }
+
+    if (!positional.isEmpty() && positional.first() == QStringLiteral("page-create")) {
+        zinc::ui::DataStore store;
+        if (!store.initialize()) {
+            return 1;
+        }
+
+        const auto created = zinc::ui::create_page(
+            store,
+            zinc::ui::CreatePageOptions{
+                .title = parser.value(pageTitleOption),
+                .notebookId = parser.value(pageNotebookOption),
+                .loose = parser.isSet(pageLooseOption),
+                .parentPageId = parser.value(pageParentOption),
+            });
+        if (created.is_err()) {
+            QTextStream(stderr) << QString::fromStdString(created.unwrap_err().message) << QLatin1Char('\n');
+            return 1;
+        }
+
+        const auto pageId = created.unwrap();
+        if (parser.isSet(jsonOption)) {
+            emit_json(QJsonObject{{QStringLiteral("pageId"), pageId}});
+        } else {
+            QTextStream(stdout) << pageId << QLatin1Char('\n');
+        }
+        return 0;
+    }
+
+    if (!positional.isEmpty() && positional.first() == QStringLiteral("page-delete")) {
+        zinc::ui::DataStore store;
+        if (!store.initialize()) {
+            return 1;
+        }
+
+        const auto deleted = zinc::ui::delete_page(store, zinc::ui::DeletePageOptions{.pageId = parser.value(noteIdOption)});
+        if (deleted.is_err()) {
+            QTextStream(stderr) << QString::fromStdString(deleted.unwrap_err().message) << QLatin1Char('\n');
+            return 1;
+        }
+
+        const auto id = parser.value(noteIdOption).trimmed();
+        if (parser.isSet(jsonOption)) {
+            emit_json(QJsonObject{{QStringLiteral("pageId"), id}, {QStringLiteral("deleted"), true}});
+        } else if (!id.isEmpty()) {
+            QTextStream(stdout) << id << QLatin1Char('\n');
+        }
         return 0;
     }
 

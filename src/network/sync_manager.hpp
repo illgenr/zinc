@@ -35,6 +35,7 @@ struct PeerConnection {
     int retry_count = 0;
     bool initiated_by_us = false;
     bool hello_received = false;
+    bool approved = true;
     QString device_name;
     QHostAddress host;
     uint16_t port = 0;
@@ -88,6 +89,29 @@ public:
     void connectToEndpoint(const Uuid& device_id,
                            const QHostAddress& host,
                            uint16_t port);
+
+    /**
+     * Connect to a peer using a hostname (e.g., Tailscale MagicDNS).
+     */
+    void connectToEndpoint(const Uuid& device_id,
+                           const QString& host,
+                           uint16_t port);
+
+    /**
+     * Approve or reject an incoming connection after Hello.
+     * When rejected, the connection is closed and removed.
+     */
+    void approvePeer(const Uuid& device_id, bool approved);
+
+    /**
+     * Pairing protocol (explicit, over secure transport).
+     */
+    void sendPairingRequest(const Uuid& device_id,
+                            const Uuid& workspace_id);
+    void sendPairingResponse(const Uuid& device_id,
+                             bool accepted,
+                             const QString& reason,
+                             const Uuid& workspace_id);
     
     /**
      * Disconnect from a peer.
@@ -116,6 +140,23 @@ signals:
     void peerConnected(const Uuid& device_id);
     void peerDisconnected(const Uuid& device_id);
     void peerDiscovered(const PeerInfo& peer);
+    void peerHelloReceived(const Uuid& device_id,
+                           const QString& device_name,
+                           const QString& host,
+                           uint16_t port);
+    void peerApprovalRequired(const Uuid& device_id,
+                              const QString& device_name,
+                              const QString& host,
+                              uint16_t port);
+    void pairingRequestReceived(const Uuid& device_id,
+                                const QString& device_name,
+                                const QString& host,
+                                uint16_t port,
+                                const Uuid& workspace_id);
+    void pairingResponseReceived(const Uuid& device_id,
+                                 bool accepted,
+                                 const QString& reason,
+                                 const Uuid& workspace_id);
     void pageSnapshotReceived(const QByteArray& payload);
     void presenceReceived(const Uuid& peer_id, const QByteArray& payload);
     void changeReceived(const QString& doc_id, const QByteArray& change_bytes);

@@ -784,6 +784,7 @@ ApplicationWindow {
         externalSyncController: appSyncController
     }
 
+    property var pendingPairByHostname: null
     property var pendingSyncConflicts: []
 
     function showSyncConflict(conflict) {
@@ -834,6 +835,279 @@ ApplicationWindow {
         
         onPairDeviceRequested: {
             pairingDialog.open()
+        }
+
+        onManualDeviceAddRequested: function(host, port) {
+            if (!appSyncController) return
+            const h = host ? host.trim() : ""
+            const p = port && port > 0 ? port : 47888
+            if (h === "") return
+            console.log("SYNCUI: manual add requested host=", h, "port=", p)
+            pendingPairByHostname = { host: h, port: p, startedAt: Date.now() }
+            if (appSyncController.pairToHostWithPort) {
+                appSyncController.pairToHostWithPort(h, p)
+            } else {
+                appSyncController.connectToHostWithPort(h, p)
+            }
+        }
+    }
+
+    Dialog {
+        id: incomingPairDialog
+        parent: Overlay.overlay
+        modal: true
+        title: "Allow Sync Connection?"
+        standardButtons: Dialog.NoButton
+
+        property string deviceId: ""
+        property string deviceName: ""
+        property string host: ""
+        property int port: 0
+
+        onClosed: {
+            deviceId = ""
+            deviceName = ""
+            host = ""
+            port = 0
+        }
+
+        background: Rectangle {
+            color: ThemeManager.surface
+            border.width: 1
+            border.color: ThemeManager.border
+            radius: ThemeManager.radiusLarge
+        }
+
+        contentItem: Item {
+            implicitWidth: 360
+            implicitHeight: contentLayout.implicitHeight + ThemeManager.spacingMedium * 2
+
+            ColumnLayout {
+                id: contentLayout
+                anchors.fill: parent
+                anchors.margins: ThemeManager.spacingMedium
+                spacing: ThemeManager.spacingMedium
+
+                Text {
+                    Layout.fillWidth: true
+                    text: incomingPairDialog.deviceName
+                    color: ThemeManager.text
+                    font.pixelSize: ThemeManager.fontSizeLarge
+                    font.weight: Font.Medium
+                    wrapMode: Text.Wrap
+                }
+
+                Text {
+                    Layout.fillWidth: true
+                    text: (incomingPairDialog.host && incomingPairDialog.host !== "" && incomingPairDialog.port > 0)
+                        ? ("Endpoint: " + incomingPairDialog.host + ":" + incomingPairDialog.port)
+                        : "Endpoint: unknown"
+                    color: ThemeManager.textSecondary
+                    font.pixelSize: ThemeManager.fontSizeNormal
+                    wrapMode: Text.Wrap
+                }
+
+                Text {
+                    Layout.fillWidth: true
+                    text: "This device is requesting to sync with your workspace."
+                    color: ThemeManager.textSecondary
+                    font.pixelSize: ThemeManager.fontSizeNormal
+                    wrapMode: Text.Wrap
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: ThemeManager.spacingSmall
+
+                    Button {
+                        Layout.fillWidth: true
+                        text: "Reject"
+                        background: Rectangle {
+                            radius: ThemeManager.radiusSmall
+                            color: parent.pressed ? ThemeManager.surfaceActive : ThemeManager.surface
+                            border.width: 1
+                            border.color: ThemeManager.border
+                        }
+                        contentItem: Text {
+                            text: parent.text
+                            color: ThemeManager.text
+                            font.pixelSize: ThemeManager.fontSizeNormal
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                        onClicked: {
+                            if (appSyncController && incomingPairDialog.deviceId !== "") {
+                                appSyncController.approvePeer(incomingPairDialog.deviceId, false)
+                            }
+                            incomingPairDialog.close()
+                        }
+                    }
+
+                    Button {
+                        Layout.fillWidth: true
+                        text: "Allow"
+                        background: Rectangle {
+                            radius: ThemeManager.radiusSmall
+                            color: parent.pressed ? ThemeManager.accentHover : ThemeManager.accent
+                        }
+                        contentItem: Text {
+                            text: parent.text
+                            color: "white"
+                            font.pixelSize: ThemeManager.fontSizeNormal
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                        onClicked: {
+                            const id = incomingPairDialog.deviceId
+                            if (DataStore && id !== "") {
+                                const name = incomingPairDialog.deviceName && incomingPairDialog.deviceName !== ""
+                                    ? incomingPairDialog.deviceName
+                                    : "Paired device"
+                                const ws = appSyncController ? appSyncController.workspaceId : ""
+                                if (ws && ws !== "") {
+                                    DataStore.savePairedDevice(id, name, ws)
+                                }
+                                if (incomingPairDialog.host && incomingPairDialog.host !== "" && incomingPairDialog.port > 0) {
+                                    DataStore.updatePairedDeviceEndpoint(id, incomingPairDialog.host, incomingPairDialog.port)
+                                }
+                            }
+                            if (appSyncController && id !== "") {
+                                appSyncController.approvePeer(id, true)
+                            }
+                            incomingPairDialog.close()
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Dialog {
+        id: incomingHostnamePairDialog
+        parent: Overlay.overlay
+        modal: true
+        title: "Allow Pairing?"
+        standardButtons: Dialog.NoButton
+
+        property string deviceId: ""
+        property string deviceName: ""
+        property string host: ""
+        property int port: 0
+        property string workspaceId: ""
+
+        onClosed: {
+            deviceId = ""
+            deviceName = ""
+            host = ""
+            port = 0
+            workspaceId = ""
+        }
+
+        background: Rectangle {
+            color: ThemeManager.surface
+            border.width: 1
+            border.color: ThemeManager.border
+            radius: ThemeManager.radiusLarge
+        }
+
+        contentItem: Item {
+            implicitWidth: 380
+            implicitHeight: contentLayout.implicitHeight + ThemeManager.spacingMedium * 2
+
+            ColumnLayout {
+                id: hostnameContentLayout
+                anchors.fill: parent
+                anchors.margins: ThemeManager.spacingMedium
+                spacing: ThemeManager.spacingMedium
+
+                Text {
+                    Layout.fillWidth: true
+                    text: incomingHostnamePairDialog.deviceName
+                    color: ThemeManager.text
+                    font.pixelSize: ThemeManager.fontSizeLarge
+                    font.weight: Font.Medium
+                    wrapMode: Text.Wrap
+                }
+
+                Text {
+                    Layout.fillWidth: true
+                    text: (incomingHostnamePairDialog.host && incomingHostnamePairDialog.host !== "" && incomingHostnamePairDialog.port > 0)
+                        ? ("Endpoint: " + incomingHostnamePairDialog.host + ":" + incomingHostnamePairDialog.port)
+                        : "Endpoint: unknown"
+                    color: ThemeManager.textSecondary
+                    font.pixelSize: ThemeManager.fontSizeNormal
+                    wrapMode: Text.Wrap
+                }
+
+                Text {
+                    Layout.fillWidth: true
+                    text: incomingHostnamePairDialog.workspaceId && incomingHostnamePairDialog.workspaceId !== ""
+                        ? ("Workspace: " + incomingHostnamePairDialog.workspaceId)
+                        : "Workspace: unknown"
+                    color: ThemeManager.textMuted
+                    font.pixelSize: ThemeManager.fontSizeSmall
+                    wrapMode: Text.Wrap
+                }
+
+                Text {
+                    Layout.fillWidth: true
+                    text: "This will pair this device into the requested workspace."
+                    color: ThemeManager.textSecondary
+                    font.pixelSize: ThemeManager.fontSizeNormal
+                    wrapMode: Text.Wrap
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: ThemeManager.spacingSmall
+
+                    Button {
+                        Layout.fillWidth: true
+                        text: "Reject"
+                        onClicked: {
+                            const id = incomingHostnamePairDialog.deviceId
+                            const ws = incomingHostnamePairDialog.workspaceId
+                            if (appSyncController && id !== "" && ws !== "" && appSyncController.sendPairingResponse) {
+                                appSyncController.sendPairingResponse(id, false, "Rejected", ws)
+                            }
+                            incomingHostnamePairDialog.close()
+                        }
+                    }
+
+                    Button {
+                        Layout.fillWidth: true
+                        text: "Allow"
+                        onClicked: {
+                            const id = incomingHostnamePairDialog.deviceId
+                            const ws = incomingHostnamePairDialog.workspaceId
+                            if (appSyncController && id !== "" && ws !== "" && appSyncController.sendPairingResponse) {
+                                appSyncController.sendPairingResponse(id, true, "", ws)
+                            }
+
+                            // Persist pairing and switch to the new workspace.
+                            if (DataStore && id !== "" && ws !== "") {
+                                const name = incomingHostnamePairDialog.deviceName && incomingHostnamePairDialog.deviceName !== ""
+                                    ? incomingHostnamePairDialog.deviceName
+                                    : "Paired device"
+                                DataStore.savePairedDevice(id, name, ws)
+                                if (incomingHostnamePairDialog.host && incomingHostnamePairDialog.host !== "" && incomingHostnamePairDialog.port > 0) {
+                                    DataStore.updatePairedDeviceEndpoint(id, incomingHostnamePairDialog.host, incomingHostnamePairDialog.port)
+                                }
+                            }
+
+                            if (appSyncController && ws !== "") {
+                                if (appSyncController.stopSync) appSyncController.stopSync()
+                                if (appSyncController.configure) {
+                                    appSyncController.configure(ws, "Zinc Device")
+                                }
+                                if (appSyncController.startSync) appSyncController.startSync()
+                            }
+
+                            incomingHostnamePairDialog.close()
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -1055,6 +1329,72 @@ ApplicationWindow {
             if (host && host !== "" && port && port > 0) {
                 DataStore.updatePairedDeviceEndpoint(deviceId, host, port)
             }
+        }
+
+        function onPairingRequestReceived(deviceId, deviceName, host, port, workspaceId) {
+            console.log("SYNCUI: pairingRequestReceived", deviceId, deviceName, host, port, workspaceId)
+            incomingHostnamePairDialog.deviceId = deviceId || ""
+            incomingHostnamePairDialog.deviceName = deviceName || "Unknown device"
+            incomingHostnamePairDialog.host = host || ""
+            incomingHostnamePairDialog.port = port || 0
+            incomingHostnamePairDialog.workspaceId = workspaceId || ""
+            incomingHostnamePairDialog.open()
+        }
+
+        function onPairingResponseReceived(deviceId, accepted, reason, workspaceId) {
+            console.log("SYNCUI: pairingResponseReceived", deviceId, accepted, reason, workspaceId)
+            const pending = pendingPairByHostname
+            if (!pending) return
+            if (!DataStore || !appSyncController) return
+            if (!deviceId || deviceId === "") return
+            if (!accepted) {
+                pendingPairByHostname = null
+                return
+            }
+            const ws = appSyncController.workspaceId
+            if (!ws || ws === "") {
+                pendingPairByHostname = null
+                return
+            }
+            // Save paired device using our current workspace id.
+            DataStore.savePairedDevice(deviceId, "Paired device", ws)
+            DataStore.updatePairedDeviceEndpoint(deviceId, pending.host, pending.port)
+            pendingPairByHostname = null
+        }
+
+        function onPeerHelloReceived(deviceId, deviceName, host, port) {
+            console.log("SYNCUI: peerHelloReceived", deviceId, deviceName, host, port)
+        }
+
+        function onPeerApprovalRequired(deviceId, deviceName, host, port) {
+            console.log("SYNCUI: peerApprovalRequired", deviceId, deviceName, host, port)
+            if (!appSyncController) return
+            const id = deviceId || ""
+            if (id === "") return
+
+            function alreadyPaired() {
+                if (!DataStore) return false
+                const devices = DataStore.getPairedDevices() || []
+                for (let i = 0; i < devices.length; i++) {
+                    const d = devices[i] || {}
+                    if (d.deviceId === id) return true
+                }
+                return false
+            }
+
+            if (alreadyPaired()) {
+                if (DataStore && host && host !== "" && port && port > 0) {
+                    DataStore.updatePairedDeviceEndpoint(id, host, port)
+                }
+                appSyncController.approvePeer(id, true)
+                return
+            }
+
+            incomingPairDialog.deviceId = id
+            incomingPairDialog.deviceName = deviceName || "Unknown device"
+            incomingPairDialog.host = host || ""
+            incomingPairDialog.port = port || 0
+            incomingPairDialog.open()
         }
 
         function onPeerConnected(deviceId) {
@@ -1375,6 +1715,13 @@ ApplicationWindow {
                         console.log("SYNC: started from paired devices workspaceId", wsId)
                     }
                 }
+            }
+        }
+
+        // Not configured yet: start a passive listener so other devices can pair via hostname.
+        if (appSyncController.startPairingListener) {
+            if (appSyncController.startPairingListener("Zinc Device")) {
+                console.log("SYNC: started pairing listener")
             }
         }
     }

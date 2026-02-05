@@ -81,6 +81,7 @@ void Connection::connectToPeer(const QHostAddress& host, uint16_t port,
     noise_ = std::make_unique<crypto::NoiseSession>(
         crypto::NoiseRole::Initiator, local_keys_);
     connect_host_ = host;
+    connect_host_name_ = host.toString();
     connect_port_ = port;
     
     setState(State::Connecting);
@@ -88,6 +89,23 @@ void Connection::connectToPeer(const QHostAddress& host, uint16_t port,
         qInfo() << "SYNC: socket connectToHost host=" << host.toString() << "port=" << port;
     }
     socket_->connectToHost(host, port);
+}
+
+void Connection::connectToPeer(const QString& host, uint16_t port,
+                               const crypto::KeyPair& local_keys) {
+    local_keys_ = local_keys;
+    noise_role_ = crypto::NoiseRole::Initiator;
+    noise_ = std::make_unique<crypto::NoiseSession>(
+        crypto::NoiseRole::Initiator, local_keys_);
+    connect_host_ = QHostAddress{};
+    connect_host_name_ = host.trimmed();
+    connect_port_ = port;
+
+    setState(State::Connecting);
+    if (sync_debug_enabled()) {
+        qInfo() << "SYNC: socket connectToHost host=" << connect_host_name_ << "port=" << port;
+    }
+    socket_->connectToHost(connect_host_name_, port);
 }
 
 void Connection::acceptConnection(QTcpSocket* socket,
@@ -109,6 +127,7 @@ void Connection::acceptConnection(QTcpSocket* socket,
             this, &Connection::onReadyRead);
 
     connect_host_ = socket_ ? socket_->peerAddress() : QHostAddress{};
+    connect_host_name_ = connect_host_.toString();
     connect_port_ = socket_ ? static_cast<uint16_t>(socket_->peerPort()) : 0;
     
     setState(State::Handshaking);
@@ -132,6 +151,7 @@ void Connection::disconnect() {
         
         socket_->disconnectFromHost();
         connect_host_ = QHostAddress{};
+        connect_host_name_.clear();
         connect_port_ = 0;
         setState(State::Disconnected);
     }
@@ -195,6 +215,7 @@ void Connection::onSocketDisconnected() {
         qInfo() << "SYNC: socket disconnected state=" << state_name(state_);
     }
     connect_host_ = QHostAddress{};
+    connect_host_name_.clear();
     connect_port_ = 0;
     setState(State::Disconnected);
     emit disconnected();
@@ -205,11 +226,13 @@ void Connection::onSocketError(QAbstractSocket::SocketError err) {
         qInfo() << "SYNC: socket error" << static_cast<int>(err) << socket_->errorString()
                 << "state=" << state_name(state_);
     }
-    const auto host = connect_host_.isNull() ? socket_->peerAddress() : connect_host_;
+    const auto hostName = !connect_host_name_.isEmpty()
+        ? connect_host_name_
+        : (connect_host_.isNull() ? socket_->peerAddress().toString() : connect_host_.toString());
     const auto port = connect_port_ != 0 ? connect_port_ : static_cast<uint16_t>(socket_->peerPort());
-    const auto where = (host.isNull() || port == 0)
+    const auto where = (hostName.isEmpty() || port == 0)
         ? QStringLiteral("")
-        : QStringLiteral(" (%1:%2)").arg(host.toString()).arg(port);
+        : QStringLiteral(" (%1:%2)").arg(hostName).arg(port);
     emit error(socket_->errorString() + where);
     if (state_ == State::Connecting || state_ == State::Handshaking) {
         setState(State::Failed);
@@ -415,12 +438,21 @@ TransportServer::~TransportServer() {
 }
 
 Result<uint16_t, Error> TransportServer::listen(uint16_t port) {
-    if (!server_->listen(QHostAddress::Any, port)) {
-        return Result<uint16_t, Error>::err(
-            Error{server_->errorString().toStdString()});
+    if (server_->listen(QHostAddress::Any, port)) {
+        return Result<uint16_t, Error>::ok(server_->serverPort());
     }
-    
-    return Result<uint16_t, Error>::ok(server_->serverPort());
+
+    const auto anyError = server_->errorString();
+    // Fallback for restricted environments where binding to all interfaces is disallowed.
+    if (server_->listen(QHostAddress::LocalHost, port)) {
+        return Result<uint16_t, Error>::ok(server_->serverPort());
+    }
+
+    const auto localhostError = server_->errorString();
+    return Result<uint16_t, Error>::err(
+        Error{QStringLiteral("%1 (fallback: %2)")
+                  .arg(anyError, localhostError)
+                  .toStdString()});
 }
 
 void TransportServer::close() {
