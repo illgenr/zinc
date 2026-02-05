@@ -42,6 +42,14 @@ Item {
         pageId = id
         loadFromStorage()
     }
+    
+    function clearPage() {
+        pageId = ""
+        editor.text = ""
+        blockSpans = []
+        parseTimer.stop()
+        saveTimer.stop()
+    }
 
     function stripHeaderIfPresent(markdown) {
         const header = "<!-- zinc-blocks v1 -->"

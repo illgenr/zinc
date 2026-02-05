@@ -5,6 +5,9 @@ import zinc
 
 Item {
     id: root
+
+    readonly property bool databaseActive: DataStore && DataStore.schemaVersion >= 0
+    enabled: databaseActive
     
     property bool collapsed: false
     property bool showNewPageButton: true
@@ -43,6 +46,7 @@ Item {
     }
 
     function beginNewNotebook() {
+        if (!root.databaseActive) return
         root._inlineMode = "newNotebook"
         root._inlineKind = "notebook"
         root._inlinePageId = ""
@@ -93,6 +97,10 @@ Item {
     }
 
     function commitInlineEdit() {
+        if (!root.databaseActive) {
+            cancelInlineEdit()
+            return
+        }
         const text = (root._inlineText || "").trim()
         if (root._inlineMode === "newNotebook") {
             if (!text) {
@@ -405,6 +413,7 @@ Item {
     }
 
     function createPageWithNotebook(parentId, notebookId, options) {
+        if (!root.databaseActive) return ""
         let id = generateUuid()
         let depth = 0
         let insertIndex = pageModel.count
@@ -534,20 +543,33 @@ Item {
     
     // Storage functions - using SQLite via DataStore
     function savePagesToStorage() {
+        if (!DataStore || DataStore.schemaVersion < 0) return
         let pages = getAllPages()
-        if (DataStore) DataStore.saveAllPages(pages)
+        DataStore.saveAllPages(pages)
     }
     
     function loadPagesFromStorage() {
+        if (!DataStore || DataStore.schemaVersion < 0) {
+            cancelInlineEdit()
+            root.selectedPageId = ""
+            pageModel.clear()
+            return false
+        }
         try {
             let pages = DataStore ? DataStore.getAllPages() : []
             let notebooks = (DataStore && DataStore.getAllNotebooks) ? DataStore.getAllNotebooks() : []
-            if (pages && pages.length > 0) {
-                rebuildModel(pages, notebooks)
-                return true
+            rebuildModel(pages || [], notebooks || [])
+            const hasAny = (pages && pages.length > 0) || (notebooks && notebooks.length > 0)
+            if (!hasAny) {
+                cancelInlineEdit()
+                root.selectedPageId = ""
             }
+            return hasAny
         } catch (e) {
             console.log("Error loading pages:", e)
+            cancelInlineEdit()
+            root.selectedPageId = ""
+            pageModel.clear()
         }
         return false
     }

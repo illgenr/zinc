@@ -54,3 +54,31 @@ TEST_CASE("DataStore: createFolder creates a child directory", "[qml][settings][
     REQUIRE(created.isLocalFile());
     REQUIRE(QDir(created.toLocalFile()).exists());
 }
+
+TEST_CASE("DataStore: createNewDatabase + openDatabaseFile + closeDatabase", "[qml][settings][export]") {
+    // Tests run with ZINC_DB_PATH set; disable env override for this test.
+    const auto had = qEnvironmentVariableIsSet("ZINC_DB_PATH");
+    const auto old = qEnvironmentVariable("ZINC_DB_PATH");
+    if (had) qunsetenv("ZINC_DB_PATH");
+
+    QSettings settings;
+    settings.remove(QStringLiteral("storage/database_path"));
+
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+
+    zinc::ui::DataStore store;
+    REQUIRE(store.initialize());
+
+    const auto okCreate = store.createNewDatabase(QUrl::fromLocalFile(tmp.path()), QStringLiteral("test.db"));
+    REQUIRE(okCreate);
+    REQUIRE(QFile::exists(QDir(tmp.path()).filePath(QStringLiteral("test.db"))));
+
+    store.closeDatabase();
+    REQUIRE(store.schemaVersion() == -1);
+
+    REQUIRE(store.openDatabaseFile(QUrl::fromLocalFile(QDir(tmp.path()).filePath(QStringLiteral("test.db")))));
+    REQUIRE(store.schemaVersion() >= 0);
+
+    if (had) qputenv("ZINC_DB_PATH", old.toUtf8());
+}

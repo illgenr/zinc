@@ -7,6 +7,7 @@ Item {
     id: root
 
     property string sortMode: "alphabetical" // "alphabetical" | "updatedAt" | "createdAt"
+    property bool canCreate: true
 
     signal newPageRequested()
     signal findRequested()
@@ -31,6 +32,7 @@ Item {
             Layout.preferredHeight: root._buttonHeight
             radius: ThemeManager.radiusMedium
             color: newPageMouse.pressed ? ThemeManager.accentHover : ThemeManager.accent
+            opacity: root.canCreate ? 1.0 : 0.45
 
             RowLayout {
                 anchors.centerIn: parent
@@ -56,6 +58,7 @@ Item {
             MouseArea {
                 id: newPageMouse
                 anchors.fill: parent
+                enabled: root.canCreate
                 onClicked: root.newPageRequested()
             }
         }
@@ -102,6 +105,7 @@ Item {
             color: newNotebookMouse.pressed ? ThemeManager.surfaceActive : ThemeManager.surface
             border.width: 1
             border.color: ThemeManager.border
+            opacity: root.canCreate ? 1.0 : 0.45
 
             RowLayout {
                 anchors.centerIn: parent
@@ -127,6 +131,7 @@ Item {
             MouseArea {
                 id: newNotebookMouse
                 anchors.fill: parent
+                enabled: root.canCreate
                 onClicked: root.newNotebookRequested()
             }
         }
@@ -193,4 +198,3 @@ Item {
         }
     }
 }
-

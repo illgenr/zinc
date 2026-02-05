@@ -8,6 +8,7 @@ Item {
 
     property bool collapsed: false
     property string sortMode: "alphabetical" // "alphabetical" | "updatedAt" | "createdAt"
+    property bool canCreate: true
 
     signal newPageRequested()
     signal findRequested()
@@ -42,6 +43,7 @@ Item {
             color: newPageMouse.containsMouse || newPageMouse.pressed ? ThemeManager.surfaceHover : ThemeManager.surface
             border.width: 1
             border.color: ThemeManager.border
+            opacity: root.canCreate ? 1.0 : 0.45
 
             Text {
                 anchors.centerIn: parent
@@ -61,6 +63,7 @@ Item {
                 anchors.fill: parent
                 hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
+                enabled: root.canCreate
                 onClicked: root.newPageRequested()
             }
         }
@@ -111,6 +114,7 @@ Item {
             color: newNotebookMouse.containsMouse || newNotebookMouse.pressed ? ThemeManager.surfaceHover : ThemeManager.surface
             border.width: 1
             border.color: ThemeManager.border
+            opacity: root.canCreate ? 1.0 : 0.45
 
             RowLayout {
                 anchors.centerIn: parent
@@ -140,6 +144,7 @@ Item {
                 anchors.fill: parent
                 hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
+                enabled: root.canCreate
                 onClicked: root.newNotebookRequested()
             }
         }

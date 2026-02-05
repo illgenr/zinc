@@ -64,6 +64,7 @@ constexpr const char* kSettingsLastViewedCursorPageId = "ui/last_viewed_cursor_p
 constexpr const char* kSettingsLastViewedCursorBlockIndex = "ui/last_viewed_cursor_block_index";
 constexpr const char* kSettingsLastViewedCursorPos = "ui/last_viewed_cursor_pos";
 constexpr const char* kSettingsExportLastFolder = "ui/export_last_folder";
+constexpr const char* kSettingsDatabasePath = "storage/database_path";
 constexpr int kDefaultDeletedPagesRetention = 100;
 constexpr int kMaxDeletedPagesRetention = 10000;
 constexpr auto kDefaultPagesSeedTimestamp = "1900-01-01 00:00:00.000";
@@ -595,6 +596,20 @@ QString export_last_folder_path() {
     return settings.value(QString::fromLatin1(kSettingsExportLastFolder), QString{}).toString();
 }
 
+QString database_path_override_from_settings() {
+    QSettings settings;
+    return settings.value(QString::fromLatin1(kSettingsDatabasePath), QString{}).toString();
+}
+
+void set_database_path_override_in_settings(const QString& absoluteFilePath) {
+    QSettings settings;
+    if (absoluteFilePath.trimmed().isEmpty()) {
+        settings.remove(QString::fromLatin1(kSettingsDatabasePath));
+        return;
+    }
+    settings.setValue(QString::fromLatin1(kSettingsDatabasePath), absoluteFilePath);
+}
+
 int normalize_cursor_int(int value) {
     return (value < 0) ? -1 : value;
 }
@@ -723,6 +738,16 @@ QString resolve_database_path() {
         return info.absoluteFilePath();
     }
 
+    const auto overrideFromSettings = database_path_override_from_settings();
+    if (!overrideFromSettings.isEmpty()) {
+        QFileInfo info(overrideFromSettings);
+        QDir dir(info.absolutePath());
+        if (!dir.exists()) {
+            dir.mkpath(".");
+        }
+        return info.absoluteFilePath();
+    }
+
     QString dataPath = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
     QDir dir(dataPath);
     if (!dir.exists()) {
@@ -744,6 +769,16 @@ QString resolve_attachments_dir() {
     const auto overrideDb = qEnvironmentVariable("ZINC_DB_PATH");
     if (!overrideDb.isEmpty()) {
         QFileInfo info(overrideDb);
+        QDir dir(info.absolutePath() + "/attachments");
+        if (!dir.exists()) {
+            dir.mkpath(".");
+        }
+        return dir.absolutePath();
+    }
+
+    const auto overrideFromSettings = database_path_override_from_settings();
+    if (!overrideFromSettings.isEmpty()) {
+        QFileInfo info(overrideFromSettings);
         QDir dir(info.absolutePath() + "/attachments");
         if (!dir.exists()) {
             dir.mkpath(".");
@@ -896,6 +931,8 @@ bool DataStore::initialize() {
     runMigrations();
     ensureDefaultNotebook();
     qDebug() << "DataStore: Database initialized successfully";
+    emit databasePathChanged();
+    emit schemaVersionChanged();
     return true;
 }
 
@@ -3570,6 +3607,8 @@ bool DataStore::resetDatabase() {
     }
     
     qDebug() << "DataStore: Database reset complete";
+    emit databasePathChanged();
+    emit schemaVersionChanged();
     emit pagesChanged();
     return true;
 }
@@ -4120,6 +4159,7 @@ bool DataStore::runMigrations() {
     }
     
     qDebug() << "DataStore: Migrations complete. Schema version:" << currentVersion;
+    emit schemaVersionChanged();
     return true;
 }
 
@@ -4828,6 +4868,269 @@ QUrl DataStore::parentFolder(const QUrl& folder) const {
         return QUrl::fromLocalFile(path);
     }
     return QUrl::fromLocalFile(dir.absolutePath());
+}
+
+QUrl DataStore::databaseFolder() const {
+    const QFileInfo info(databasePath());
+    if (!info.exists() && info.absolutePath().isEmpty()) {
+        return QUrl::fromLocalFile(QDir::homePath());
+    }
+    return QUrl::fromLocalFile(QDir(info.absolutePath()).absolutePath());
+}
+
+namespace {
+
+bool copy_dir_recursive(const QString& srcPath, const QString& dstPath) {
+    QDir src(srcPath);
+    if (!src.exists()) return true;
+
+    if (!QDir().mkpath(dstPath)) {
+        return false;
+    }
+
+    const auto entries = src.entryInfoList(QDir::AllEntries | QDir::NoDotAndDotDot);
+    for (const auto& info : entries) {
+        const auto dstItem = QDir(dstPath).filePath(info.fileName());
+        if (info.isDir()) {
+            if (!copy_dir_recursive(info.absoluteFilePath(), dstItem)) return false;
+        } else {
+            QFile::remove(dstItem);
+            if (!QFile::copy(info.absoluteFilePath(), dstItem)) return false;
+        }
+    }
+    return true;
+}
+
+} // namespace
+
+bool DataStore::moveDatabaseToFolder(const QUrl& folder) {
+    if (qEnvironmentVariableIsSet("ZINC_DB_PATH")) {
+        emit error(QStringLiteral("Move database failed: ZINC_DB_PATH is set (path is controlled by environment)"));
+        return false;
+    }
+    if (!m_ready) {
+        emit error(QStringLiteral("Move database failed: database not initialized"));
+        return false;
+    }
+    if (!folder.isValid() || !folder.isLocalFile()) {
+        emit error(QStringLiteral("Move database failed: destination must be a local folder"));
+        return false;
+    }
+
+    const auto dstDirPath = QDir(folder.toLocalFile()).absolutePath();
+    if (dstDirPath.isEmpty()) {
+        emit error(QStringLiteral("Move database failed: invalid destination folder"));
+        return false;
+    }
+    if (!QDir().mkpath(dstDirPath)) {
+        emit error(QStringLiteral("Move database failed: could not create destination folder"));
+        return false;
+    }
+
+    const auto oldDbPath = QFileInfo(m_db.databaseName()).absoluteFilePath();
+    const auto newDbPath = QFileInfo(QDir(dstDirPath).filePath(QStringLiteral("zinc.db"))).absoluteFilePath();
+    if (oldDbPath.isEmpty() || newDbPath.isEmpty()) {
+        emit error(QStringLiteral("Move database failed: invalid database path"));
+        return false;
+    }
+    if (QDir::cleanPath(oldDbPath) == QDir::cleanPath(newDbPath)) {
+        return true;
+    }
+    if (QFileInfo::exists(newDbPath)) {
+        emit error(QStringLiteral("Move database failed: destination already contains zinc.db"));
+        return false;
+    }
+
+    const auto oldAttachmentsDir = resolve_attachments_dir();
+    const auto newAttachmentsDir = QDir(dstDirPath).filePath(QStringLiteral("attachments"));
+
+    // Close the DB before copying.
+    m_db.close();
+    m_ready = false;
+
+    const auto copy_one = [&](const QString& src, const QString& dst) -> bool {
+        if (!QFileInfo::exists(src)) return true;
+        QFile::remove(dst);
+        return QFile::copy(src, dst);
+    };
+
+    // Copy DB and sidecar files.
+    if (!copy_one(oldDbPath, newDbPath) ||
+        !copy_one(oldDbPath + QStringLiteral("-wal"), newDbPath + QStringLiteral("-wal")) ||
+        !copy_one(oldDbPath + QStringLiteral("-shm"), newDbPath + QStringLiteral("-shm")) ||
+        !copy_one(oldDbPath + QStringLiteral("-journal"), newDbPath + QStringLiteral("-journal"))) {
+        emit error(QStringLiteral("Move database failed: could not copy database files"));
+        // Best-effort reopen old DB.
+        initialize();
+        return false;
+    }
+
+    // Copy attachments unless they're controlled by env var.
+    if (!qEnvironmentVariableIsSet("ZINC_ATTACHMENTS_DIR")) {
+        if (!copy_dir_recursive(oldAttachmentsDir, newAttachmentsDir)) {
+            emit error(QStringLiteral("Move database failed: could not copy attachments"));
+            initialize();
+            return false;
+        }
+    }
+
+    const auto prevOverride = database_path_override_from_settings();
+    set_database_path_override_in_settings(newDbPath);
+    if (!initialize()) {
+        set_database_path_override_in_settings(prevOverride);
+        initialize();
+        emit error(QStringLiteral("Move database failed: could not open database at new location"));
+        return false;
+    }
+
+    // Best-effort delete the old copies if attachments aren't env-controlled.
+    QFile::remove(oldDbPath);
+    QFile::remove(oldDbPath + QStringLiteral("-wal"));
+    QFile::remove(oldDbPath + QStringLiteral("-shm"));
+    QFile::remove(oldDbPath + QStringLiteral("-journal"));
+    if (!qEnvironmentVariableIsSet("ZINC_ATTACHMENTS_DIR")) {
+        const auto expectedOldAttachments = QDir(QFileInfo(oldDbPath).absolutePath()).filePath(QStringLiteral("attachments"));
+        if (QDir::cleanPath(expectedOldAttachments) == QDir::cleanPath(oldAttachmentsDir) &&
+            QDir::cleanPath(oldAttachmentsDir) != QDir::cleanPath(newAttachmentsDir)) {
+            QDir(oldAttachmentsDir).removeRecursively();
+        }
+    }
+
+    emit databasePathChanged();
+    emit schemaVersionChanged();
+    emit notebooksChanged();
+    emit pagesChanged();
+    emit attachmentsChanged();
+    return true;
+}
+
+bool DataStore::openDatabaseFile(const QUrl& file) {
+    if (qEnvironmentVariableIsSet("ZINC_DB_PATH")) {
+        emit error(QStringLiteral("Open database failed: ZINC_DB_PATH is set (path is controlled by environment)"));
+        return false;
+    }
+    if (!file.isValid() || !file.isLocalFile()) {
+        emit error(QStringLiteral("Open database failed: file must be a local path"));
+        return false;
+    }
+
+    const auto path = QFileInfo(file.toLocalFile()).absoluteFilePath();
+    if (path.isEmpty()) {
+        emit error(QStringLiteral("Open database failed: invalid file path"));
+        return false;
+    }
+    if (!QFileInfo::exists(path)) {
+        emit error(QStringLiteral("Open database failed: file does not exist"));
+        return false;
+    }
+    if (QFileInfo(path).isDir()) {
+        emit error(QStringLiteral("Open database failed: path is a directory"));
+        return false;
+    }
+
+    const auto prevOverride = database_path_override_from_settings();
+    const auto prevDbPath = resolve_database_path();
+
+    closeDatabase();
+    set_database_path_override_in_settings(path);
+    if (!initialize()) {
+        set_database_path_override_in_settings(prevOverride);
+        initialize();
+        emit error(QStringLiteral("Open database failed: could not open database"));
+        return false;
+    }
+
+    if (prevDbPath != resolve_database_path()) {
+        emit databasePathChanged();
+    }
+    emit schemaVersionChanged();
+    emit notebooksChanged();
+    emit pagesChanged();
+    emit attachmentsChanged();
+    return true;
+}
+
+bool DataStore::createNewDatabase(const QUrl& folder, const QString& fileName) {
+    if (qEnvironmentVariableIsSet("ZINC_DB_PATH")) {
+        emit error(QStringLiteral("Create database failed: ZINC_DB_PATH is set (path is controlled by environment)"));
+        return false;
+    }
+    if (!folder.isValid() || !folder.isLocalFile()) {
+        emit error(QStringLiteral("Create database failed: destination must be a local folder"));
+        return false;
+    }
+
+    const auto dstDirPath = QDir(folder.toLocalFile()).absolutePath();
+    if (dstDirPath.isEmpty()) {
+        emit error(QStringLiteral("Create database failed: invalid destination folder"));
+        return false;
+    }
+    if (!QDir().mkpath(dstDirPath)) {
+        emit error(QStringLiteral("Create database failed: could not create destination folder"));
+        return false;
+    }
+
+    const auto cleaned = sanitize_export_component(fileName.trimmed());
+    if (cleaned.isEmpty()) {
+        emit error(QStringLiteral("Create database failed: invalid file name"));
+        return false;
+    }
+
+    const auto finalName = cleaned.contains(QLatin1Char('.'))
+        ? cleaned
+        : (cleaned + QStringLiteral(".db"));
+    const auto newDbPath = QFileInfo(QDir(dstDirPath).filePath(finalName)).absoluteFilePath();
+    if (newDbPath.isEmpty()) {
+        emit error(QStringLiteral("Create database failed: invalid file path"));
+        return false;
+    }
+    if (QFileInfo::exists(newDbPath)) {
+        emit error(QStringLiteral("Create database failed: file already exists"));
+        return false;
+    }
+
+    const auto prevOverride = database_path_override_from_settings();
+    const auto prevDbPath = resolve_database_path();
+
+    closeDatabase();
+    set_database_path_override_in_settings(newDbPath);
+    if (!initialize()) {
+        set_database_path_override_in_settings(prevOverride);
+        initialize();
+        emit error(QStringLiteral("Create database failed: could not create/open database"));
+        return false;
+    }
+
+    if (prevDbPath != resolve_database_path()) {
+        emit databasePathChanged();
+    }
+    emit schemaVersionChanged();
+    emit notebooksChanged();
+    emit pagesChanged();
+    emit attachmentsChanged();
+    return true;
+}
+
+void DataStore::closeDatabase() {
+    if (!m_ready && !m_db.isValid()) {
+        emit schemaVersionChanged();
+        return;
+    }
+
+    if (m_db.isOpen()) {
+        m_db.close();
+    }
+    const auto connection = m_db.connectionName();
+    m_db = {};
+    if (QCoreApplication::instance() && !connection.isEmpty() && QSqlDatabase::contains(connection)) {
+        QSqlDatabase::removeDatabase(connection);
+    }
+    m_ready = false;
+
+    emit schemaVersionChanged();
+    emit notebooksChanged();
+    emit pagesChanged();
+    emit attachmentsChanged();
 }
 
 } // namespace zinc::ui

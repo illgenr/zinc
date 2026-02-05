@@ -614,6 +614,7 @@ if(ZINC_BUILD_TESTS)
                     tests/qml/test_external_link_tooltip_qml.cpp
                     tests/qml/test_slash_menu_page_command_qml.cpp
                     tests/qml/test_task_marker_rendering_qml.cpp
+                    tests/qml/test_database_close_clears_ui_qml.cpp
 				    )
 
     qt_add_qml_module(zinc_qml_tests

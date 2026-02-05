@@ -53,15 +53,30 @@ ApplicationWindow {
     // Detect mobile (Android) vs desktop
     readonly property bool isMobile: Qt.platform.os === "android" || Qt.platform.os === "ios" || width < 600
     readonly property bool syncDisabled: Qt.application.arguments.indexOf("--no-sync") !== -1
+    readonly property bool databaseActive: DataStore && DataStore.schemaVersion >= 0
 
     Connections {
         target: DataStore
+
+        function onSchemaVersionChanged() {
+            if (!DataStore || DataStore.schemaVersion >= 0) return
+            root.currentPage = null
+            root.pendingStartupCursorHint = null
+            root.pendingSearchBlockIndex = -1
+            if (pageTree) pageTree.selectedPageId = ""
+            if (mobilePageTree) mobilePageTree.selectedPageId = ""
+            if (blockEditor && blockEditor.clearPage) blockEditor.clearPage()
+            if (markdownEditor && markdownEditor.clearPage) markdownEditor.clearPage()
+            if (mobileStack && mobileStack.depth > 1) {
+                while (mobileStack.depth > 1) mobileStack.pop()
+            }
+        }
     }
     
     // Keyboard shortcuts (desktop)
     Shortcut {
         sequence: "Ctrl+N"
-        enabled: !isMobile
+        enabled: !isMobile && root.databaseActive
         context: Qt.ApplicationShortcut
         onActivated: pageTree.createPage("")
     }
@@ -193,6 +208,7 @@ ApplicationWindow {
                     Layout.fillWidth: true
                     Layout.margins: ThemeManager.spacingSmall
                     sortMode: mobilePageTree.sortMode
+                    canCreate: root.databaseActive
 
                     onNewPageRequested: mobilePageTree.createPage("")
                     onFindRequested: searchDialog.open()
@@ -330,6 +346,7 @@ ApplicationWindow {
             BlockEditor {
                 id: mobileBlockEditor
                 anchors.fill: parent
+                enabled: root.databaseActive
                 pageTitle: root.currentPage ? root.currentPage.title : ""
                 availablePages: pageTree.getAllPages()
                 realtimeSyncEnabled: root.bothAutoSyncEnabled
@@ -545,6 +562,7 @@ ApplicationWindow {
                     Layout.fillWidth: true
                     collapsed: sidebarCollapsed
                     sortMode: pageTree.sortMode
+                    canCreate: root.databaseActive
 
                     onNewPageRequested: pageTree.createPage("")
                     onFindRequested: searchDialog.open()
@@ -616,6 +634,7 @@ ApplicationWindow {
                         id: blockEditor
                         Layout.fillWidth: true
                         Layout.fillHeight: true
+                        enabled: root.databaseActive
                         pageTitle: currentPage ? currentPage.title : ""
                         availablePages: pageTree.getAllPages()
                         realtimeSyncEnabled: root.bothAutoSyncEnabled
@@ -704,6 +723,7 @@ ApplicationWindow {
                         id: markdownEditor
                         Layout.fillWidth: true
                         Layout.fillHeight: true
+                        enabled: root.databaseActive
                         pageTitle: currentPage ? currentPage.title : ""
                         availablePages: pageTree.getAllPages()
 
@@ -726,6 +746,7 @@ ApplicationWindow {
                     anchors.right: parent.right
                     anchors.margins: ThemeManager.spacingSmall
                     text: root.editorModeToggleLabel()
+                    enabled: root.databaseActive && root.currentPage !== null
                     onClicked: root.switchEditorMode()
                 }
             }

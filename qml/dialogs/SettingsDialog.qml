@@ -974,7 +974,18 @@ Dialog {
         property url importFolderPickerCurrentFolder: ""
         property url importFolderPickerSelectedFolder: ""
         property string newFolderName: ""
-        property bool newFolderIsImport: false
+        property string newFolderTarget: "export" // export | import | db
+        property string databaseStatus: ""
+        property bool databaseSucceeded: false
+        property string databaseFolderPickerStatus: ""
+        property string databaseFolderPickerMode: "move" // move | select
+        property url databaseFolderPickerCurrentFolder: ""
+        property url databaseFolderPickerSelectedFolder: ""
+        property url databaseCreateFolder: ""
+        property string newDbFileName: "zinc.db"
+        property string databaseFilePickerStatus: ""
+        property url databaseFilePickerCurrentFolder: ""
+        property url databaseFilePickerSelectedFile: ""
 
         function refreshNotebooks() {
             notebooksModel.clear()
@@ -1035,6 +1046,35 @@ Dialog {
             importFolderPickerDialog.open()
         }
 
+        function ensureDatabaseFolderPicker() {
+            const folder = DataStore ? DataStore.databaseFolder() : ""
+            const hasFolder = folder && folder !== "" && folder.toString().indexOf("file:") === 0
+            databaseFolderPickerCurrentFolder = hasFolder ? folder : (DataStore ? DataStore.exportLastFolder() : "")
+            databaseFolderPickerSelectedFolder = ""
+            databaseFolderPickerStatus = ""
+        }
+
+        function openDatabaseFolderPicker() {
+            databaseFolderPickerMode = "move"
+            ensureDatabaseFolderPicker()
+            databaseFolderPickerDialog.open()
+        }
+
+        function openDatabaseCreateFolderPicker() {
+            databaseFolderPickerMode = "select"
+            ensureDatabaseFolderPicker()
+            databaseFolderPickerDialog.open()
+        }
+
+        function openDatabaseFilePicker() {
+            const folder = DataStore ? DataStore.databaseFolder() : ""
+            const hasFolder = folder && folder !== "" && folder.toString().indexOf("file:") === 0
+            databaseFilePickerCurrentFolder = hasFolder ? folder : (DataStore ? DataStore.exportLastFolder() : "")
+            databaseFilePickerSelectedFile = ""
+            databaseFilePickerStatus = ""
+            databaseFilePickerDialog.open()
+        }
+
         Component.onCompleted: {
             refreshNotebooks()
             ensureExportDestinationFolder()
@@ -1046,11 +1086,30 @@ Dialog {
             function onNotebooksChanged() { refreshNotebooks() }
             function onError(message) {
                 if (newFolderDialog && newFolderDialog.visible) {
-                    if (newFolderIsImport) {
+                    if (newFolderTarget === "import") {
                         importFolderPickerStatus = message
+                    } else if (newFolderTarget === "db") {
+                        if (databaseFilePickerDialog && databaseFilePickerDialog.visible) {
+                            databaseFilePickerStatus = message
+                        } else {
+                            databaseFolderPickerStatus = message
+                        }
                     } else {
                         exportFolderPickerStatus = message
                     }
+                    return
+                }
+                if (databaseFolderPickerDialog && databaseFolderPickerDialog.visible) {
+                    databaseFolderPickerStatus = message
+                    return
+                }
+                if (databaseFilePickerDialog && databaseFilePickerDialog.visible) {
+                    databaseFilePickerStatus = message
+                    return
+                }
+                if (createDatabaseDialog && createDatabaseDialog.visible) {
+                    databaseStatus = message
+                    databaseSucceeded = false
                     return
                 }
                 if (importFolderPickerDialog && importFolderPickerDialog.visible) {
@@ -1076,16 +1135,138 @@ Dialog {
             
             Text {
                 Layout.fillWidth: true
-                text: "Path: " + (DataStore ? DataStore.databasePath() : "N/A")
+                text: "Path: " + (DataStore ? DataStore.databasePath : "N/A")
                 color: ThemeManager.textSecondary
                 font.pixelSize: ThemeManager.fontSizeSmall
                 wrapMode: Text.WrapAnywhere
             }
             
             Text {
-                text: "Schema: v" + (DataStore ? DataStore.schemaVersion() : "?")
+                text: "Schema: " + (DataStore && DataStore.schemaVersion >= 0 ? ("v" + DataStore.schemaVersion) : "N/A")
                 color: ThemeManager.textSecondary
                 font.pixelSize: ThemeManager.fontSizeSmall
+            }
+
+            Text {
+                Layout.fillWidth: true
+                visible: databaseStatus && databaseStatus.length > 0
+                text: databaseStatus
+                color: databaseSucceeded ? ThemeManager.success : ThemeManager.danger
+                font.pixelSize: ThemeManager.fontSizeSmall
+                wrapMode: Text.Wrap
+            }
+
+            Button {
+                Layout.fillWidth: true
+                text: "Move Database…"
+
+                background: Rectangle {
+                    implicitHeight: 40
+                    radius: ThemeManager.radiusSmall
+                    color: parent.pressed ? ThemeManager.surfaceActive : ThemeManager.surfaceHover
+                    border.width: 1
+                    border.color: ThemeManager.border
+                }
+
+                contentItem: Text {
+                    text: parent.text
+                    color: ThemeManager.text
+                    font.pixelSize: ThemeManager.fontSizeNormal
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
+
+                onClicked: {
+                    databaseStatus = ""
+                    databaseSucceeded = false
+                    openDatabaseFolderPicker()
+                }
+            }
+
+            Button {
+                Layout.fillWidth: true
+                text: "Create New Database…"
+
+                background: Rectangle {
+                    implicitHeight: 40
+                    radius: ThemeManager.radiusSmall
+                    color: parent.pressed ? ThemeManager.surfaceActive : ThemeManager.surfaceHover
+                    border.width: 1
+                    border.color: ThemeManager.border
+                }
+
+                contentItem: Text {
+                    text: parent.text
+                    color: ThemeManager.text
+                    font.pixelSize: ThemeManager.fontSizeNormal
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
+
+                onClicked: {
+                    databaseStatus = ""
+                    databaseSucceeded = false
+                    ensureDatabaseFolderPicker()
+                    newDbFileName = "zinc.db"
+                    databaseCreateFolder = DataStore ? DataStore.databaseFolder() : ""
+                    createDatabaseDialog.open()
+                }
+            }
+
+            Button {
+                Layout.fillWidth: true
+                text: "Open Database…"
+
+                background: Rectangle {
+                    implicitHeight: 40
+                    radius: ThemeManager.radiusSmall
+                    color: parent.pressed ? ThemeManager.surfaceActive : ThemeManager.surfaceHover
+                    border.width: 1
+                    border.color: ThemeManager.border
+                }
+
+                contentItem: Text {
+                    text: parent.text
+                    color: ThemeManager.text
+                    font.pixelSize: ThemeManager.fontSizeNormal
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
+
+                onClicked: {
+                    databaseStatus = ""
+                    databaseSucceeded = false
+                    openDatabaseFilePicker()
+                }
+            }
+
+            Button {
+                Layout.fillWidth: true
+                text: "Close Database"
+                enabled: DataStore && DataStore.schemaVersion >= 0
+
+                background: Rectangle {
+                    implicitHeight: 40
+                    radius: ThemeManager.radiusSmall
+                    color: parent.pressed ? ThemeManager.surfaceActive : ThemeManager.surfaceHover
+                    border.width: 1
+                    border.color: ThemeManager.border
+                }
+
+                contentItem: Text {
+                    text: parent.text
+                    color: ThemeManager.text
+                    font.pixelSize: ThemeManager.fontSizeNormal
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
+
+                onClicked: {
+                    if (!DataStore) return
+                    DataStore.closeDatabase()
+                    databaseSucceeded = true
+                    databaseStatus = "Database closed."
+                }
             }
             
             Button {
@@ -1494,7 +1675,7 @@ Dialog {
 	                        enabled: folderPickerCurrentFolder && folderPickerCurrentFolder !== ""
 	                        onClicked: {
 	                            newFolderName = ""
-	                            newFolderIsImport = false
+	                            newFolderTarget = "export"
 	                            exportFolderPickerStatus = ""
 	                            newFolderDialog.open()
 	                        }
@@ -1626,6 +1807,189 @@ Dialog {
             }
         }
 
+        property Dialog _databaseFolderPickerDialog: Dialog {
+            id: databaseFolderPickerDialog
+            title: "Choose Database Folder"
+            anchors.centerIn: parent
+            modal: true
+            standardButtons: Dialog.NoButton
+
+            width: isMobile ? parent.width * 0.95 : Math.min(560, parent.width * 0.9)
+            height: isMobile ? parent.height * 0.85 : Math.min(520, parent.height * 0.85)
+
+            background: Rectangle {
+                color: ThemeManager.surface
+                border.width: isMobile ? 0 : 1
+                border.color: ThemeManager.border
+                radius: ThemeManager.radiusLarge
+            }
+
+            contentItem: ColumnLayout {
+                anchors.margins: ThemeManager.spacingMedium
+                spacing: ThemeManager.spacingSmall
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: ThemeManager.spacingSmall
+
+                    Button {
+                        text: "Up"
+                        enabled: DataStore && databaseFolderPickerCurrentFolder !== "" &&
+                            DataStore.parentFolder(databaseFolderPickerCurrentFolder).toString() !== databaseFolderPickerCurrentFolder.toString()
+                        onClicked: {
+                            if (!DataStore) return
+                            databaseFolderPickerCurrentFolder = DataStore.parentFolder(databaseFolderPickerCurrentFolder)
+                            databaseFolderPickerSelectedFolder = ""
+                        }
+                    }
+
+                    Button {
+                        text: "New Folder…"
+                        enabled: databaseFolderPickerCurrentFolder && databaseFolderPickerCurrentFolder !== ""
+                        onClicked: {
+                            newFolderName = ""
+                            newFolderTarget = "db"
+                            databaseFolderPickerStatus = ""
+                            newFolderDialog.open()
+                        }
+                    }
+
+                    Text {
+                        Layout.fillWidth: true
+                        text: databaseFolderPickerCurrentFolder && databaseFolderPickerCurrentFolder !== ""
+                            ? databaseFolderPickerCurrentFolder.toString().replace("file://", "")
+                            : ""
+                        color: ThemeManager.textSecondary
+                        font.pixelSize: ThemeManager.fontSizeSmall
+                        elide: Text.ElideMiddle
+                    }
+                }
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    color: ThemeManager.background
+                    radius: ThemeManager.radiusSmall
+                    border.width: 1
+                    border.color: ThemeManager.border
+
+                    ListView {
+                        anchors.fill: parent
+                        anchors.margins: ThemeManager.spacingSmall
+                        clip: true
+                        model: FolderListModel {
+                            folder: databaseFolderPickerCurrentFolder
+                            showDirs: true
+                            showFiles: false
+                            sortField: FolderListModel.Name
+                        }
+
+                        delegate: Rectangle {
+                            readonly property string dirUrl: "file://" + filePath
+                            width: ListView.view.width
+                            height: 36
+                            radius: ThemeManager.radiusSmall
+                            color: (databaseFolderPickerSelectedFolder && databaseFolderPickerSelectedFolder.toString() === dirUrl)
+                                ? ThemeManager.surfaceHover
+                                : (rowMouse.containsMouse ? ThemeManager.surfaceHover : "transparent")
+
+                            RowLayout {
+                                anchors.fill: parent
+                                anchors.leftMargin: ThemeManager.spacingSmall
+                                anchors.rightMargin: ThemeManager.spacingSmall
+                                spacing: ThemeManager.spacingSmall
+
+                                Text {
+                                    text: "📁"
+                                    font.pixelSize: ThemeManager.fontSizeSmall
+                                }
+
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: fileName
+                                    color: ThemeManager.text
+                                    font.pixelSize: ThemeManager.fontSizeSmall
+                                    elide: Text.ElideRight
+                                }
+                            }
+
+                            MouseArea {
+                                id: rowMouse
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: databaseFolderPickerSelectedFolder = dirUrl
+                                onDoubleClicked: {
+                                    databaseFolderPickerCurrentFolder = dirUrl
+                                    databaseFolderPickerSelectedFolder = ""
+                                }
+                            }
+                        }
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: ThemeManager.spacingSmall
+
+                    Text {
+                        Layout.fillWidth: true
+                        text: databaseFolderPickerSelectedFolder && databaseFolderPickerSelectedFolder !== ""
+                            ? ("Selected: " + databaseFolderPickerSelectedFolder.toString().replace("file://", ""))
+                            : "Selected: (current folder)"
+                        color: ThemeManager.textSecondary
+                        font.pixelSize: ThemeManager.fontSizeSmall
+                        elide: Text.ElideMiddle
+                    }
+                }
+
+                Text {
+                    Layout.fillWidth: true
+                    visible: databaseFolderPickerStatus && databaseFolderPickerStatus.length > 0
+                    text: databaseFolderPickerStatus
+                    color: ThemeManager.danger
+                    font.pixelSize: ThemeManager.fontSizeSmall
+                    wrapMode: Text.Wrap
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: ThemeManager.spacingSmall
+
+                    Item { Layout.fillWidth: true }
+
+                    Button {
+                        text: "Cancel"
+                        onClicked: databaseFolderPickerDialog.close()
+                    }
+
+                    Button {
+                        text: databaseFolderPickerMode === "move" ? "Move Here" : "Choose"
+                        enabled: databaseFolderPickerCurrentFolder && databaseFolderPickerCurrentFolder !== ""
+                        onClicked: {
+                            if (!DataStore) return
+                            const chosen = (databaseFolderPickerSelectedFolder && databaseFolderPickerSelectedFolder !== "")
+                                ? databaseFolderPickerSelectedFolder
+                                : databaseFolderPickerCurrentFolder
+                            databaseFolderPickerStatus = ""
+                            if (databaseFolderPickerMode === "move") {
+                                const ok = DataStore.moveDatabaseToFolder(chosen)
+                                if (ok) {
+                                    databaseSucceeded = true
+                                    databaseStatus = "Database moved."
+                                    refreshNotebooks()
+                                    databaseFolderPickerDialog.close()
+                                }
+                            } else {
+                                databaseCreateFolder = chosen
+                                databaseFolderPickerDialog.close()
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         property Dialog _newFolderDialog: Dialog {
             id: newFolderDialog
             title: "New Folder"
@@ -1664,29 +2028,323 @@ Dialog {
                         onClicked: newFolderDialog.close()
                     }
 
+	                    Button {
+	                        text: "Create"
+	                        enabled: newFolderName && newFolderName.trim().length > 0
+	                        onClicked: {
+	                            if (!DataStore) return
+	                            const parentUrl = newFolderTarget === "import"
+	                                ? importFolderPickerCurrentFolder
+	                                : (newFolderTarget === "db" ? databaseFolderPickerCurrentFolder : folderPickerCurrentFolder)
+	                            const created = DataStore.createFolder(parentUrl, newFolderName)
+	                            if (created && created.toString && created.toString() !== "") {
+	                                if (newFolderTarget === "import") {
+	                                    importFolderPickerCurrentFolder = created
+	                                    importFolderPickerSelectedFolder = ""
+	                                    importFolderPickerStatus = ""
+	                                } else if (newFolderTarget === "db") {
+	                                    if (databaseFilePickerDialog && databaseFilePickerDialog.visible) {
+	                                        databaseFilePickerCurrentFolder = created
+	                                        databaseFilePickerSelectedFile = ""
+	                                        databaseFilePickerStatus = ""
+	                                    } else {
+	                                        databaseFolderPickerCurrentFolder = created
+	                                        databaseFolderPickerSelectedFolder = ""
+	                                        databaseFolderPickerStatus = ""
+	                                    }
+	                                } else {
+	                                    folderPickerCurrentFolder = created
+	                                    folderPickerSelectedFolder = ""
+	                                    exportFolderPickerStatus = ""
+	                                }
+	                            } else {
+	                                const msg = "Could not create folder."
+	                                if (newFolderTarget === "import") importFolderPickerStatus = msg
+	                                else if (newFolderTarget === "db") {
+	                                    if (databaseFilePickerDialog && databaseFilePickerDialog.visible) databaseFilePickerStatus = msg
+	                                    else databaseFolderPickerStatus = msg
+	                                }
+	                                else exportFolderPickerStatus = msg
+	                            }
+	                            newFolderDialog.close()
+	                        }
+	                    }
+                }
+            }
+        }
+
+        property Dialog _createDatabaseDialog: Dialog {
+            id: createDatabaseDialog
+            title: "Create New Database"
+            anchors.centerIn: parent
+            modal: true
+            standardButtons: Dialog.NoButton
+
+            width: isMobile ? parent.width * 0.95 : Math.min(520, parent.width * 0.9)
+
+            background: Rectangle {
+                color: ThemeManager.surface
+                border.width: isMobile ? 0 : 1
+                border.color: ThemeManager.border
+                radius: ThemeManager.radiusLarge
+            }
+
+            contentItem: ColumnLayout {
+                anchors.margins: ThemeManager.spacingMedium
+                spacing: ThemeManager.spacingMedium
+
+                SettingsRow {
+                    label: "Folder"
+                    Button {
+                        text: "Choose Folder…"
+                        onClicked: {
+                            databaseFolderPickerStatus = ""
+                            openDatabaseCreateFolderPicker()
+                        }
+                    }
+                }
+
+                Text {
+                    Layout.fillWidth: true
+                    text: databaseCreateFolder && databaseCreateFolder !== ""
+                        ? databaseCreateFolder.toString().replace("file://", "")
+                        : "(not selected)"
+                    color: ThemeManager.textSecondary
+                    font.pixelSize: ThemeManager.fontSizeSmall
+                    elide: Text.ElideMiddle
+                }
+
+                SettingsRow {
+                    label: "File name"
+                    TextField {
+                        Layout.fillWidth: true
+                        placeholderText: "zinc.db"
+                        text: newDbFileName
+                        onTextChanged: newDbFileName = text
+                    }
+                }
+
+                Text {
+                    Layout.fillWidth: true
+                    visible: databaseFolderPickerStatus && databaseFolderPickerStatus.length > 0
+                    text: databaseFolderPickerStatus
+                    color: ThemeManager.danger
+                    font.pixelSize: ThemeManager.fontSizeSmall
+                    wrapMode: Text.Wrap
+                }
+
+                Text {
+                    Layout.fillWidth: true
+                    visible: databaseStatus && databaseStatus.length > 0
+                    text: databaseStatus
+                    color: databaseSucceeded ? ThemeManager.success : ThemeManager.danger
+                    font.pixelSize: ThemeManager.fontSizeSmall
+                    wrapMode: Text.Wrap
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: ThemeManager.spacingSmall
+
+                    Item { Layout.fillWidth: true }
+
+                    Button {
+                        text: "Cancel"
+                        onClicked: createDatabaseDialog.close()
+                    }
+
                     Button {
                         text: "Create"
-                        enabled: newFolderName && newFolderName.trim().length > 0
+                        enabled: databaseCreateFolder && databaseCreateFolder !== "" && newDbFileName && newDbFileName.trim().length > 0
                         onClicked: {
                             if (!DataStore) return
-                            const parentUrl = newFolderIsImport ? importFolderPickerCurrentFolder : folderPickerCurrentFolder
-                            const created = DataStore.createFolder(parentUrl, newFolderName)
-                            if (created && created.toString && created.toString() !== "") {
-                                if (newFolderIsImport) {
-                                    importFolderPickerCurrentFolder = created
-                                    importFolderPickerSelectedFolder = ""
-                                    importFolderPickerStatus = ""
-                                } else {
-                                    folderPickerCurrentFolder = created
-                                    folderPickerSelectedFolder = ""
-                                    exportFolderPickerStatus = ""
-                                }
-                            } else {
-                                const msg = "Could not create folder."
-                                if (newFolderIsImport) importFolderPickerStatus = msg
-                                else exportFolderPickerStatus = msg
+                            databaseStatus = ""
+                            databaseSucceeded = false
+                            const ok = DataStore.createNewDatabase(databaseCreateFolder, newDbFileName)
+                            if (ok) {
+                                databaseSucceeded = true
+                                databaseStatus = "Database created."
+                                refreshNotebooks()
+                                createDatabaseDialog.close()
                             }
-                            newFolderDialog.close()
+                        }
+                    }
+                }
+            }
+        }
+
+        property Dialog _databaseFilePickerDialog: Dialog {
+            id: databaseFilePickerDialog
+            title: "Open Database"
+            anchors.centerIn: parent
+            modal: true
+            standardButtons: Dialog.NoButton
+
+            width: isMobile ? parent.width * 0.95 : Math.min(560, parent.width * 0.9)
+            height: isMobile ? parent.height * 0.85 : Math.min(520, parent.height * 0.85)
+
+            background: Rectangle {
+                color: ThemeManager.surface
+                border.width: isMobile ? 0 : 1
+                border.color: ThemeManager.border
+                radius: ThemeManager.radiusLarge
+            }
+
+            contentItem: ColumnLayout {
+                anchors.margins: ThemeManager.spacingMedium
+                spacing: ThemeManager.spacingSmall
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: ThemeManager.spacingSmall
+
+                    Button {
+                        text: "Up"
+                        enabled: DataStore && databaseFilePickerCurrentFolder !== "" &&
+                            DataStore.parentFolder(databaseFilePickerCurrentFolder).toString() !== databaseFilePickerCurrentFolder.toString()
+                        onClicked: {
+                            if (!DataStore) return
+                            databaseFilePickerCurrentFolder = DataStore.parentFolder(databaseFilePickerCurrentFolder)
+                            databaseFilePickerSelectedFile = ""
+                        }
+                    }
+
+                    Button {
+                        text: "New Folder…"
+                        enabled: databaseFilePickerCurrentFolder && databaseFilePickerCurrentFolder !== ""
+                        onClicked: {
+                            newFolderName = ""
+                            newFolderTarget = "db"
+                            databaseFilePickerStatus = ""
+                            // Reuse new-folder dialog against current folder.
+                            databaseFolderPickerCurrentFolder = databaseFilePickerCurrentFolder
+                            databaseFolderPickerSelectedFolder = ""
+                            newFolderDialog.open()
+                        }
+                    }
+
+                    Text {
+                        Layout.fillWidth: true
+                        text: databaseFilePickerCurrentFolder && databaseFilePickerCurrentFolder !== ""
+                            ? databaseFilePickerCurrentFolder.toString().replace("file://", "")
+                            : ""
+                        color: ThemeManager.textSecondary
+                        font.pixelSize: ThemeManager.fontSizeSmall
+                        elide: Text.ElideMiddle
+                    }
+                }
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    color: ThemeManager.background
+                    radius: ThemeManager.radiusSmall
+                    border.width: 1
+                    border.color: ThemeManager.border
+
+                    ListView {
+                        anchors.fill: parent
+                        anchors.margins: ThemeManager.spacingSmall
+                        clip: true
+                        model: FolderListModel {
+                            folder: databaseFilePickerCurrentFolder
+                            showDirs: true
+                            showFiles: true
+                            nameFilters: ["*.db", "*.sqlite", "*.sqlite3"]
+                            sortField: FolderListModel.Name
+                        }
+
+                        delegate: Rectangle {
+                            readonly property string itemUrl: "file://" + filePath
+                            width: ListView.view.width
+                            height: 36
+                            radius: ThemeManager.radiusSmall
+                            color: (databaseFilePickerSelectedFile && databaseFilePickerSelectedFile.toString() === itemUrl)
+                                ? ThemeManager.surfaceHover
+                                : (rowMouse.containsMouse ? ThemeManager.surfaceHover : "transparent")
+
+                            RowLayout {
+                                anchors.fill: parent
+                                anchors.leftMargin: ThemeManager.spacingSmall
+                                anchors.rightMargin: ThemeManager.spacingSmall
+                                spacing: ThemeManager.spacingSmall
+
+                                Text {
+                                    text: fileIsDir ? "📁" : "📄"
+                                    font.pixelSize: ThemeManager.fontSizeSmall
+                                }
+
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: fileName
+                                    color: ThemeManager.text
+                                    font.pixelSize: ThemeManager.fontSizeSmall
+                                    elide: Text.ElideRight
+                                }
+                            }
+
+                            MouseArea {
+                                id: rowMouse
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: databaseFilePickerSelectedFile = itemUrl
+                                onDoubleClicked: {
+                                    if (fileIsDir) {
+                                        databaseFilePickerCurrentFolder = itemUrl
+                                        databaseFilePickerSelectedFile = ""
+                                        return
+                                    }
+                                    databaseFilePickerSelectedFile = itemUrl
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Text {
+                    Layout.fillWidth: true
+                    text: databaseFilePickerSelectedFile && databaseFilePickerSelectedFile !== ""
+                        ? ("Selected: " + databaseFilePickerSelectedFile.toString().replace("file://", ""))
+                        : "Selected: (none)"
+                    color: ThemeManager.textSecondary
+                    font.pixelSize: ThemeManager.fontSizeSmall
+                    elide: Text.ElideMiddle
+                }
+
+                Text {
+                    Layout.fillWidth: true
+                    visible: databaseFilePickerStatus && databaseFilePickerStatus.length > 0
+                    text: databaseFilePickerStatus
+                    color: ThemeManager.danger
+                    font.pixelSize: ThemeManager.fontSizeSmall
+                    wrapMode: Text.Wrap
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: ThemeManager.spacingSmall
+
+                    Item { Layout.fillWidth: true }
+
+                    Button {
+                        text: "Cancel"
+                        onClicked: databaseFilePickerDialog.close()
+                    }
+
+                    Button {
+                        text: "Open"
+                        enabled: databaseFilePickerSelectedFile && databaseFilePickerSelectedFile !== "" && !databaseFilePickerSelectedFile.toString().endsWith("/")
+                        onClicked: {
+                            if (!DataStore) return
+                            databaseFilePickerStatus = ""
+                            const ok = DataStore.openDatabaseFile(databaseFilePickerSelectedFile)
+                            if (ok) {
+                                databaseSucceeded = true
+                                databaseStatus = "Database opened."
+                                refreshNotebooks()
+                                databaseFilePickerDialog.close()
+                            }
                         }
                     }
                 }
@@ -1733,7 +2391,7 @@ Dialog {
 	                        enabled: importFolderPickerCurrentFolder && importFolderPickerCurrentFolder !== ""
 	                        onClicked: {
 	                            newFolderName = ""
-	                            newFolderIsImport = true
+	                            newFolderTarget = "import"
 	                            importFolderPickerStatus = ""
 	                            newFolderDialog.open()
 	                        }

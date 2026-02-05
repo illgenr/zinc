@@ -714,6 +714,14 @@ FocusScope {
             })
         }
     }
+
+    function clearPage() {
+        pendingRemoteRefresh = false
+        dirty = false
+        pageId = ""
+        blockModel.clearUndoStack()
+        blockModel.clear()
+    }
     
     function saveBlocks() {
         if (!pageId || pageId === "") return

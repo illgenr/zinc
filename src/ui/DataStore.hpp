@@ -18,6 +18,9 @@ class DataStore : public QObject {
     Q_OBJECT
     QML_ELEMENT
     QML_SINGLETON
+
+    Q_PROPERTY(QString databasePath READ databasePath NOTIFY databasePathChanged)
+    Q_PROPERTY(int schemaVersion READ schemaVersion NOTIFY schemaVersionChanged)
     
 public:
     explicit DataStore(QObject* parent = nullptr);
@@ -146,6 +149,11 @@ public:
     Q_INVOKABLE bool resetDatabase();
     Q_INVOKABLE bool runMigrations();
     Q_INVOKABLE int schemaVersion() const;
+    Q_INVOKABLE QUrl databaseFolder() const;
+    Q_INVOKABLE bool moveDatabaseToFolder(const QUrl& folder);
+    Q_INVOKABLE bool openDatabaseFile(const QUrl& file);
+    Q_INVOKABLE bool createNewDatabase(const QUrl& folder, const QString& fileName);
+    Q_INVOKABLE void closeDatabase();
 
     // Export folder preferences
     // - defaults to user's home directory when unset/invalid
@@ -181,6 +189,8 @@ public:
     Q_INVOKABLE QUrl createFolder(const QUrl& parentFolder, const QString& name);
     
 signals:
+    void databasePathChanged();
+    void schemaVersionChanged();
     void pagesChanged();
     void pageContentChanged(const QString& pageId);
     void attachmentsChanged();
