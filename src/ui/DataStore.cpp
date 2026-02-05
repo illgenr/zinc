@@ -96,6 +96,56 @@ QString normalize_export_format(const QString& format) {
     return {};
 }
 
+QString read_utf8_text_file_or_empty(const QString& path) {
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) {
+        qWarning() << "DataStore: Failed to open default page resource:" << path;
+        return QStringLiteral("");
+    }
+    auto bytes = file.readAll();
+    // Trim UTF-8 BOM when present.
+    if (bytes.size() >= 3 &&
+        static_cast<unsigned char>(bytes[0]) == 0xEF &&
+        static_cast<unsigned char>(bytes[1]) == 0xBB &&
+        static_cast<unsigned char>(bytes[2]) == 0xBF) {
+        bytes = bytes.mid(3);
+    }
+    return QString::fromUtf8(bytes);
+}
+
+QString default_page_resource_path(const char* relativePath) {
+    return QStringLiteral(":/zinc/") + QString::fromLatin1(relativePath);
+}
+
+QString default_notebook_id_if_exists(QSqlDatabase& db) {
+    QSqlQuery q(db);
+    q.prepare("SELECT 1 FROM notebooks WHERE id = ? LIMIT 1");
+    q.addBindValue(QString::fromLatin1(kDefaultNotebookId));
+    if (q.exec() && q.next()) {
+        return QString::fromLatin1(kDefaultNotebookId);
+    }
+    return QStringLiteral("");
+}
+
+bool is_fresh_database_for_default_seeding(QSqlDatabase& db) {
+    QSqlQuery q(db);
+    if (!q.exec("SELECT COUNT(*) FROM pages")) return false;
+    if (!q.next()) return false;
+    if (q.value(0).toInt() != 0) return false;
+    q.finish();
+
+    if (!q.exec("SELECT COUNT(*) FROM deleted_pages")) return false;
+    if (!q.next()) return false;
+    if (q.value(0).toInt() != 0) return false;
+    q.finish();
+
+    if (!q.exec("SELECT COUNT(*) FROM deleted_notebooks")) return false;
+    if (!q.next()) return false;
+    if (q.value(0).toInt() != 0) return false;
+
+    return true;
+}
+
 QString sanitize_path_component(const QString& input) {
     const auto trimmed = input.trimmed();
     if (trimmed.isEmpty()) return {};
@@ -929,6 +979,9 @@ bool DataStore::initialize() {
     createTables();
     m_ready = true;
     runMigrations();
+    if (is_fresh_database_for_default_seeding(m_db)) {
+        seedDefaultPages();
+    }
     ensureDefaultNotebook();
     qDebug() << "DataStore: Database initialized successfully";
     emit databasePathChanged();
@@ -2306,6 +2359,8 @@ void DataStore::applyPageUpdates(const QVariantList& pages) {
     QSet<QString> conflictPageIds;
     m_db.transaction();
 
+    const auto defaultNotebookFallback = default_notebook_id_if_exists(m_db);
+
     QSqlQuery tombstoneSelect(m_db);
     tombstoneSelect.prepare("SELECT deleted_at FROM deleted_pages WHERE page_id = ?");
 
@@ -2390,7 +2445,7 @@ void DataStore::applyPageUpdates(const QVariantList& pages) {
         const bool hasNotebookId = page.contains(QStringLiteral("notebookId"));
         const QString remoteNotebook = hasNotebookId
             ? page.value(QStringLiteral("notebookId")).toString()
-            : ensureDefaultNotebook();
+            : defaultNotebookFallback;
         const QString remoteUpdated = normalize_timestamp(page.value("updatedAt"));
         QDateTime remoteTime = parse_timestamp(remoteUpdated);
         const QString remoteTitle = normalize_title(page.value("title"));
@@ -3160,15 +3215,16 @@ bool DataStore::seedDefaultPages() {
         const char* id;
         const char* title;
         const char* parent;
+        const char* resourceRelativePath;
         int depth;
         int sortOrder;
     };
 
     static constexpr DefaultPage defaults[] = {
-        {"1", "Getting Started", "", 0, 0},
-        {"2", "Projects", "", 0, 1},
-        {"3", "Work Project", "2", 1, 2},
-        {"4", "Personal", "", 0, 3},
+        {"1", "Getting Started", "", "default_pages/My_Notebook/Getting_Started.md", 0, 0},
+        {"2", "Projects", "", "default_pages/My_Notebook/Projects.md", 0, 1},
+        {"3", "Work Project", "2", "default_pages/My_Notebook/Work_Project.md", 1, 2},
+        {"4", "Personal", "", "default_pages/My_Notebook/Personal.md", 0, 3},
     };
 
     bool insertedAny = false;
@@ -3177,21 +3233,23 @@ bool DataStore::seedDefaultPages() {
     QSqlQuery insert(m_db);
     insert.prepare(R"SQL(
         INSERT INTO pages (id, notebook_id, title, parent_id, content_markdown, depth, sort_order, created_at, updated_at)
-        VALUES (?, ?, ?, ?, '', ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO NOTHING;
     )SQL");
 
     const auto notebookId = ensureDefaultNotebook();
     const auto seedTs = QString::fromLatin1(kDefaultPagesSeedTimestamp);
     for (const auto& page : defaults) {
+        const auto content = read_utf8_text_file_or_empty(default_page_resource_path(page.resourceRelativePath));
         insert.bindValue(0, QString::fromLatin1(page.id));
         insert.bindValue(1, notebookId);
         insert.bindValue(2, QString::fromLatin1(page.title));
         insert.bindValue(3, QString::fromLatin1(page.parent));
-        insert.bindValue(4, page.depth);
-        insert.bindValue(5, page.sortOrder);
-        insert.bindValue(6, seedTs);
+        insert.bindValue(4, content);
+        insert.bindValue(5, page.depth);
+        insert.bindValue(6, page.sortOrder);
         insert.bindValue(7, seedTs);
+        insert.bindValue(8, seedTs);
         if (!insert.exec()) {
             qWarning() << "DataStore: seedDefaultPages failed:" << insert.lastError().text();
         } else if (insert.numRowsAffected() > 0) {
@@ -3280,7 +3338,6 @@ QString DataStore::createNotebook(const QString& name) {
 void DataStore::renameNotebook(const QString& notebookId, const QString& name) {
     if (!m_ready) return;
     if (notebookId.isEmpty()) return;
-    if (notebookId == QString::fromLatin1(kDefaultNotebookId)) return;
 
     const auto nbName = normalize_notebook_name(name);
     const auto now = now_timestamp_utc();
@@ -3300,7 +3357,6 @@ void DataStore::renameNotebook(const QString& notebookId, const QString& name) {
 void DataStore::deleteNotebook(const QString& notebookId) {
     if (!m_ready) return;
     if (notebookId.isEmpty()) return;
-    if (notebookId == QString::fromLatin1(kDefaultNotebookId)) return;
 
     const auto deletedAt = now_timestamp_utc();
     m_db.transaction();
@@ -4809,12 +4865,19 @@ QUrl DataStore::createFolder(const QUrl& parentFolder, const QString& name) {
 QString DataStore::ensureDefaultNotebook() {
     if (!m_ready) return QString::fromLatin1(kDefaultNotebookId);
 
+    // If the user deleted the default notebook, never recreate it implicitly.
+    QSqlQuery tombstone(m_db);
+    tombstone.prepare("SELECT 1 FROM deleted_notebooks WHERE notebook_id = ? LIMIT 1");
+    tombstone.addBindValue(QString::fromLatin1(kDefaultNotebookId));
+    if (tombstone.exec() && tombstone.next()) {
+        return QString::fromLatin1(kDefaultNotebookId);
+    }
+
     QSqlQuery ensure(m_db);
     ensure.prepare(R"SQL(
         INSERT INTO notebooks (id, name, sort_order, created_at, updated_at)
         VALUES (?, ?, 0, ?, ?)
-        ON CONFLICT(id) DO UPDATE SET
-            name = excluded.name;
+        ON CONFLICT(id) DO NOTHING;
     )SQL");
     const auto now = now_timestamp_utc();
     ensure.addBindValue(QString::fromLatin1(kDefaultNotebookId));

@@ -75,8 +75,6 @@ TEST_CASE("DataStore: seedDefaultPages uses old timestamps", "[qml][datastore]")
     REQUIRE(store.initialize());
     REQUIRE(store.resetDatabase());
 
-    REQUIRE(store.seedDefaultPages());
-
     const auto seedTs = QStringLiteral("1900-01-01 00:00:00.000");
     REQUIRE(titleForPage(store, "1") == QStringLiteral("Getting Started"));
     REQUIRE(titleForPage(store, "2") == QStringLiteral("Projects"));

@@ -272,6 +272,20 @@ add_library(zinc_ui STATIC
     src/platform/android/android_utils.cpp
 )
 
+set(ZINC_DEFAULT_PAGE_FILES
+    src/assets/default_pages/My_Notebook/Getting_Started.md
+    src/assets/default_pages/My_Notebook/Projects.md
+    src/assets/default_pages/My_Notebook/Work_Project.md
+    src/assets/default_pages/My_Notebook/Personal.md
+)
+
+qt_add_resources(zinc_ui zinc_default_pages
+    PREFIX "/zinc"
+    BASE "${CMAKE_CURRENT_SOURCE_DIR}/src/assets"
+    FILES
+        ${ZINC_DEFAULT_PAGE_FILES}
+)
+
 # CommonMark renderer (vendored cmark)
 set(CMARK_LIB_FUZZER OFF CACHE BOOL "" FORCE)
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
@@ -576,9 +590,11 @@ if(ZINC_BUILD_TESTS)
 			        tests/qml/test_datastore_sync.cpp
                     tests/qml/test_datastore_lifetime.cpp
 			        tests/qml/test_datastore_notebooks.cpp
+			        tests/qml/test_datastore_default_pages_content.cpp
 			        tests/qml/test_datastore_export.cpp
 			        tests/qml/test_datastore_import.cpp
 			        tests/qml/test_export_folder_settings.cpp
+                    tests/qml/test_settings_dialog_path_pickings_qml.cpp
 			        tests/qml/test_attachments_disk_storage.cpp
 			        tests/qml/test_block_editor_cursor_visibility_qml.cpp
 			        tests/qml/test_block_editor_enter_logic_qml.cpp

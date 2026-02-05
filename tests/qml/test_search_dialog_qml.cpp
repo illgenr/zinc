@@ -157,7 +157,7 @@ TEST_CASE("QML: SearchDialog searches titles and content as you type", "[qml]") 
         "    Component.onCompleted: {\n"
         "        DataStore.resetDatabase()\n"
         "        DataStore.savePage({ pageId: \"p1\", title: \"Alpha\", parentId: \"\", contentMarkdown: \"\" })\n"
-        "        DataStore.savePageContentMarkdown(\"p1\", \"# Welcome\\n\\nHello world\")\n"
+        "        DataStore.savePageContentMarkdown(\"p1\", \"# SpecialHeading42\\n\\nHello world\")\n"
         "        DataStore.savePage({ pageId: \"p2\", title: \"Beta\", parentId: \"\", contentMarkdown: \"\" })\n"
         "        DataStore.savePageContentMarkdown(\"p2\", \"Zebra stripes\")\n"
         "    }\n"
@@ -192,7 +192,7 @@ TEST_CASE("QML: SearchDialog searches titles and content as you type", "[qml]") 
     QTest::qWait(300);
     REQUIRE(resultsList->property("count").toInt() == 1);
 
-    searchField->setProperty("text", QStringLiteral("Welcome"));
+    searchField->setProperty("text", QStringLiteral("SpecialHeading42"));
     QTest::qWait(300);
     REQUIRE(resultsList->property("count").toInt() == 1);
 

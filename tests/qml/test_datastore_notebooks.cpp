@@ -47,8 +47,6 @@ TEST_CASE("DataStore: seedDefaultPages creates My Notebook and assigns pages", "
     const auto defaultNotebookId = store.defaultNotebookId();
     REQUIRE_FALSE(defaultNotebookId.isEmpty());
 
-    REQUIRE(store.seedDefaultPages());
-
     const auto notebooks = store.getAllNotebooks();
     REQUIRE(notebookNameById(notebooks, defaultNotebookId) == QStringLiteral("My Notebook"));
 
@@ -105,4 +103,35 @@ TEST_CASE("DataStore: applyPageUpdates keeps explicit empty notebookId", "[qml][
 
     const auto retrieved = store.getPage(QStringLiteral("p_empty_nb"));
     REQUIRE(retrieved.value("notebookId").toString() == QStringLiteral(""));
+}
+
+TEST_CASE("DataStore: can rename and delete the initial My Notebook", "[qml][datastore][notebooks]") {
+    zinc::ui::DataStore store;
+    REQUIRE(store.initialize());
+    REQUIRE(store.resetDatabase());
+
+    const auto defaultNotebookId = store.defaultNotebookId();
+    REQUIRE_FALSE(defaultNotebookId.isEmpty());
+
+    store.renameNotebook(defaultNotebookId, QStringLiteral("Renamed"));
+    {
+        const auto notebooks = store.getAllNotebooks();
+        REQUIRE(notebookNameById(notebooks, defaultNotebookId) == QStringLiteral("Renamed"));
+    }
+
+    store.deleteNotebook(defaultNotebookId);
+    {
+        const auto notebooks = store.getAllNotebooks();
+        REQUIRE(notebookNameById(notebooks, defaultNotebookId).isEmpty());
+    }
+
+    QVariantList incoming;
+    incoming.append(makePage("p_no_nb_after_delete",
+                             QStringLiteral("Hello"),
+                             QStringLiteral("2026-01-01 00:00:00.000"),
+                             QStringLiteral("Body")));
+    store.applyPageUpdates(incoming);
+
+    const auto page = store.getPage(QStringLiteral("p_no_nb_after_delete"));
+    REQUIRE(page.value("notebookId").toString() == QStringLiteral(""));
 }

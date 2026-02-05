@@ -965,6 +965,7 @@ Dialog {
         property string exportFolderPickerStatus: ""
         property url folderPickerCurrentFolder: ""
         property url folderPickerSelectedFolder: ""
+        property string exportFolderPickerPathText: ""
         property url importSourceFolder: ""
         property int importFormatIndex: 0 // 0=auto, 1=markdown, 2=html
         property bool importReplaceExisting: false
@@ -973,6 +974,7 @@ Dialog {
         property string importFolderPickerStatus: ""
         property url importFolderPickerCurrentFolder: ""
         property url importFolderPickerSelectedFolder: ""
+        property string importFolderPickerPathText: ""
         property string newFolderName: ""
         property string newFolderTarget: "export" // export | import | db
         property string databaseStatus: ""
@@ -981,11 +983,38 @@ Dialog {
         property string databaseFolderPickerMode: "move" // move | select
         property url databaseFolderPickerCurrentFolder: ""
         property url databaseFolderPickerSelectedFolder: ""
+        property string databaseFolderPickerPathText: ""
         property url databaseCreateFolder: ""
         property string newDbFileName: "zinc.db"
         property string databaseFilePickerStatus: ""
         property url databaseFilePickerCurrentFolder: ""
         property url databaseFilePickerSelectedFile: ""
+        property string databaseFilePickerPathText: ""
+
+        function _normalizePathText(text) {
+            return text ? text.trim() : ""
+        }
+
+        function _localPathFromUrl(url) {
+            if (!url || url === "") return ""
+            const s = url.toString ? url.toString() : ("" + url)
+            return s.replace("file://", "")
+        }
+
+        function _urlFromUserPathText(text) {
+            const t = _normalizePathText(text)
+            if (t === "") return ""
+            if (t.indexOf("file:") === 0) return t
+            return "file://" + t
+        }
+
+        function _looksLikeFilePath(pathText) {
+            const t = _normalizePathText(pathText)
+            if (t === "" || t.endsWith("/")) return false
+            const lastSlash = Math.max(t.lastIndexOf("/"), t.lastIndexOf("\\"))
+            const lastDot = t.lastIndexOf(".")
+            return lastDot > lastSlash
+        }
 
         function refreshNotebooks() {
             notebooksModel.clear()
@@ -1028,6 +1057,7 @@ Dialog {
             exportFolderPickerStatus = ""
             folderPickerCurrentFolder = exportDestinationFolder
             folderPickerSelectedFolder = ""
+            exportFolderPickerPathText = _localPathFromUrl(folderPickerCurrentFolder)
             exportFolderPickerDialog.open()
         }
 
@@ -1043,6 +1073,7 @@ Dialog {
             importFolderPickerStatus = ""
             importFolderPickerCurrentFolder = importSourceFolder
             importFolderPickerSelectedFolder = ""
+            importFolderPickerPathText = _localPathFromUrl(importFolderPickerCurrentFolder)
             importFolderPickerDialog.open()
         }
 
@@ -1057,12 +1088,14 @@ Dialog {
         function openDatabaseFolderPicker() {
             databaseFolderPickerMode = "move"
             ensureDatabaseFolderPicker()
+            databaseFolderPickerPathText = _localPathFromUrl(databaseFolderPickerCurrentFolder)
             databaseFolderPickerDialog.open()
         }
 
         function openDatabaseCreateFolderPicker() {
             databaseFolderPickerMode = "select"
             ensureDatabaseFolderPicker()
+            databaseFolderPickerPathText = _localPathFromUrl(databaseFolderPickerCurrentFolder)
             databaseFolderPickerDialog.open()
         }
 
@@ -1072,6 +1105,7 @@ Dialog {
             databaseFilePickerCurrentFolder = hasFolder ? folder : (DataStore ? DataStore.exportLastFolder() : "")
             databaseFilePickerSelectedFile = ""
             databaseFilePickerStatus = ""
+            databaseFilePickerPathText = _localPathFromUrl(databaseFilePickerCurrentFolder)
             databaseFilePickerDialog.open()
         }
 
@@ -1667,6 +1701,7 @@ Dialog {
                             if (!DataStore) return
                             folderPickerCurrentFolder = DataStore.parentFolder(folderPickerCurrentFolder)
                             folderPickerSelectedFolder = ""
+                            exportFolderPickerPathText = _localPathFromUrl(folderPickerCurrentFolder)
                         }
 	                    }
 
@@ -1681,14 +1716,22 @@ Dialog {
 	                        }
 	                    }
 
-	                    Text {
+                        TextField {
+                            objectName: "exportFolderPickerPathField"
 	                        Layout.fillWidth: true
-	                        text: folderPickerCurrentFolder && folderPickerCurrentFolder !== ""
-	                            ? folderPickerCurrentFolder.toString().replace("file://", "")
-                            : ""
+                            placeholderText: "Path"
+                            text: exportFolderPickerPathText
+                            selectByMouse: true
+                            onTextChanged: exportFolderPickerPathText = text
+                            onAccepted: {
+                                const url = _urlFromUserPathText(exportFolderPickerPathText)
+                                if (!url || url === "") return
+                                exportFolderPickerStatus = ""
+                                folderPickerCurrentFolder = url
+                                folderPickerSelectedFolder = ""
+                            }
                         color: ThemeManager.textSecondary
                         font.pixelSize: ThemeManager.fontSizeSmall
-                        elide: Text.ElideMiddle
                     }
                 }
 
@@ -1706,9 +1749,12 @@ Dialog {
                         anchors.margins: ThemeManager.spacingSmall
                         clip: true
                         model: FolderListModel {
+                            objectName: "exportFolderListModel"
                             folder: folderPickerCurrentFolder
                             showDirs: true
                             showFiles: false
+                            showHidden: true
+                            showDotAndDotDot: false
                             sortField: FolderListModel.Name
                         }
 
@@ -1750,6 +1796,7 @@ Dialog {
 	                                onDoubleClicked: {
 	                                    folderPickerCurrentFolder = dirUrl
 	                                    folderPickerSelectedFolder = ""
+                                        exportFolderPickerPathText = _localPathFromUrl(folderPickerCurrentFolder)
 	                                }
 	                            }
 	                        }
@@ -1840,6 +1887,7 @@ Dialog {
                             if (!DataStore) return
                             databaseFolderPickerCurrentFolder = DataStore.parentFolder(databaseFolderPickerCurrentFolder)
                             databaseFolderPickerSelectedFolder = ""
+                            databaseFolderPickerPathText = _localPathFromUrl(databaseFolderPickerCurrentFolder)
                         }
                     }
 
@@ -1854,14 +1902,22 @@ Dialog {
                         }
                     }
 
-                    Text {
+                    TextField {
+                        objectName: "databaseFolderPickerPathField"
                         Layout.fillWidth: true
-                        text: databaseFolderPickerCurrentFolder && databaseFolderPickerCurrentFolder !== ""
-                            ? databaseFolderPickerCurrentFolder.toString().replace("file://", "")
-                            : ""
+                        placeholderText: "Path"
+                        text: databaseFolderPickerPathText
+                        selectByMouse: true
+                        onTextChanged: databaseFolderPickerPathText = text
+                        onAccepted: {
+                            const url = _urlFromUserPathText(databaseFolderPickerPathText)
+                            if (!url || url === "") return
+                            databaseFolderPickerStatus = ""
+                            databaseFolderPickerCurrentFolder = url
+                            databaseFolderPickerSelectedFolder = ""
+                        }
                         color: ThemeManager.textSecondary
                         font.pixelSize: ThemeManager.fontSizeSmall
-                        elide: Text.ElideMiddle
                     }
                 }
 
@@ -1878,9 +1934,12 @@ Dialog {
                         anchors.margins: ThemeManager.spacingSmall
                         clip: true
                         model: FolderListModel {
+                            objectName: "databaseFolderListModel"
                             folder: databaseFolderPickerCurrentFolder
                             showDirs: true
                             showFiles: false
+                            showHidden: true
+                            showDotAndDotDot: false
                             sortField: FolderListModel.Name
                         }
 
@@ -1922,6 +1981,7 @@ Dialog {
                                 onDoubleClicked: {
                                     databaseFolderPickerCurrentFolder = dirUrl
                                     databaseFolderPickerSelectedFolder = ""
+                                    databaseFolderPickerPathText = _localPathFromUrl(databaseFolderPickerCurrentFolder)
                                 }
                             }
                         }
@@ -2042,20 +2102,24 @@ Dialog {
 	                                    importFolderPickerCurrentFolder = created
 	                                    importFolderPickerSelectedFolder = ""
 	                                    importFolderPickerStatus = ""
+                                        importFolderPickerPathText = _localPathFromUrl(importFolderPickerCurrentFolder)
 	                                } else if (newFolderTarget === "db") {
 	                                    if (databaseFilePickerDialog && databaseFilePickerDialog.visible) {
 	                                        databaseFilePickerCurrentFolder = created
 	                                        databaseFilePickerSelectedFile = ""
 	                                        databaseFilePickerStatus = ""
+                                            databaseFilePickerPathText = _localPathFromUrl(databaseFilePickerCurrentFolder)
 	                                    } else {
 	                                        databaseFolderPickerCurrentFolder = created
 	                                        databaseFolderPickerSelectedFolder = ""
 	                                        databaseFolderPickerStatus = ""
+                                            databaseFolderPickerPathText = _localPathFromUrl(databaseFolderPickerCurrentFolder)
 	                                    }
 	                                } else {
 	                                    folderPickerCurrentFolder = created
 	                                    folderPickerSelectedFolder = ""
 	                                    exportFolderPickerStatus = ""
+                                        exportFolderPickerPathText = _localPathFromUrl(folderPickerCurrentFolder)
 	                                }
 	                            } else {
 	                                const msg = "Could not create folder."
@@ -2206,6 +2270,7 @@ Dialog {
                             if (!DataStore) return
                             databaseFilePickerCurrentFolder = DataStore.parentFolder(databaseFilePickerCurrentFolder)
                             databaseFilePickerSelectedFile = ""
+                            databaseFilePickerPathText = _localPathFromUrl(databaseFilePickerCurrentFolder)
                         }
                     }
 
@@ -2223,14 +2288,28 @@ Dialog {
                         }
                     }
 
-                    Text {
+                    TextField {
+                        objectName: "databaseFilePickerPathField"
                         Layout.fillWidth: true
-                        text: databaseFilePickerCurrentFolder && databaseFilePickerCurrentFolder !== ""
-                            ? databaseFilePickerCurrentFolder.toString().replace("file://", "")
-                            : ""
+                        placeholderText: "Path (folder or database file)"
+                        text: databaseFilePickerPathText
+                        selectByMouse: true
+                        onTextChanged: databaseFilePickerPathText = text
+                        onAccepted: {
+                            if (!DataStore) return
+                            const url = _urlFromUserPathText(databaseFilePickerPathText)
+                            if (!url || url === "") return
+                            databaseFilePickerStatus = ""
+                            if (_looksLikeFilePath(databaseFilePickerPathText)) {
+                                databaseFilePickerSelectedFile = url
+                                databaseFilePickerCurrentFolder = DataStore.parentFolder(url)
+                                return
+                            }
+                            databaseFilePickerCurrentFolder = url
+                            databaseFilePickerSelectedFile = ""
+                        }
                         color: ThemeManager.textSecondary
                         font.pixelSize: ThemeManager.fontSizeSmall
-                        elide: Text.ElideMiddle
                     }
                 }
 
@@ -2247,9 +2326,12 @@ Dialog {
                         anchors.margins: ThemeManager.spacingSmall
                         clip: true
                         model: FolderListModel {
+                            objectName: "databaseFileListModel"
                             folder: databaseFilePickerCurrentFolder
                             showDirs: true
                             showFiles: true
+                            showHidden: true
+                            showDotAndDotDot: false
                             nameFilters: ["*.db", "*.sqlite", "*.sqlite3"]
                             sortField: FolderListModel.Name
                         }
@@ -2288,14 +2370,19 @@ Dialog {
                                 anchors.fill: parent
                                 hoverEnabled: true
                                 cursorShape: Qt.PointingHandCursor
-                                onClicked: databaseFilePickerSelectedFile = itemUrl
+                                onClicked: {
+                                    databaseFilePickerSelectedFile = itemUrl
+                                    databaseFilePickerPathText = _localPathFromUrl(itemUrl)
+                                }
                                 onDoubleClicked: {
                                     if (fileIsDir) {
                                         databaseFilePickerCurrentFolder = itemUrl
                                         databaseFilePickerSelectedFile = ""
+                                        databaseFilePickerPathText = _localPathFromUrl(databaseFilePickerCurrentFolder)
                                         return
                                     }
                                     databaseFilePickerSelectedFile = itemUrl
+                                    databaseFilePickerPathText = _localPathFromUrl(itemUrl)
                                 }
                             }
                         }
@@ -2383,6 +2470,7 @@ Dialog {
                             if (!DataStore) return
                             importFolderPickerCurrentFolder = DataStore.parentFolder(importFolderPickerCurrentFolder)
                             importFolderPickerSelectedFolder = ""
+                            importFolderPickerPathText = _localPathFromUrl(importFolderPickerCurrentFolder)
                         }
 	                    }
 
@@ -2397,22 +2485,32 @@ Dialog {
 	                        }
 	                    }
 
-	                    Text {
+	                    TextField {
+                            objectName: "importFolderPickerPathField"
 	                        Layout.fillWidth: true
-	                        text: importFolderPickerCurrentFolder && importFolderPickerCurrentFolder !== ""
-	                            ? importFolderPickerCurrentFolder.toString().replace("file://", "")
-                            : ""
+                            placeholderText: "Path"
+                            text: importFolderPickerPathText
+                            selectByMouse: true
+                            onTextChanged: importFolderPickerPathText = text
+                            onAccepted: {
+                                const url = _urlFromUserPathText(importFolderPickerPathText)
+                                if (!url || url === "") return
+                                importFolderPickerStatus = ""
+                                importFolderPickerCurrentFolder = url
+                                importFolderPickerSelectedFolder = ""
+                            }
                         color: ThemeManager.textSecondary
                         font.pixelSize: ThemeManager.fontSizeSmall
-                        elide: Text.ElideMiddle
                     }
                 }
 
                 FolderListModel {
                     id: importFolderListModel
+                    objectName: "importFolderListModel"
                     folder: importFolderPickerCurrentFolder
                     showDirs: true
                     showFiles: false
+                    showHidden: true
                     showDotAndDotDot: false
                     sortField: FolderListModel.Name
                 }
@@ -2465,6 +2563,7 @@ Dialog {
 	                                onDoubleClicked: {
 	                                    importFolderPickerCurrentFolder = dirUrl
 	                                    importFolderPickerSelectedFolder = ""
+                                        importFolderPickerPathText = _localPathFromUrl(importFolderPickerCurrentFolder)
 	                                }
 	                            }
 	                        }
