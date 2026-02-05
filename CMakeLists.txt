@@ -603,14 +603,15 @@ if(ZINC_BUILD_TESTS)
 		        tests/qml/test_search_dialog_qml.cpp
 		        tests/qml/test_markdown_editor_qml.cpp
 		        tests/qml/test_slash_menu_qml.cpp
-			        tests/qml/test_image_block_interactions.cpp
-			        tests/qml/test_page_tree_keyboard_shortcut_qml.cpp
-                    tests/qml/test_page_tree_collapse_spacing_qml.cpp
-			        tests/qml/test_sidebar_toggle_button_qml.cpp
-			        tests/qml/test_desktop_sidebar_actions_qml.cpp
-			        tests/qml/test_mobile_sidebar_actions_qml.cpp
-                    tests/qml/test_editor_gutter_settings_qml.cpp
-                    tests/qml/test_title_editing_commit_qml.cpp
+				        tests/qml/test_image_block_interactions.cpp
+				        tests/qml/test_page_tree_keyboard_shortcut_qml.cpp
+	                    tests/qml/test_page_tree_collapse_spacing_qml.cpp
+                        tests/qml/test_page_tree_hover_stability_qml.cpp
+				        tests/qml/test_sidebar_toggle_button_qml.cpp
+				        tests/qml/test_desktop_sidebar_actions_qml.cpp
+				        tests/qml/test_mobile_sidebar_actions_qml.cpp
+	                    tests/qml/test_editor_gutter_settings_qml.cpp
+	                    tests/qml/test_title_editing_commit_qml.cpp
                     tests/qml/test_external_link_tooltip_qml.cpp
                     tests/qml/test_slash_menu_page_command_qml.cpp
                     tests/qml/test_task_marker_rendering_qml.cpp

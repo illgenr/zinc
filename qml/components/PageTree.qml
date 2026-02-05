@@ -1161,6 +1161,12 @@ Item {
                 width: pageList.width
 
                 readonly property bool rowIsVisible: rowVisible(index)
+                readonly property bool rowHasKids: root.hasChildrenAtIndex(index)
+                readonly property bool rowIsCollapsedFolder: rowHasKids && !model.expanded
+                readonly property bool rowHovered: delegateMouseArea.containsMouse
+                    || arrowMouse.containsMouse
+                    || addChildMouse.containsMouse
+                    || menuMouse.containsMouse
                 readonly property int rowHeight: collapsed
                     ? 32
                     : (root._isMobile ? Math.max(44, root.actionButtonSize) : 28)
@@ -1180,7 +1186,7 @@ Item {
                     readonly property string pageId: model.pageId || ""
                     color: selected
                         ? ThemeManager.surfaceActive
-                        : (delegateMouseArea.containsMouse || delegateMouseArea.pressed ? ThemeManager.surfaceHover : "transparent")
+                        : (delegateItem.rowHovered || delegateMouseArea.pressed ? ThemeManager.surfaceHover : "transparent")
 
                     Drag.active: root._isMobile ? mobileDragHandler.active : desktopDragHandler.active
                     Drag.supportedActions: Qt.MoveAction
@@ -1259,9 +1265,8 @@ Item {
 	                    Layout.preferredWidth: 18
 	                    width: 18
 
-	                    readonly property bool hasKids: root.hasChildrenAtIndex(index)
-	                    readonly property bool showArrow: !collapsed && hasKids &&
-	                                                     (root.showExpandArrowsAlways || delegateMouseArea.containsMouse)
+	                    readonly property bool showArrow: !collapsed && delegateItem.rowHasKids &&
+	                                                     (root.showExpandArrowsAlways || delegateItem.rowHovered)
 
                     Text {
                         anchors.centerIn: parent
@@ -1284,6 +1289,7 @@ Item {
                     }
 
                     MouseArea {
+                        id: arrowMouse
                         anchors.fill: parent
                         enabled: parent.showArrow
                         cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
@@ -1386,12 +1392,13 @@ Item {
 	                    Layout.alignment: Qt.AlignVCenter
 	                    Layout.fillHeight: true
 	                    spacing: 2
-	                    visible: (root.actionsAlwaysVisible || delegateMouseArea.containsMouse) && !collapsed
+	                    visible: (root.actionsAlwaysVisible || delegateItem.rowHovered) && !collapsed
 	                    
 	                    Rectangle {
 	                        id: addChildButton
 	                        objectName: "pageTreeAddChildButton_" + index
 	                        Layout.alignment: Qt.AlignVCenter
+                            visible: !delegateItem.rowIsCollapsedFolder
 	                        width: root.actionButtonSize
 	                        height: root.actionButtonSize
 	                        radius: ThemeManager.radiusSmall
