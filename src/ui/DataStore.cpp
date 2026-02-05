@@ -3355,16 +3355,53 @@ void DataStore::renameNotebook(const QString& notebookId, const QString& name) {
 }
 
 void DataStore::deleteNotebook(const QString& notebookId) {
+    deleteNotebook(notebookId, false);
+}
+
+void DataStore::deleteNotebook(const QString& notebookId, bool deletePages) {
     if (!m_ready) return;
     if (notebookId.isEmpty()) return;
 
     const auto deletedAt = now_timestamp_utc();
     m_db.transaction();
 
-    QSqlQuery move(m_db);
-    move.prepare("UPDATE pages SET notebook_id = '' WHERE notebook_id = ?");
-    move.addBindValue(notebookId);
-    move.exec();
+    if (deletePages) {
+        // Delete pages in the notebook (best-effort). Also tombstone them for sync.
+        QStringList pageIds;
+        {
+            QSqlQuery q(m_db);
+            q.prepare("SELECT id FROM pages WHERE notebook_id = ?");
+            q.addBindValue(notebookId);
+            if (q.exec()) {
+                while (q.next()) {
+                    const auto id = q.value(0).toString();
+                    if (!id.isEmpty()) {
+                        pageIds.push_back(id);
+                    }
+                }
+            }
+        }
+
+        for (const auto& pageId : pageIds) {
+            deleteBlocksForPage(pageId);
+        }
+
+        QSqlQuery delPages(m_db);
+        delPages.prepare("DELETE FROM pages WHERE notebook_id = ?");
+        delPages.addBindValue(notebookId);
+        delPages.exec();
+
+        for (const auto& pageId : pageIds) {
+            upsert_deleted_page(m_db, pageId, deletedAt);
+        }
+        prune_deleted_pages(m_db, deleted_pages_retention_limit());
+    } else {
+        // Preserve pages as "Loose notes" (empty notebookId).
+        QSqlQuery move(m_db);
+        move.prepare("UPDATE pages SET notebook_id = '' WHERE notebook_id = ?");
+        move.addBindValue(notebookId);
+        move.exec();
+    }
 
     QSqlQuery tombstone(m_db);
     tombstone.prepare(R"SQL(

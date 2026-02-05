@@ -623,6 +623,7 @@ if(ZINC_BUILD_TESTS)
 				        tests/qml/test_page_tree_keyboard_shortcut_qml.cpp
 	                    tests/qml/test_page_tree_collapse_spacing_qml.cpp
                         tests/qml/test_page_tree_hover_stability_qml.cpp
+                        tests/qml/test_delete_notebook_dialog_qml.cpp
 				        tests/qml/test_sidebar_toggle_button_qml.cpp
 				        tests/qml/test_desktop_sidebar_actions_qml.cpp
 				        tests/qml/test_mobile_sidebar_actions_qml.cpp

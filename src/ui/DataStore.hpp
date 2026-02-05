@@ -131,6 +131,7 @@ public:
     Q_INVOKABLE QString createNotebook(const QString& name);
     Q_INVOKABLE void renameNotebook(const QString& notebookId, const QString& name);
     Q_INVOKABLE void deleteNotebook(const QString& notebookId);
+    Q_INVOKABLE void deleteNotebook(const QString& notebookId, bool deletePages);
     Q_INVOKABLE QVariantList getNotebooksForSync();
     Q_INVOKABLE QVariantList getNotebooksForSyncSince(const QString& updatedAtCursor,
                                                       const QString& notebookIdCursor);

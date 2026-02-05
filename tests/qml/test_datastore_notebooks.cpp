@@ -135,3 +135,51 @@ TEST_CASE("DataStore: can rename and delete the initial My Notebook", "[qml][dat
     const auto page = store.getPage(QStringLiteral("p_no_nb_after_delete"));
     REQUIRE(page.value("notebookId").toString() == QStringLiteral(""));
 }
+
+TEST_CASE("DataStore: deleteNotebook(deletePages=true) deletes pages and tombstones them", "[qml][datastore][notebooks]") {
+    zinc::ui::DataStore store;
+    REQUIRE(store.initialize());
+    REQUIRE(store.resetDatabase());
+
+    const auto notebookId = store.createNotebook(QStringLiteral("Work"));
+    REQUIRE_FALSE(notebookId.isEmpty());
+
+    QVariantMap page1 = makePage(QStringLiteral("p_nb_1"),
+                                 QStringLiteral("One"),
+                                 QStringLiteral("2026-01-01 00:00:00.000"),
+                                 QStringLiteral("Body"));
+    page1.insert(QStringLiteral("notebookId"), notebookId);
+    store.savePage(page1);
+
+    QVariantMap page2 = makePage(QStringLiteral("p_nb_2"),
+                                 QStringLiteral("Two"),
+                                 QStringLiteral("2026-01-01 00:00:01.000"),
+                                 QStringLiteral("Body"));
+    page2.insert(QStringLiteral("notebookId"), notebookId);
+    store.savePage(page2);
+
+    REQUIRE(store.getPage(QStringLiteral("p_nb_1")).value("notebookId").toString() == notebookId);
+    REQUIRE(store.getPage(QStringLiteral("p_nb_2")).value("notebookId").toString() == notebookId);
+
+    store.deleteNotebook(notebookId, true);
+
+    {
+        const auto notebooks = store.getAllNotebooks();
+        REQUIRE(notebookNameById(notebooks, notebookId).isEmpty());
+    }
+
+    REQUIRE(store.getPage(QStringLiteral("p_nb_1")).isEmpty());
+    REQUIRE(store.getPage(QStringLiteral("p_nb_2")).isEmpty());
+
+    const auto deleted = store.getDeletedPagesForSync();
+    bool has1 = false;
+    bool has2 = false;
+    for (const auto& entry : deleted) {
+        const auto m = entry.toMap();
+        const auto id = m.value(QStringLiteral("pageId")).toString();
+        if (id == QStringLiteral("p_nb_1")) has1 = true;
+        if (id == QStringLiteral("p_nb_2")) has2 = true;
+    }
+    REQUIRE(has1);
+    REQUIRE(has2);
+}

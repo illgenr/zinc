@@ -39,6 +39,9 @@ Item {
     property string _inlineText: ""
     property var _activeRenameField: null
 
+    property string _pendingDeleteNotebookId: ""
+    property string _pendingDeleteNotebookTitle: ""
+
     onSortModeChanged: {
         if (!root._componentReady) return
         loadPagesFromStorage()
@@ -783,6 +786,14 @@ Item {
         menu.popup()
     }
 
+    function requestDeleteNotebook(notebookId, title) {
+        if (!notebookId || notebookId === "") return
+        root._pendingDeleteNotebookId = notebookId
+        root._pendingDeleteNotebookTitle = title || ""
+        deleteNotebookDeletePages.checked = false
+        deleteNotebookDialog.open()
+    }
+
     function selectPage(pageId) {
         if (!pageId || pageId === "") return false
         for (let i = 0; i < pageModel.count; i++) {
@@ -1515,11 +1526,7 @@ Item {
                 text: pageContextMenu.targetKind === "notebook" ? "Delete notebook" : "Delete"
                 onTriggered: {
                     if (pageContextMenu.targetKind === "notebook") {
-                        if (DataStore && DataStore.deleteNotebook) {
-                            DataStore.deleteNotebook(pageContextMenu.targetNotebookId)
-                            loadPagesFromStorage()
-                            pagesChanged()
-                        }
+                        root.requestDeleteNotebook(pageContextMenu.targetNotebookId, pageContextMenu.targetTitle)
                         return
                     }
 
@@ -1543,6 +1550,83 @@ Item {
         }
     }
     } // End ColumnLayout
+
+    Dialog {
+        id: deleteNotebookDialog
+        objectName: "deleteNotebookDialog"
+        title: "Delete notebook?"
+        anchors.centerIn: parent
+        modal: true
+        width: Math.min(360, root.width - 40)
+
+        background: Rectangle {
+            color: ThemeManager.surface
+            border.width: 1
+            border.color: ThemeManager.border
+            radius: ThemeManager.radiusMedium
+        }
+
+        contentItem: ColumnLayout {
+            spacing: ThemeManager.spacingLarge
+
+            Text {
+                Layout.fillWidth: true
+                text: root._pendingDeleteNotebookTitle && root._pendingDeleteNotebookTitle !== ""
+                    ? ("Delete \"" + root._pendingDeleteNotebookTitle + "\"?")
+                    : "Delete this notebook?"
+                color: ThemeManager.text
+                font.pixelSize: ThemeManager.fontSizeNormal
+                wrapMode: Text.Wrap
+            }
+
+            CheckBox {
+                id: deleteNotebookDeletePages
+                objectName: "deleteNotebookDeletePages"
+                text: "Also delete pages in this notebook"
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: ThemeManager.spacingSmall
+
+                Button {
+                    objectName: "deleteNotebookCancelButton"
+                    Layout.fillWidth: true
+                    text: "Cancel"
+                    onClicked: deleteNotebookDialog.close()
+                }
+
+                Button {
+                    objectName: "deleteNotebookConfirmButton"
+                    Layout.fillWidth: true
+                    text: "Delete"
+
+                    background: Rectangle {
+                        implicitHeight: 40
+                        radius: ThemeManager.radiusSmall
+                        color: parent.pressed ? "#7a2020" : ThemeManager.danger
+                    }
+
+                    contentItem: Text {
+                        text: parent.text
+                        color: "white"
+                        font.pixelSize: ThemeManager.fontSizeNormal
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                    }
+
+                    onClicked: {
+                        if (DataStore && DataStore.deleteNotebook) {
+                            DataStore.deleteNotebook(root._pendingDeleteNotebookId, deleteNotebookDeletePages.checked)
+                            loadPagesFromStorage()
+                            pagesChanged()
+                        }
+                        deleteNotebookDialog.close()
+                    }
+                }
+            }
+        }
+    }
     
     // Public function to reset pages
     function resetToDefaults() {
