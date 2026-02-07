@@ -7,6 +7,7 @@ Popup {
     id: root
     
     signal resultSelected(string pageId, string blockId, int blockIndex)
+    readonly property bool debugSearchUi: Qt.application.arguments.indexOf("--debug-search-ui") !== -1
     
     anchors.centerIn: parent
 
@@ -73,6 +74,11 @@ Popup {
                     Keys.onReturnPressed: {
                         if (resultsList.count > 0) {
                             let item = resultsModel.get(0)
+                            if (root.debugSearchUi) {
+                                console.log("SEARCHUI: return-select first result pageId=", item.pageId,
+                                            "blockId=", item.blockId || "",
+                                            "blockIndex=", item.blockIndex !== undefined ? item.blockIndex : -1)
+                            }
                             root.resultSelected(item.pageId, item.blockId || "", item.blockIndex !== undefined ? item.blockIndex : -1)
                             root.close()
                         }
@@ -143,9 +149,20 @@ Popup {
                 MouseArea {
                     anchors.fill: parent
                     hoverEnabled: true
+                    acceptedButtons: Qt.LeftButton
                     
                     onEntered: resultsList.currentIndex = index
+                    onPressed: function(mouse) {
+                        if (mouse.button !== Qt.LeftButton) return
+                        resultsList.currentIndex = index
+                    }
                     onClicked: {
+                        if (root.debugSearchUi) {
+                            console.log("SEARCHUI: click result index=", index,
+                                        "pageId=", model.pageId || "",
+                                        "blockId=", model.blockId || "",
+                                        "blockIndex=", model.blockIndex !== undefined ? model.blockIndex : -1)
+                        }
                         root.resultSelected(model.pageId, model.blockId || "", model.blockIndex !== undefined ? model.blockIndex : -1)
                         root.close()
                     }
@@ -196,6 +213,16 @@ Popup {
         if (query.length === 0) return
 
         const results = DataStore ? DataStore.searchPages(query, 50) : []
+        if (root.debugSearchUi) {
+            console.log("SEARCHUI: performSearch query=", query, "count=", results.length)
+            if (results.length > 0) {
+                const first = results[0]
+                console.log("SEARCHUI: first result pageId=", first.pageId || "",
+                            "blockId=", first.blockId || "",
+                            "blockIndex=", first.blockIndex !== undefined ? first.blockIndex : -1,
+                            "pageTitle=", first.pageTitle || "")
+            }
+        }
         for (let i = 0; i < results.length; i++) {
             resultsModel.append(results[i])
         }

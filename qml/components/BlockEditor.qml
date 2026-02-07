@@ -9,6 +9,7 @@ import "CursorMotionIndicatorLogic.js" as CursorMotionLogic
 
 FocusScope {
     id: root
+    readonly property bool debugSearchUi: Qt.application.arguments.indexOf("--debug-search-ui") !== -1
 
     // Keep undo/redo centralized (avoid per-TextEdit undo stacks).
     Shortcut { sequences: ["Ctrl+Z", "Meta+Z"]; onActivated: root.performUndo() }
@@ -690,6 +691,9 @@ FocusScope {
     }
     
     function loadPage(id) {
+        if (root.debugSearchUi) {
+            console.log("SEARCHUI: BlockEditor.loadPage id=", id, "current=", pageId)
+        }
         // Save current page first if we have one
         if (pageId && pageId !== "" && pageId !== id) {
             saveBlocks()
@@ -1057,6 +1061,26 @@ FocusScope {
         scrollToBlockIndex(idx)
         root.searchHighlightBlockIndex = idx
         searchHighlightClearTimer.restart()
+    }
+
+    function focusSearchResult(blockId, blockIndex) {
+        let idx = blockIndex === undefined ? -1 : blockIndex
+        if (idx < 0 && blockId && blockId !== "") {
+            for (let i = 0; i < blockModel.count; i++) {
+                if (blockModel.get(i).blockId === blockId) {
+                    idx = i
+                    break
+                }
+            }
+        }
+        if (idx < 0) {
+            focusContent()
+            scheduleEnsureFocusedCursorVisible()
+            return
+        }
+        revealSearchBlockIndex(idx)
+        focusBlockAtDeferred(idx, 0)
+        scheduleEnsureFocusedCursorVisible()
     }
 
     function focusDocumentEnd() {

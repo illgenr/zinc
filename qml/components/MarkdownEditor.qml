@@ -5,6 +5,7 @@ import zinc
 
 Item {
     id: root
+    readonly property bool debugSearchUi: Qt.application.arguments.indexOf("--debug-search-ui") !== -1
 
     property string pageTitle: ""
     property string pageId: ""
@@ -36,6 +37,9 @@ Item {
     }
 
     function loadPage(id) {
+        if (root.debugSearchUi) {
+            console.log("SEARCHUI: MarkdownEditor.loadPage id=", id, "current=", pageId)
+        }
         if (pageId && pageId !== "" && pageId !== id) {
             saveBlocks()
         }
@@ -102,6 +106,25 @@ Item {
 
     function focusContent() {
         focusContentAt(0)
+    }
+
+    function focusSearchResult(blockIndex) {
+        if (blockIndex === undefined || blockIndex < 0) {
+            focusContentAt(0)
+            return
+        }
+        parseTimer.restart()
+        Qt.callLater(function() {
+            const spans = blockSpans || []
+            if (spans.length === 0) {
+                focusContentAt(0)
+                return
+            }
+            const idx = Math.max(0, Math.min(blockIndex, spans.length - 1))
+            const span = spans[idx] || null
+            const start = span && span.start !== undefined ? span.start : 0
+            focusContentAt(start)
+        })
     }
 
     Timer {

@@ -24,6 +24,8 @@ ApplicationWindow {
     property bool startupPageAppliedMobile: false
     property var pendingStartupCursorHint: null
     property int pendingSearchBlockIndex: -1
+    property string pendingSearchBlockId: ""
+    readonly property bool debugSearchUi: Qt.application.arguments.indexOf("--debug-search-ui") !== -1
     readonly property bool debugSyncUi: Qt.application.arguments.indexOf("--debug-sync-ui") !== -1
     property int suppressOutgoingSnapshots: 0
     property var pendingCursorPersist: null
@@ -63,8 +65,9 @@ ApplicationWindow {
             root.currentPage = null
             root.pendingStartupCursorHint = null
             root.pendingSearchBlockIndex = -1
+            root.pendingSearchBlockId = ""
             if (pageTree) pageTree.selectedPageId = ""
-            if (mobilePageTree) mobilePageTree.selectedPageId = ""
+            if (typeof mobilePageTree !== "undefined" && mobilePageTree) mobilePageTree.selectedPageId = ""
             if (blockEditor && blockEditor.clearPage) blockEditor.clearPage()
             if (markdownEditor && markdownEditor.clearPage) markdownEditor.clearPage()
             if (mobileStack && mobileStack.depth > 1) {
@@ -212,7 +215,7 @@ ApplicationWindow {
 
                     onNewPageRequested: mobilePageTree.createPage("")
                     onFindRequested: searchDialog.open()
-                    onNewNotebookRequested: mobilePageTree.beginNewNotebook()
+                    onNewNotebookRequested: pageTree.beginNewNotebook()
                     onSortModeRequested: function(mode) { mobilePageTree.sortMode = mode }
                 }
 
@@ -360,9 +363,10 @@ ApplicationWindow {
                     if (root.currentPage) {
                         loadPage(root.currentPage.id)
                         Qt.callLater(function() {
-                            if (root.pendingSearchBlockIndex >= 0) {
-                                mobileBlockEditor.revealSearchBlockIndex(root.pendingSearchBlockIndex)
+                            if (root.pendingSearchBlockIndex >= 0 || (root.pendingSearchBlockId && root.pendingSearchBlockId !== "")) {
+                                mobileBlockEditor.focusSearchResult(root.pendingSearchBlockId, root.pendingSearchBlockIndex)
                                 root.pendingSearchBlockIndex = -1
+                                root.pendingSearchBlockId = ""
                             }
                             root.applyPendingStartupFocusIfAny(mobileBlockEditor, root.currentPage.id)
                         })
@@ -758,22 +762,35 @@ ApplicationWindow {
         id: searchDialog
         
         onResultSelected: function(pageId, blockId, blockIndex) {
+            const page = DataStore ? DataStore.getPage(pageId) : null
+            const title = page && page.title ? page.title : "Untitled"
+            if (root.debugSearchUi) {
+                console.log("SEARCHUI: onResultSelected pageId=", pageId,
+                            "blockId=", blockId || "",
+                            "blockIndex=", blockIndex,
+                            "resolvedTitle=", title,
+                            "isMobile=", isMobile,
+                            "editorMode=", root.editorMode)
+            }
             if (DataStore) DataStore.setLastViewedPageId(pageId)
             root.pendingSearchBlockIndex = blockIndex
+            root.pendingSearchBlockId = blockId || ""
+            root.currentPage = { id: pageId, title: title }
+            if (pageTree) pageTree.selectedPageId = pageId
+            if (typeof mobilePageTree !== "undefined" && mobilePageTree) mobilePageTree.selectedPageId = pageId
             if (isMobile) {
-                root.currentPage = { id: pageId, title: "Note" }
                 mobileStack.push(mobileEditorComponent)
             } else {
                 root.loadCurrentPageInActiveEditor(pageId)
                 Qt.callLater(function() {
-                    if (root.editorMode === 0 && blockEditor) {
-                        if (blockIndex >= 0) {
-                            blockEditor.revealSearchBlockIndex(blockIndex)
-                        } else if (blockId) {
-                            blockEditor.scrollToBlock(blockId)
-                        }
+                    if (root.editorMode === 0 && blockEditor && blockEditor.focusSearchResult) {
+                        blockEditor.focusSearchResult(blockId || "", blockIndex)
+                    }
+                    if (root.editorMode === 1 && markdownEditor && markdownEditor.focusSearchResult) {
+                        markdownEditor.focusSearchResult(blockIndex)
                     }
                     root.pendingSearchBlockIndex = -1
+                    root.pendingSearchBlockId = ""
                 })
             }
         }
@@ -1299,15 +1316,24 @@ ApplicationWindow {
 
     function loadCurrentPageInActiveEditor(pageId) {
         if (!pageId || pageId === "") return
+        if (root.debugSearchUi) {
+            console.log("SEARCHUI: loadCurrentPageInActiveEditor pageId=", pageId, "editorMode=", root.editorMode)
+        }
         if (root.editorMode === 1) {
             if (markdownEditor && markdownEditor.loadPage) {
                 markdownEditor.loadPage(pageId)
+                if (root.debugSearchUi) {
+                    console.log("SEARCHUI: markdownEditor.loadPage done pageId=", pageId)
+                }
                 Qt.callLater(() => markdownEditor.focusContent && markdownEditor.focusContent())
             }
             return
         }
         if (blockEditor && blockEditor.loadPage) {
             blockEditor.loadPage(pageId)
+            if (root.debugSearchUi) {
+                console.log("SEARCHUI: blockEditor.loadPage done pageId=", pageId)
+            }
             Qt.callLater(() => root.applyPendingStartupFocusIfAny(blockEditor, pageId))
         }
     }

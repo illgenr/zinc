@@ -3,8 +3,10 @@
 #include <QQmlComponent>
 #include <QQmlEngine>
 #include <QQmlError>
+#include <QFile>
 #include <QQuickItem>
 #include <QQuickWindow>
+#include <QRegularExpression>
 #include <QStringList>
 #include <QTest>
 #include <QUrl>
@@ -30,6 +32,14 @@ QString formatErrors(const QList<QQmlError>& errors) {
         lines.append(error.toString());
     }
     return lines.join('\n');
+}
+
+QString readAllText(const QString& path) {
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        return {};
+    }
+    return QString::fromUtf8(file.readAll());
 }
 
 QQuickWindow* requireWindow(QObject* root) {
@@ -203,4 +213,33 @@ TEST_CASE("QML: SearchDialog searches titles and content as you type", "[qml]") 
     searchField->setProperty("text", QStringLiteral("nope"));
     QTest::qWait(300);
     REQUIRE(resultsList->property("count").toInt() == 0);
+}
+
+TEST_CASE("QML: Search selection updates editor title state and uses left click", "[qml][search]") {
+    const auto main = readAllText(QStringLiteral(":/qt/qml/zinc/qml/Main.qml"));
+    REQUIRE(!main.isEmpty());
+    REQUIRE(main.contains(QStringLiteral("onResultSelected: function(pageId, blockId, blockIndex) {")));
+    REQUIRE(main.contains(QStringLiteral("const page = DataStore ? DataStore.getPage(pageId) : null")));
+    REQUIRE(main.contains(QStringLiteral("root.currentPage = { id: pageId, title: title }")));
+    REQUIRE(main.contains(QStringLiteral("root.pendingSearchBlockId = blockId || \"\"")));
+    REQUIRE(main.contains(QStringLiteral("blockEditor.focusSearchResult(blockId || \"\", blockIndex)")));
+    REQUIRE(main.contains(QStringLiteral("markdownEditor.focusSearchResult(blockIndex)")));
+    REQUIRE(main.contains(QStringLiteral("mobileBlockEditor.focusSearchResult(root.pendingSearchBlockId, root.pendingSearchBlockIndex)")));
+    REQUIRE(main.contains(QStringLiteral("typeof mobilePageTree !== \"undefined\" && mobilePageTree")));
+
+    const auto dialog = readAllText(QStringLiteral(":/qt/qml/zinc/qml/components/SearchDialog.qml"));
+    REQUIRE(!dialog.isEmpty());
+    REQUIRE(dialog.contains(QStringLiteral("acceptedButtons: Qt.LeftButton")));
+    REQUIRE(dialog.contains(QStringLiteral("onPressed: function(mouse) {")));
+    REQUIRE(dialog.contains(QStringLiteral("if (mouse.button !== Qt.LeftButton) return")));
+
+    const auto blockEditor = readAllText(QStringLiteral(":/qt/qml/zinc/qml/components/BlockEditor.qml"));
+    REQUIRE(!blockEditor.isEmpty());
+    REQUIRE(blockEditor.contains(QStringLiteral("function focusSearchResult(blockId, blockIndex) {")));
+    REQUIRE(blockEditor.contains(QStringLiteral("focusBlockAtDeferred(idx, 0)")));
+
+    const auto markdownEditor = readAllText(QStringLiteral(":/qt/qml/zinc/qml/components/MarkdownEditor.qml"));
+    REQUIRE(!markdownEditor.isEmpty());
+    REQUIRE(markdownEditor.contains(QStringLiteral("function focusSearchResult(blockIndex) {")));
+    REQUIRE(markdownEditor.contains(QStringLiteral("focusContentAt(start)")));
 }
