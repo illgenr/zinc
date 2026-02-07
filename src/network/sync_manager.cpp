@@ -1,4 +1,5 @@
 #include "network/sync_manager.hpp"
+#include "network/hello_policy.hpp"
 #include <QDebug>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -179,6 +180,7 @@ void SyncManager::connectToPeer(const Uuid& device_id) {
     peer->connection = std::make_unique<Connection>(this);
     peer->sync_state = SyncState::Connecting;
     peer->initiated_by_us = true;
+    peer->allow_rekey_on_hello = false;
     
     setupConnection(*peer);
     peer->connection->connectToPeer(peer_info->host, peer_info->port, identity_);
@@ -188,7 +190,8 @@ void SyncManager::connectToPeer(const Uuid& device_id) {
 
 void SyncManager::connectToEndpoint(const Uuid& device_id,
                                     const QHostAddress& host,
-                                    uint16_t port) {
+                                    uint16_t port,
+                                    bool allow_rekey_on_hello) {
     if (device_id.is_nil()) {
         emit error("Invalid peer device ID");
         return;
@@ -219,6 +222,7 @@ void SyncManager::connectToEndpoint(const Uuid& device_id,
     peer->sync_state = SyncState::Connecting;
     peer->initiated_by_us = true;
     peer->approved = true;
+    peer->allow_rekey_on_hello = allow_rekey_on_hello;
     
     setupConnection(*peer);
     peer->connection->connectToPeer(host, port, identity_);
@@ -228,7 +232,8 @@ void SyncManager::connectToEndpoint(const Uuid& device_id,
 
 void SyncManager::connectToEndpoint(const Uuid& device_id,
                                     const QString& host,
-                                    uint16_t port) {
+                                    uint16_t port,
+                                    bool allow_rekey_on_hello) {
     if (device_id.is_nil()) {
         emit error("Invalid peer device ID");
         return;
@@ -263,6 +268,7 @@ void SyncManager::connectToEndpoint(const Uuid& device_id,
     peer->sync_state = SyncState::Connecting;
     peer->initiated_by_us = true;
     peer->approved = true;
+    peer->allow_rekey_on_hello = allow_rekey_on_hello;
 
     setupConnection(*peer);
     peer->connection->connectToPeer(host.trimmed(), port, identity_);
@@ -479,6 +485,7 @@ void SyncManager::onNewConnection(QTcpSocket* socket) {
     peer->sync_state = SyncState::Connecting;
     peer->initiated_by_us = false;
     peer->approved = false;
+    peer->allow_rekey_on_hello = true;
     
     setupConnection(*peer);
     peer->connection->acceptConnection(socket, identity_);
@@ -777,31 +784,6 @@ void SyncManager::handleHello(Connection& conn, const std::vector<uint8_t>& payl
 
     const auto remoteId = *remoteIdParsed;
     const auto remoteWs = *remoteWsParsed;
-    if (remoteId == device_id_) {
-        if (sync_debug_enabled()) {
-            qInfo() << "SYNC: Hello from self, disconnecting";
-        }
-        conn.disconnect();
-        return;
-    }
-    if (remoteWs != workspace_id_) {
-        // Allow pairing bootstrapping if either side is unconfigured (nil workspace id).
-        const bool pairing_bootstrap = remoteWs.is_nil() || workspace_id_.is_nil();
-        if (!pairing_bootstrap) {
-            qInfo() << "SYNC: Hello workspace mismatch; disconnecting"
-                    << "remote_id=" << QString::fromStdString(remoteId.to_string())
-                    << "remote_ws=" << QString::fromStdString(remoteWs.to_string())
-                    << "local_ws=" << QString::fromStdString(workspace_id_.to_string())
-                    << "remote_name=" << name;
-            conn.disconnect();
-            return;
-        }
-        qInfo() << "SYNC: Hello workspace mismatch (pairing bootstrap allowed)"
-                << "remote_id=" << QString::fromStdString(remoteId.to_string())
-                << "remote_ws=" << QString::fromStdString(remoteWs.to_string())
-                << "local_ws=" << QString::fromStdString(workspace_id_.to_string())
-                << "remote_name=" << name;
-    }
 
     // Find current peer entry by connection pointer.
     const auto currentIt = std::find_if(peers_.begin(), peers_.end(),
@@ -814,6 +796,65 @@ void SyncManager::handleHello(Connection& conn, const std::vector<uint8_t>& payl
 
     // Hold onto the current key before any map mutation.
     const auto currentKey = currentIt->first;
+    const auto allowRekey = currentIt->second->allow_rekey_on_hello;
+    const auto helloPeerPort = port > 0 && port <= 65535 ? static_cast<uint16_t>(port) : conn.peerPort();
+    const auto helloHostStr = conn.peerAddress().toString();
+
+    const auto decision = decide_hello(device_id_, workspace_id_, currentKey, allowRekey, remoteId, remoteWs);
+    switch (decision.kind) {
+        case HelloDecisionKind::DisconnectSelf: {
+            if (sync_debug_enabled()) {
+                qInfo() << "SYNC: Hello from self, disconnecting";
+            }
+            conn.disconnect();
+            return;
+        }
+        case HelloDecisionKind::DisconnectIdentityMismatch: {
+            qInfo() << "SYNC: Hello identity mismatch; disconnecting"
+                    << "expected_id=" << QString::fromStdString(currentKey.to_string())
+                    << "remote_id=" << QString::fromStdString(remoteId.to_string())
+                    << "remote_name=" << name
+                    << "endpoint=" << helloHostStr
+                    << "port=" << helloPeerPort;
+            QMetaObject::invokeMethod(this, [this, expected = currentKey, actual = remoteId, name, hostStr = helloHostStr, peerPort = helloPeerPort]() {
+                emit peerIdentityMismatch(expected, actual, name, hostStr, peerPort);
+                emit error(QStringLiteral("Peer identity mismatch: expected %1 but got %2 at %3:%4. Re-pair required.")
+                               .arg(QString::fromStdString(expected.to_string()),
+                                    QString::fromStdString(actual.to_string()),
+                                    hostStr)
+                               .arg(peerPort));
+            }, Qt::QueuedConnection);
+            conn.disconnect();
+            return;
+        }
+        case HelloDecisionKind::DisconnectWorkspaceMismatch: {
+            qInfo() << "SYNC: Hello workspace mismatch; disconnecting"
+                    << "remote_id=" << QString::fromStdString(remoteId.to_string())
+                    << "remote_ws=" << QString::fromStdString(remoteWs.to_string())
+                    << "local_ws=" << QString::fromStdString(workspace_id_.to_string())
+                    << "remote_name=" << name
+                    << "endpoint=" << helloHostStr
+                    << "port=" << helloPeerPort;
+            QMetaObject::invokeMethod(this, [this, remoteId, remoteWs, localWs = workspace_id_, name, hostStr = helloHostStr, peerPort = helloPeerPort]() {
+                emit peerWorkspaceMismatch(remoteId, remoteWs, localWs, name, hostStr, peerPort);
+                emit error(QStringLiteral("Peer workspace mismatch: device %1 is not in this workspace. Re-pair required.")
+                               .arg(QString::fromStdString(remoteId.to_string())));
+            }, Qt::QueuedConnection);
+            conn.disconnect();
+            return;
+        }
+        case HelloDecisionKind::AcceptPairingBootstrap: {
+            qInfo() << "SYNC: Hello workspace mismatch (pairing bootstrap allowed)"
+                    << "remote_id=" << QString::fromStdString(remoteId.to_string())
+                    << "remote_ws=" << QString::fromStdString(remoteWs.to_string())
+                    << "local_ws=" << QString::fromStdString(workspace_id_.to_string())
+                    << "remote_name=" << name;
+            break;
+        }
+        case HelloDecisionKind::Accept:
+            break;
+    }
+
     {
         auto& peer = *currentIt->second;
         peer.hello_received = true;

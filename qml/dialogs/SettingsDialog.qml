@@ -12,6 +12,11 @@ Dialog {
     signal manualDeviceAddRequested(string host, int port)
     property var syncController: null
 
+    function openDevicesTab() {
+        // Devices tab index matches tabModel ordering.
+        settingsTabs.currentIndex = 3
+    }
+
     ListModel {
         id: pairedDevicesModel
     }
@@ -86,11 +91,35 @@ Dialog {
 
         function onPeerHelloReceived(deviceId, deviceName, host, port) {
             console.log("SettingsDialog: peerHelloReceived", deviceId, deviceName, host, port)
+            if (DataStore && deviceId && deviceId !== "" && host && host !== "" && port && port > 0) {
+                DataStore.updatePairedDeviceEndpoint(deviceId, host, port)
+            }
             if (!manualAddDialog.visible) return
             if (!manualAddDialog.pending) return
             manualAddDialog.statusText = "Device responded. Check the other device for confirmation."
             manualAddDialog.pending = null
             manualAddDialog.close()
+        }
+
+        function onPeerIdentityMismatch(expectedDeviceId, actualDeviceId, deviceName, host, port) {
+            console.log("SettingsDialog: peerIdentityMismatch expected=", expectedDeviceId,
+                        "actual=", actualDeviceId, deviceName, host, port)
+            if (manualAddDialog.visible && manualAddDialog.pending) {
+                manualAddDialog.statusText = "Device was reset/reinstalled. Re-pair is required."
+            }
+            if (endpointEditDialog.visible) {
+                endpointEditDialog.statusText = "Device was reset/reinstalled. Re-pair is required."
+            }
+        }
+
+        function onPeerWorkspaceMismatch(deviceId, remoteWorkspaceId, localWorkspaceId, deviceName, host, port) {
+            console.log("SettingsDialog: peerWorkspaceMismatch", deviceId, remoteWorkspaceId, localWorkspaceId, deviceName, host, port)
+            if (manualAddDialog.visible && manualAddDialog.pending) {
+                manualAddDialog.statusText = "Device is not in this workspace. Re-pair is required."
+            }
+            if (endpointEditDialog.visible) {
+                endpointEditDialog.statusText = "Device is not in this workspace. Re-pair is required."
+            }
         }
     }
 
@@ -707,6 +736,19 @@ Dialog {
                 label: "Enable sync"
                 Switch { checked: true }
             }
+
+            SettingsRow {
+                label: "Workspace ID"
+
+                TextField {
+                    Layout.fillWidth: true
+                    readOnly: true
+                    text: (syncController && syncController.workspaceId && syncController.workspaceId !== "")
+                        ? syncController.workspaceId
+                        : "Not configured"
+                    selectByMouse: true
+                }
+            }
             
             SettingsRow {
                 label: "Auto sync"
@@ -1136,7 +1178,11 @@ Dialog {
                             endpointEditDialog.statusText = "Device is not paired yet. Pair first, then set a manual endpoint."
                             return
                         }
-                        DataStore.updatePairedDeviceEndpoint(endpointEditDialog.deviceId, host, port)
+                        if (DataStore.setPairedDevicePreferredEndpoint) {
+                            DataStore.setPairedDevicePreferredEndpoint(endpointEditDialog.deviceId, host, port)
+                        } else {
+                            DataStore.updatePairedDeviceEndpoint(endpointEditDialog.deviceId, host, port)
+                        }
                         endpointEditDialog.close()
                     }
                 }
@@ -1164,7 +1210,11 @@ Dialog {
                             endpointEditDialog.statusText = "Device is not paired yet. Pair first, then connect."
                             return
                         }
-                        DataStore.updatePairedDeviceEndpoint(endpointEditDialog.deviceId, host, port)
+                        if (DataStore.setPairedDevicePreferredEndpoint) {
+                            DataStore.setPairedDevicePreferredEndpoint(endpointEditDialog.deviceId, host, port)
+                        } else {
+                            DataStore.updatePairedDeviceEndpoint(endpointEditDialog.deviceId, host, port)
+                        }
                         syncController.connectToPeer(endpointEditDialog.deviceId, host, port)
                         endpointEditDialog.close()
                     }

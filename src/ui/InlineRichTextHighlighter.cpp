@@ -6,6 +6,7 @@
 #include <QTextBlock>
 #include <QTextCharFormat>
 #include <QTextDocument>
+#include <QMetaObject>
 
 #include <algorithm>
 #include <vector>
@@ -128,7 +129,8 @@ QQuickTextDocument* InlineRichTextHighlighter::document() const {
 void InlineRichTextHighlighter::setDocument(QQuickTextDocument* doc) {
     if (m_document == doc) return;
     m_document = doc;
-    rebuildHighlighter();
+    emit documentChanged();
+    scheduleApply();
 }
 
 QVariantList InlineRichTextHighlighter::runs() const {
@@ -138,7 +140,8 @@ QVariantList InlineRichTextHighlighter::runs() const {
 void InlineRichTextHighlighter::setRuns(const QVariantList& runs) {
     if (m_runs == runs) return;
     m_runs = runs;
-    rehighlight();
+    emit runsChanged();
+    scheduleApply();
 }
 
 void InlineRichTextHighlighter::rebuildHighlighter() {
@@ -153,11 +156,37 @@ void InlineRichTextHighlighter::rebuildHighlighter() {
     m_impl->setRuns(m_runs);
 }
 
-void InlineRichTextHighlighter::rehighlight() {
-    if (!m_impl) {
+void InlineRichTextHighlighter::scheduleApply() {
+    if (m_apply_scheduled) return;
+    m_apply_scheduled = true;
+    QMetaObject::invokeMethod(this, [this]() { applyNow(); }, Qt::QueuedConnection);
+}
+
+void InlineRichTextHighlighter::applyNow() {
+    m_apply_scheduled = false;
+
+    if (!m_document) {
+        if (m_impl) {
+            m_impl->deleteLater();
+            m_impl = nullptr;
+        }
+        return;
+    }
+
+    auto* doc = m_document->textDocument();
+    if (!doc) {
+        if (m_impl) {
+            m_impl->deleteLater();
+            m_impl = nullptr;
+        }
+        return;
+    }
+
+    if (!m_impl || m_impl->document() != doc) {
         rebuildHighlighter();
         return;
     }
+
     m_impl->setRuns(m_runs);
 }
 

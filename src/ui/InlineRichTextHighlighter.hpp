@@ -30,10 +30,12 @@ signals:
 
 private:
     void rebuildHighlighter();
-    void rehighlight();
+    void scheduleApply();
+    void applyNow();
 
     QPointer<QQuickTextDocument> m_document;
     QVariantList m_runs;
+    bool m_apply_scheduled = false;
 
     class Impl;
     QPointer<Impl> m_impl;

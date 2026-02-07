@@ -1076,6 +1076,8 @@ void DataStore::createTables() {
             device_id TEXT PRIMARY KEY,
             device_name TEXT NOT NULL,
             workspace_id TEXT NOT NULL,
+            preferred_host TEXT,
+            preferred_port INTEGER,
             host TEXT,
             port INTEGER,
             last_seen TEXT,
@@ -2435,6 +2437,18 @@ void DataStore::applyPageUpdates(const QVariantList& pages) {
     QSet<QString> contentChangedPages;
     QSet<QString> resolvedConflictPageIds;
 
+    // If a remote update matches our current local title+content but timestamps drifted (e.g. due to
+    // autosave or platform clock granularity), advance the sync-base without overwriting local state.
+    QSqlQuery markSynced(m_db);
+    markSynced.prepare(R"SQL(
+        UPDATE pages
+        SET last_synced_at = updated_at,
+            last_synced_title = title,
+            last_synced_content_markdown = content_markdown
+        WHERE id = ?
+          AND NOT EXISTS (SELECT 1 FROM page_conflicts WHERE page_id = ?)
+    )SQL");
+
     for (const auto& entry : pages) {
         auto page = entry.toMap();
         const QString pageId = page.value("pageId").toString();
@@ -2572,6 +2586,18 @@ void DataStore::applyPageUpdates(const QVariantList& pages) {
             qInfo() << "DataStore: conflict detected pageId=" << pageId;
             conflictPageIds.insert(pageId);
             continue;
+        }
+
+        if (!localUpdated.isEmpty() && hasRemoteContent) {
+            const bool sameTitle = normalize_title(localTitle) == remoteTitle;
+            const bool sameContent = localMd == remoteMd;
+            if (sameTitle && sameContent) {
+                markSynced.bindValue(0, pageId);
+                markSynced.bindValue(1, pageId);
+                markSynced.exec();
+                markSynced.finish();
+                continue;
+            }
         }
 
         if (!localUpdated.isEmpty()) {
@@ -3104,7 +3130,20 @@ QVariantList DataStore::getPairedDevices() {
     if (!m_ready) return devices;
 
     QSqlQuery query(m_db);
-    query.exec("SELECT device_id, device_name, workspace_id, host, port, last_seen, paired_at FROM paired_devices ORDER BY paired_at DESC");
+    query.exec(R"SQL(
+        SELECT
+            device_id,
+            device_name,
+            workspace_id,
+            COALESCE(NULLIF(preferred_host, ''), host) AS display_host,
+            COALESCE(NULLIF(preferred_port, 0), port) AS display_port,
+            host AS last_seen_host,
+            port AS last_seen_port,
+            last_seen,
+            paired_at
+        FROM paired_devices
+        ORDER BY paired_at DESC
+    )SQL");
 
     while (query.next()) {
         QVariantMap device;
@@ -3113,8 +3152,10 @@ QVariantList DataStore::getPairedDevices() {
         device["workspaceId"] = query.value(2).toString();
         device["host"] = query.value(3).toString();
         device["port"] = query.value(4).toInt();
-        device["lastSeen"] = query.value(5).toString();
-        device["pairedAt"] = query.value(6).toString();
+        device["lastSeenHost"] = query.value(5).toString();
+        device["lastSeenPort"] = query.value(6).toInt();
+        device["lastSeen"] = query.value(7).toString();
+        device["pairedAt"] = query.value(8).toString();
         devices.append(device);
     }
 
@@ -3128,13 +3169,6 @@ void DataStore::savePairedDevice(const QString& deviceId,
     if (deviceId.isEmpty()) return;
 
     QSqlQuery query(m_db);
-    // Remove older entries that share the same name/workspace but different IDs.
-    QSqlQuery cleanup(m_db);
-    cleanup.prepare("DELETE FROM paired_devices WHERE device_name = ? AND workspace_id = ? AND device_id <> ?");
-    cleanup.addBindValue(deviceName);
-    cleanup.addBindValue(workspaceId);
-    cleanup.addBindValue(deviceId);
-    cleanup.exec();
 
     query.prepare(R"SQL(
         INSERT INTO paired_devices (device_id, device_name, workspace_id, last_seen)
@@ -3174,6 +3208,42 @@ void DataStore::updatePairedDeviceEndpoint(const QString& deviceId,
 
     if (!query.exec()) {
         qWarning() << "DataStore: Failed to update paired device endpoint:" << query.lastError().text();
+        return;
+    }
+    const auto updated = query.numRowsAffected();
+    if (updated > 0) {
+        emit pairedDevicesChanged();
+    }
+}
+
+void DataStore::setPairedDevicePreferredEndpoint(const QString& deviceId,
+                                                 const QString& host,
+                                                 int port) {
+    if (!m_ready) return;
+    if (deviceId.isEmpty()) return;
+
+    const auto trimmedHost = host.trimmed();
+    if (trimmedHost.isEmpty()) return;
+    if (port <= 0 || port > 65535) return;
+
+    QSqlQuery query(m_db);
+    query.prepare(R"SQL(
+        UPDATE paired_devices
+        SET preferred_host = ?,
+            preferred_port = ?,
+            host = ?,
+            port = ?,
+            last_seen = CURRENT_TIMESTAMP
+        WHERE device_id = ?;
+    )SQL");
+    query.addBindValue(trimmedHost);
+    query.addBindValue(port);
+    query.addBindValue(trimmedHost);
+    query.addBindValue(port);
+    query.addBindValue(deviceId);
+
+    if (!query.exec()) {
+        qWarning() << "DataStore: Failed to set paired device preferred endpoint:" << query.lastError().text();
         return;
     }
     const auto updated = query.numRowsAffected();
@@ -3750,6 +3820,8 @@ bool DataStore::runMigrations() {
                 device_id TEXT PRIMARY KEY,
                 device_name TEXT NOT NULL,
                 workspace_id TEXT NOT NULL,
+                preferred_host TEXT,
+                preferred_port INTEGER,
                 host TEXT,
                 port INTEGER,
                 last_seen TEXT,
@@ -4249,6 +4321,33 @@ bool DataStore::runMigrations() {
         migration.exec("PRAGMA user_version = 10");
         m_db.commit();
         currentVersion = 10;
+    }
+
+    // Migration 11: Preferred (manual) endpoint fields for paired devices.
+    if (currentVersion < 11) {
+        qDebug() << "DataStore: Running migration to version 11";
+        m_db.transaction();
+
+        QSet<QString> columns;
+        QSqlQuery info(m_db);
+        if (info.exec("PRAGMA table_info(paired_devices)")) {
+            while (info.next()) {
+                columns.insert(info.value(1).toString());
+            }
+        }
+        info.finish();
+
+        QSqlQuery migration(m_db);
+        if (!columns.contains(QStringLiteral("preferred_host"))) {
+            migration.exec("ALTER TABLE paired_devices ADD COLUMN preferred_host TEXT");
+        }
+        if (!columns.contains(QStringLiteral("preferred_port"))) {
+            migration.exec("ALTER TABLE paired_devices ADD COLUMN preferred_port INTEGER");
+        }
+
+        migration.exec("PRAGMA user_version = 11");
+        m_db.commit();
+        currentVersion = 11;
     }
     
     qDebug() << "DataStore: Migrations complete. Schema version:" << currentVersion;

@@ -118,6 +118,34 @@ SyncController::SyncController(QObject* parent)
                     host,
                     static_cast<int>(port));
             });
+    connect(sync_manager_.get(), &network::SyncManager::peerIdentityMismatch,
+            this, [this](const Uuid& expected_device_id,
+                         const Uuid& actual_device_id,
+                         const QString& device_name,
+                         const QString& host,
+                         uint16_t port) {
+                emit peerIdentityMismatch(
+                    QString::fromStdString(expected_device_id.to_string()),
+                    QString::fromStdString(actual_device_id.to_string()),
+                    device_name,
+                    host,
+                    static_cast<int>(port));
+            });
+    connect(sync_manager_.get(), &network::SyncManager::peerWorkspaceMismatch,
+            this, [this](const Uuid& device_id,
+                         const Uuid& remote_workspace_id,
+                         const Uuid& local_workspace_id,
+                         const QString& device_name,
+                         const QString& host,
+                         uint16_t port) {
+                emit peerWorkspaceMismatch(
+                    QString::fromStdString(device_id.to_string()),
+                    QString::fromStdString(remote_workspace_id.to_string()),
+                    QString::fromStdString(local_workspace_id.to_string()),
+                    device_name,
+                    host,
+                    static_cast<int>(port));
+            });
     connect(sync_manager_.get(), &network::SyncManager::peerApprovalRequired,
             this, [this](const Uuid& device_id,
                          const QString& device_name,
@@ -365,7 +393,8 @@ void SyncController::connectToPeer(const QString& deviceId,
     }
     qInfo() << "SYNC: connectToPeer deviceId=" << deviceId << "host=" << trimmedHost << "port=" << port;
     sync_manager_->connectToEndpoint(*parsed, trimmedHost,
-                                     static_cast<uint16_t>(port));
+                                     static_cast<uint16_t>(port),
+                                     false);
 }
 
 void SyncController::connectToHost(const QString& host) {
@@ -384,7 +413,8 @@ void SyncController::connectToHostWithPort(const QString& host, int port) {
     }
     qInfo() << "SYNC: connectToHost host=" << trimmedHost << "port=" << port;
     sync_manager_->connectToEndpoint(Uuid::generate(), trimmedHost,
-                                     static_cast<uint16_t>(port));
+                                     static_cast<uint16_t>(port),
+                                     true);
 }
 
 void SyncController::pairToHostWithPort(const QString& host, int port) {
@@ -411,7 +441,7 @@ void SyncController::pairToHostWithPort(const QString& host, int port) {
         .started_ms = QDateTime::currentDateTimeUtc().toMSecsSinceEpoch(),
     };
     qInfo() << "SYNC: pairToHost connect host=" << trimmedHost << "port=" << port;
-    sync_manager_->connectToEndpoint(Uuid::generate(), trimmedHost, static_cast<uint16_t>(port));
+    sync_manager_->connectToEndpoint(Uuid::generate(), trimmedHost, static_cast<uint16_t>(port), true);
 }
 
 void SyncController::sendPairingResponse(const QString& deviceId,

@@ -786,6 +786,8 @@ ApplicationWindow {
 
     property var pendingPairByHostname: null
     property var pendingSyncConflicts: []
+    property var blockedReconnectUntilByDeviceId: ({})
+    property var repairPromptedUntilByDeviceId: ({})
 
     function showSyncConflict(conflict) {
         if (!conflict || !conflict.pageId) return
@@ -853,6 +855,84 @@ ApplicationWindow {
     }
 
     Dialog {
+        id: repairRequiredDialog
+        parent: Overlay.overlay
+        modal: true
+        title: "Re-pair Required"
+        standardButtons: Dialog.NoButton
+
+        property string pairedDeviceId: ""
+        property string details: ""
+        property bool canRemovePairing: false
+
+        onClosed: {
+            pairedDeviceId = ""
+            details = ""
+            canRemovePairing = false
+        }
+
+        background: Rectangle {
+            color: ThemeManager.surface
+            border.width: 1
+            border.color: ThemeManager.border
+            radius: ThemeManager.radiusLarge
+        }
+
+        contentItem: Item {
+            implicitWidth: 420
+            implicitHeight: contentLayout.implicitHeight + ThemeManager.spacingMedium * 2
+
+            ColumnLayout {
+                id: contentLayout
+                anchors.fill: parent
+                anchors.margins: ThemeManager.spacingMedium
+                spacing: ThemeManager.spacingMedium
+
+                Text {
+                    Layout.fillWidth: true
+                    text: repairRequiredDialog.details !== "" ? repairRequiredDialog.details
+                                                          : "This device and the peer are not in the same workspace or the peer was reset. Re-pairing is required."
+                    color: ThemeManager.text
+                    font.pixelSize: ThemeManager.fontSizeNormal
+                    wrapMode: Text.Wrap
+                }
+
+                Flow {
+                    width: parent.width
+                    spacing: ThemeManager.spacingSmall
+
+                    Button {
+                        text: "Open Devices"
+                        onClicked: {
+                            if (settingsDialog) {
+                                settingsDialog.open()
+                                if (settingsDialog.openDevicesTab) settingsDialog.openDevicesTab()
+                            }
+                            repairRequiredDialog.close()
+                        }
+                    }
+
+                    Button {
+                        text: "Remove Pairing"
+                        visible: repairRequiredDialog.canRemovePairing && DataStore && repairRequiredDialog.pairedDeviceId !== ""
+                        onClicked: {
+                            if (DataStore && repairRequiredDialog.pairedDeviceId !== "") {
+                                DataStore.removePairedDevice(repairRequiredDialog.pairedDeviceId)
+                            }
+                            repairRequiredDialog.close()
+                        }
+                    }
+
+                    Button {
+                        text: "Dismiss"
+                        onClicked: repairRequiredDialog.close()
+                    }
+                }
+            }
+        }
+    }
+
+    Dialog {
         id: incomingPairDialog
         parent: Overlay.overlay
         modal: true
@@ -883,7 +963,7 @@ ApplicationWindow {
             implicitHeight: contentLayout.implicitHeight + ThemeManager.spacingMedium * 2
 
             ColumnLayout {
-                id: contentLayout
+                id: hostnameContentLayout
                 anchors.fill: parent
                 anchors.margins: ThemeManager.spacingMedium
                 spacing: ThemeManager.spacingMedium
@@ -1015,7 +1095,7 @@ ApplicationWindow {
             implicitHeight: contentLayout.implicitHeight + ThemeManager.spacingMedium * 2
 
             ColumnLayout {
-                id: hostnameContentLayout
+                id: pairingContentLayout
                 anchors.fill: parent
                 anchors.margins: ThemeManager.spacingMedium
                 spacing: ThemeManager.spacingMedium
@@ -1357,13 +1437,77 @@ ApplicationWindow {
                 return
             }
             // Save paired device using our current workspace id.
-            DataStore.savePairedDevice(deviceId, "Paired device", ws)
-            DataStore.updatePairedDeviceEndpoint(deviceId, pending.host, pending.port)
+            const name = pending.peerDeviceName && pending.peerDeviceName !== ""
+                ? pending.peerDeviceName
+                : "Paired device"
+            DataStore.savePairedDevice(deviceId, name, ws)
+            if (DataStore.setPairedDevicePreferredEndpoint) {
+                DataStore.setPairedDevicePreferredEndpoint(deviceId, pending.host, pending.port)
+            } else {
+                DataStore.updatePairedDeviceEndpoint(deviceId, pending.host, pending.port)
+            }
             pendingPairByHostname = null
         }
 
         function onPeerHelloReceived(deviceId, deviceName, host, port) {
             console.log("SYNCUI: peerHelloReceived", deviceId, deviceName, host, port)
+            if (DataStore && deviceId && deviceId !== "" && host && host !== "" && port && port > 0) {
+                DataStore.updatePairedDeviceEndpoint(deviceId, host, port)
+            }
+            const pending = pendingPairByHostname
+            if (!pending) return
+            if (!pending.peerDeviceId || pending.peerDeviceId === "") {
+                pendingPairByHostname = {
+                    host: pending.host,
+                    port: pending.port,
+                    startedAt: pending.startedAt,
+                    peerDeviceId: deviceId || "",
+                    peerDeviceName: deviceName || ""
+                }
+            }
+        }
+
+        function onPeerIdentityMismatch(expectedDeviceId, actualDeviceId, deviceName, host, port) {
+            console.log("SYNCUI: peerIdentityMismatch expected=", expectedDeviceId,
+                        "actual=", actualDeviceId, deviceName, host, port)
+            if (!expectedDeviceId || expectedDeviceId === "") return
+            // Avoid hot-looping reconnect attempts when a device was reinstalled/reset (device_id changed).
+            blockedReconnectUntilByDeviceId[expectedDeviceId] = Date.now() + 60000
+
+            const promptedUntil = repairPromptedUntilByDeviceId[expectedDeviceId]
+            if (promptedUntil && Date.now() < promptedUntil) return
+            repairPromptedUntilByDeviceId[expectedDeviceId] = Date.now() + 60000
+
+            repairRequiredDialog.pairedDeviceId = expectedDeviceId
+            repairRequiredDialog.canRemovePairing = true
+            repairRequiredDialog.details =
+                "This paired device was reset/reinstalled.\n\n" +
+                "Expected deviceId: " + expectedDeviceId + "\n" +
+                "Actual deviceId: " + (actualDeviceId || "unknown") + "\n" +
+                "Endpoint: " + (host || "unknown") + ":" + (port || 0) + "\n\n" +
+                "Remove the old pairing and pair again."
+            repairRequiredDialog.open()
+        }
+
+        function onPeerWorkspaceMismatch(deviceId, remoteWorkspaceId, localWorkspaceId, deviceName, host, port) {
+            console.log("SYNCUI: peerWorkspaceMismatch", deviceId, remoteWorkspaceId, localWorkspaceId, deviceName, host, port)
+            if (!deviceId || deviceId === "") return
+            blockedReconnectUntilByDeviceId[deviceId] = Date.now() + 60000
+
+            const promptedUntil = repairPromptedUntilByDeviceId[deviceId]
+            if (promptedUntil && Date.now() < promptedUntil) return
+            repairPromptedUntilByDeviceId[deviceId] = Date.now() + 60000
+
+            repairRequiredDialog.pairedDeviceId = deviceId
+            repairRequiredDialog.canRemovePairing = true
+            repairRequiredDialog.details =
+                "This device is not in the same workspace as the peer.\n\n" +
+                "Peer: " + deviceId + (deviceName ? (" (" + deviceName + ")") : "") + "\n" +
+                "Peer workspace: " + (remoteWorkspaceId || "unknown") + "\n" +
+                "This workspace: " + (localWorkspaceId || "unknown") + "\n" +
+                "Endpoint: " + (host || "unknown") + ":" + (port || 0) + "\n\n" +
+                "Re-pair the devices to get back into the same workspace."
+            repairRequiredDialog.open()
         }
 
         function onPeerApprovalRequired(deviceId, deviceName, host, port) {
@@ -1745,6 +1889,9 @@ ApplicationWindow {
                 if (!d.deviceId || !d.host || !d.port) continue
                 if (d.port <= 0) continue
                 if (d.workspaceId && d.workspaceId !== "" && d.workspaceId !== appSyncController.workspaceId) continue
+                var blockedUntil = blockedReconnectUntilByDeviceId[d.deviceId]
+                if (blockedUntil && Date.now() < blockedUntil) continue
+                if (blockedUntil && Date.now() >= blockedUntil) delete blockedReconnectUntilByDeviceId[d.deviceId]
                 appSyncController.connectToPeer(d.deviceId, d.host, d.port)
             }
         }

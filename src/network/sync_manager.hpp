@@ -36,6 +36,9 @@ struct PeerConnection {
     bool initiated_by_us = false;
     bool hello_received = false;
     bool approved = true;
+    // When true, the peers_ map key is a temporary placeholder and may be rekeyed
+    // to the real remoteId after Hello (e.g. inbound connections or manual hostname connect).
+    bool allow_rekey_on_hello = false;
     QString device_name;
     QHostAddress host;
     uint16_t port = 0;
@@ -88,14 +91,16 @@ public:
      */
     void connectToEndpoint(const Uuid& device_id,
                            const QHostAddress& host,
-                           uint16_t port);
+                           uint16_t port,
+                           bool allow_rekey_on_hello = false);
 
     /**
      * Connect to a peer using a hostname (e.g., Tailscale MagicDNS).
      */
     void connectToEndpoint(const Uuid& device_id,
                            const QString& host,
-                           uint16_t port);
+                           uint16_t port,
+                           bool allow_rekey_on_hello = false);
 
     /**
      * Approve or reject an incoming connection after Hello.
@@ -144,6 +149,17 @@ signals:
                            const QString& device_name,
                            const QString& host,
                            uint16_t port);
+    void peerIdentityMismatch(const Uuid& expected_device_id,
+                              const Uuid& actual_device_id,
+                              const QString& device_name,
+                              const QString& host,
+                              uint16_t port);
+    void peerWorkspaceMismatch(const Uuid& device_id,
+                               const Uuid& remote_workspace_id,
+                               const Uuid& local_workspace_id,
+                               const QString& device_name,
+                               const QString& host,
+                               uint16_t port);
     void peerApprovalRequired(const Uuid& device_id,
                               const QString& device_name,
                               const QString& host,

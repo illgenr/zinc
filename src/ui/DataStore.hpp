@@ -117,6 +117,9 @@ public:
     Q_INVOKABLE void updatePairedDeviceEndpoint(const QString& deviceId,
                                                const QString& host,
                                                int port);
+    Q_INVOKABLE void setPairedDevicePreferredEndpoint(const QString& deviceId,
+                                                      const QString& host,
+                                                      int port);
     Q_INVOKABLE void removePairedDevice(const QString& deviceId);
     Q_INVOKABLE void clearPairedDevices();
 

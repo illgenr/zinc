@@ -493,3 +493,34 @@ TEST_CASE("DataStore: paired device endpoint round-trip", "[qml][datastore]") {
     REQUIRE(device.value("host").toString() == QStringLiteral("192.168.1.2"));
     REQUIRE(device.value("port").toInt() == 4242);
 }
+
+TEST_CASE("DataStore: preferred device endpoint is stable across updates", "[qml][datastore]") {
+    zinc::ui::DataStore store;
+    REQUIRE(store.initialize());
+    REQUIRE(store.resetDatabase());
+
+    store.savePairedDevice("dev1", "Device 1", "ws1");
+    store.setPairedDevicePreferredEndpoint("dev1", "do7", 47888);
+    store.updatePairedDeviceEndpoint("dev1", "192.168.1.12", 47888);
+
+    const auto devices = store.getPairedDevices();
+    REQUIRE(devices.size() == 1);
+    const auto device = devices[0].toMap();
+    REQUIRE(device.value("deviceId").toString() == QStringLiteral("dev1"));
+    REQUIRE(device.value("host").toString() == QStringLiteral("do7"));
+    REQUIRE(device.value("port").toInt() == 47888);
+    REQUIRE(device.value("lastSeenHost").toString() == QStringLiteral("192.168.1.12"));
+    REQUIRE(device.value("lastSeenPort").toInt() == 47888);
+}
+
+TEST_CASE("DataStore: multiple paired devices may share the same name", "[qml][datastore]") {
+    zinc::ui::DataStore store;
+    REQUIRE(store.initialize());
+    REQUIRE(store.resetDatabase());
+
+    store.savePairedDevice("dev1", "Zinc Device", "ws1");
+    store.savePairedDevice("dev2", "Zinc Device", "ws1");
+
+    const auto devices = store.getPairedDevices();
+    REQUIRE(devices.size() == 2);
+}

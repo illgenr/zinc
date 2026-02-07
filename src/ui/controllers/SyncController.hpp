@@ -79,6 +79,17 @@ signals:
                            const QString& deviceName,
                            const QString& host,
                            int port);
+    void peerIdentityMismatch(const QString& expectedDeviceId,
+                              const QString& actualDeviceId,
+                              const QString& deviceName,
+                              const QString& host,
+                              int port);
+    void peerWorkspaceMismatch(const QString& deviceId,
+                               const QString& remoteWorkspaceId,
+                               const QString& localWorkspaceId,
+                               const QString& deviceName,
+                               const QString& host,
+                               int port);
     void pairingRequestReceived(const QString& deviceId,
                                 const QString& deviceName,
                                 const QString& host,
