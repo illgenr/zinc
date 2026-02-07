@@ -3,6 +3,7 @@
 #include <QQmlComponent>
 #include <QQmlEngine>
 #include <QQmlError>
+#include <QFile>
 #include <QStringList>
 #include <QUrl>
 
@@ -26,6 +27,14 @@ QString formatErrors(const QList<QQmlError>& errors) {
         lines.append(error.toString());
     }
     return lines.join('\n');
+}
+
+QString readAllText(const QString& path) {
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        return {};
+    }
+    return QString::fromUtf8(file.readAll());
 }
 
 } // namespace
@@ -55,4 +64,10 @@ TEST_CASE("QML: PairingDialog loads", "[qml]") {
     REQUIRE(component.status() == QQmlComponent::Ready);
 
     // Component load is enough to catch QML compile errors.
+}
+
+TEST_CASE("QML: PairingDialog exposes add via hostname option", "[qml]") {
+    const auto contents = readAllText(QStringLiteral(":/qt/qml/zinc/qml/dialogs/PairingDialog.qml"));
+    REQUIRE(!contents.isEmpty());
+    REQUIRE(contents.contains(QStringLiteral("Add via Hostname (Tailscale)")));
 }

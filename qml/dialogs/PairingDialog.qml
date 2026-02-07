@@ -8,6 +8,7 @@ import "../components"
 
 Dialog {
     id: root
+    signal addViaHostnameRequested()
     
     title: "Pair Device"
     anchors.centerIn: parent
@@ -505,6 +506,21 @@ Dialog {
                         pairingController.configureLocalDevice(deviceName, "", 0)
                         pairingController.startPairingAsInitiator("passphrase")
                         mode = "passphrase"
+                    }
+                }
+
+                PairingOption {
+                    Layout.fillWidth: true
+                    icon: "🌐"
+                    label: "Add via Hostname (Tailscale)"
+                    description: "Connect directly using MagicDNS or Tailscale IP"
+                    onClicked: {
+                        statusOverride = ""
+                        scanInProgress = false
+                        cameraActive = false
+                        pairingController.cancel()
+                        root.close()
+                        root.addViaHostnameRequested()
                     }
                 }
             }

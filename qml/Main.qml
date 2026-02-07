@@ -782,6 +782,11 @@ ApplicationWindow {
     PairingDialog {
         id: pairingDialog
         externalSyncController: appSyncController
+        onAddViaHostnameRequested: {
+            settingsDialog.open()
+            settingsDialog.openDevicesTab()
+            Qt.callLater(function() { settingsDialog.openManualAddDialog() })
+        }
     }
 
     property var pendingPairByHostname: null

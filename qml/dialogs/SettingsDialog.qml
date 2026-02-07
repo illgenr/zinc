@@ -16,6 +16,12 @@ Dialog {
         // Devices tab index matches tabModel ordering.
         settingsTabs.currentIndex = 3
     }
+    function openManualAddDialog() {
+        manualAddDialog.hostText = ""
+        manualAddDialog.portText = ""
+        manualAddDialog.statusText = ""
+        manualAddDialog.open()
+    }
 
     ListModel {
         id: pairedDevicesModel
@@ -1071,7 +1077,10 @@ Dialog {
                     verticalAlignment: Text.AlignVCenter
                 }
                 
-                onClicked: pairOrManualDialog.open()
+                onClicked: {
+                    root.pairDeviceRequested()
+                    root.close()
+                }
             }
         }
     }
@@ -1218,70 +1227,6 @@ Dialog {
                         syncController.connectToPeer(endpointEditDialog.deviceId, host, port)
                         endpointEditDialog.close()
                     }
-                }
-            }
-        }
-    }
-
-    Dialog {
-        id: pairOrManualDialog
-        title: "Add Device"
-        modal: true
-        anchors.centerIn: parent
-        width: Math.min(360, root.width - 40)
-        standardButtons: Dialog.NoButton
-
-        background: Rectangle {
-            color: ThemeManager.surface
-            border.width: 1
-            border.color: ThemeManager.border
-            radius: ThemeManager.radiusMedium
-        }
-
-        contentItem: Item {
-            implicitWidth: 360
-            implicitHeight: pairOrManualContentLayout.implicitHeight + ThemeManager.spacingMedium * 2
-
-            ColumnLayout {
-                id: pairOrManualContentLayout
-                anchors.fill: parent
-                anchors.margins: ThemeManager.spacingMedium
-                spacing: ThemeManager.spacingMedium
-
-                Text {
-                    Layout.fillWidth: true
-                    text: "Choose how to add a device"
-                    color: ThemeManager.text
-                    font.pixelSize: ThemeManager.fontSizeNormal
-                    wrapMode: Text.Wrap
-                }
-
-                Button {
-                    Layout.fillWidth: true
-                    text: "Pair via Code/QR"
-                    onClicked: {
-                        pairOrManualDialog.close()
-                        root.pairDeviceRequested()
-                        root.close()
-                    }
-                }
-
-                Button {
-                    Layout.fillWidth: true
-                    text: "Add via Hostname (Tailscale)"
-                    onClicked: {
-                        pairOrManualDialog.close()
-                        manualAddDialog.hostText = ""
-                        manualAddDialog.portText = ""
-                        manualAddDialog.statusText = ""
-                        manualAddDialog.open()
-                    }
-                }
-
-                Button {
-                    Layout.fillWidth: true
-                    text: "Cancel"
-                    onClicked: pairOrManualDialog.close()
                 }
             }
         }
