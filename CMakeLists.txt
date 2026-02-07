@@ -605,6 +605,7 @@ if(ZINC_BUILD_TESTS)
 			        tests/qml/test_export_folder_settings.cpp
                     tests/qml/test_settings_dialog_path_pickings_qml.cpp
                     tests/qml/test_settings_dialog_endpoint_edit_qml.cpp
+                    tests/qml/test_settings_dialog_device_name_qml.cpp
 			        tests/qml/test_attachments_disk_storage.cpp
 			        tests/qml/test_block_editor_cursor_visibility_qml.cpp
 			        tests/qml/test_block_editor_enter_logic_qml.cpp
@@ -619,9 +620,12 @@ if(ZINC_BUILD_TESTS)
 				        tests/qml/test_cmark.cpp
 				        tests/qml/test_inline_format_bar_qml.cpp
 		        tests/qml/test_cursor_motion_indicator_logic_qml.cpp
+                tests/qml/test_multi_remote_cursor_qml.cpp
 		        tests/qml/test_sync_controller_settings.cpp
                 tests/qml/test_sync_incoming_approval.cpp
 		        tests/qml/test_sync_buttons_qml.cpp
+                tests/qml/test_main_sync_relay_qml.cpp
+                tests/qml/test_main_reconnect_qml.cpp
 		        tests/qml/test_sync_presence_parse.cpp
 		        tests/qml/test_hello_policy.cpp
 		        tests/qml/test_startup_page_settings.cpp

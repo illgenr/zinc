@@ -136,6 +136,7 @@ public:
     
     [[nodiscard]] bool isSyncing() const { return syncing_; }
     [[nodiscard]] int connectedPeerCount() const;
+    [[nodiscard]] bool isPeerConnected(const Uuid& device_id) const;
     [[nodiscard]] uint16_t listeningPort() const;
     [[nodiscard]] DiscoveryService* discovery() { return discovery_.get(); }
 

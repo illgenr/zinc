@@ -114,6 +114,8 @@ public:
     Q_INVOKABLE void savePairedDevice(const QString& deviceId,
                                       const QString& deviceName,
                                       const QString& workspaceId);
+    Q_INVOKABLE void setPairedDeviceName(const QString& deviceId,
+                                         const QString& deviceName);
     Q_INVOKABLE void updatePairedDeviceEndpoint(const QString& deviceId,
                                                const QString& host,
                                                int port);

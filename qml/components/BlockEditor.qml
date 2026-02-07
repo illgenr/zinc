@@ -143,6 +143,7 @@ FocusScope {
     property string remoteCursorPageId: ""
     property int remoteCursorBlockIndex: -1
     property int remoteCursorPos: -1
+    property var remoteCursors: []
     
     property var availablePages: []  // Set by parent to provide page list for linking
     property bool selectionDragging: false

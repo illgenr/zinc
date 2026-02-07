@@ -8,6 +8,7 @@
 #include <QJsonObject>
 #include <QSettings>
 #include <QDateTime>
+#include <algorithm>
 
 namespace zinc::ui {
 
@@ -55,8 +56,7 @@ SyncController::SyncController(QObject* parent)
                 emit peerDisconnected(QString::fromStdString(device_id.to_string()));
                 emit peerCountChanged();
                 emit peersChanged();
-                if (remote_presence_.has_value()) {
-                    remote_presence_.reset();
+                if (remote_presences_.erase(device_id) > 0) {
                     emit remotePresenceChanged();
                 }
             });
@@ -227,27 +227,28 @@ SyncController::SyncController(QObject* parent)
             });
     connect(sync_manager_.get(), &network::SyncManager::presenceReceived,
             this, [this](const Uuid& peer_id, const QByteArray& payload) {
-                Q_UNUSED(peer_id);
                 const auto parsed = parseSyncPresence(payload);
                 if (!parsed) {
                     return;
                 }
                 if (qEnvironmentVariableIsSet("ZINC_DEBUG_SYNC")) {
-                    qInfo() << "SYNC: presenceReceived autoSyncEnabled=" << parsed->auto_sync_enabled
+                    qInfo() << "SYNC: presenceReceived peer=" << QString::fromStdString(peer_id.to_string())
+                            << "autoSyncEnabled=" << parsed->auto_sync_enabled
                             << "pageId=" << parsed->page_id
                             << "blockIndex=" << parsed->block_index
                             << "cursorPos=" << parsed->cursor_pos;
                 }
+                const auto it = remote_presences_.find(peer_id);
                 const auto changed =
-                    (!remote_presence_.has_value()) ||
-                    (remote_presence_->auto_sync_enabled != parsed->auto_sync_enabled) ||
-                    (remote_presence_->page_id != parsed->page_id) ||
-                    (remote_presence_->block_index != parsed->block_index) ||
-                    (remote_presence_->cursor_pos != parsed->cursor_pos);
+                    (it == remote_presences_.end()) ||
+                    (it->second.auto_sync_enabled != parsed->auto_sync_enabled) ||
+                    (it->second.page_id != parsed->page_id) ||
+                    (it->second.block_index != parsed->block_index) ||
+                    (it->second.cursor_pos != parsed->cursor_pos);
                 if (!changed) {
                     return;
                 }
-                remote_presence_ = *parsed;
+                remote_presences_[peer_id] = *parsed;
                 emit remotePresenceChanged();
             });
     connect(sync_manager_.get(), &network::SyncManager::error,
@@ -281,19 +282,38 @@ QVariantList SyncController::discoveredPeers() const {
 }
 
 bool SyncController::remoteAutoSyncEnabled() const {
-    return remote_presence_.has_value() ? remote_presence_->auto_sync_enabled : false;
+    return std::any_of(remote_presences_.begin(), remote_presences_.end(),
+                       [](const auto& entry) { return entry.second.auto_sync_enabled; });
 }
 
 QString SyncController::remoteCursorPageId() const {
-    return remote_presence_.has_value() ? remote_presence_->page_id : QString{};
+    if (remote_presences_.empty()) return QString{};
+    return remote_presences_.begin()->second.page_id;
 }
 
 int SyncController::remoteCursorBlockIndex() const {
-    return remote_presence_.has_value() ? remote_presence_->block_index : -1;
+    if (remote_presences_.empty()) return -1;
+    return remote_presences_.begin()->second.block_index;
 }
 
 int SyncController::remoteCursorPos() const {
-    return remote_presence_.has_value() ? remote_presence_->cursor_pos : -1;
+    if (remote_presences_.empty()) return -1;
+    return remote_presences_.begin()->second.cursor_pos;
+}
+
+QVariantList SyncController::remoteCursors() const {
+    QVariantList out;
+    out.reserve(static_cast<int>(remote_presences_.size()));
+    for (const auto& [peerId, presence] : remote_presences_) {
+        QVariantMap cursor;
+        cursor.insert(QStringLiteral("deviceId"), QString::fromStdString(peerId.to_string()));
+        cursor.insert(QStringLiteral("pageId"), presence.page_id);
+        cursor.insert(QStringLiteral("blockIndex"), presence.block_index);
+        cursor.insert(QStringLiteral("cursorPos"), presence.cursor_pos);
+        cursor.insert(QStringLiteral("autoSyncEnabled"), presence.auto_sync_enabled);
+        out.append(cursor);
+    }
+    return out;
 }
 
 bool SyncController::configure(const QString& workspaceId, const QString& deviceName) {
@@ -317,7 +337,7 @@ bool SyncController::configure(const QString& workspaceId, const QString& device
     discovered_peers_.clear();
     emit discoveredPeersChanged();
     emit configuredChanged();
-    remote_presence_.reset();
+    remote_presences_.clear();
     emit remotePresenceChanged();
     return true;
 }
@@ -362,6 +382,10 @@ bool SyncController::startPairingListener(const QString& defaultDeviceName) {
 
 void SyncController::stopSync() {
     sync_manager_->stop();
+    if (!remote_presences_.empty()) {
+        remote_presences_.clear();
+        emit remotePresenceChanged();
+    }
 }
 
 void SyncController::connectToPeer(const QString& deviceId,
@@ -468,6 +492,14 @@ void SyncController::approvePeer(const QString& deviceId, bool approved) {
 
 int SyncController::listeningPort() const {
     return static_cast<int>(sync_manager_->listeningPort());
+}
+
+bool SyncController::isPeerConnected(const QString& deviceId) const {
+    const auto parsed = Uuid::parse(deviceId.toStdString());
+    if (!parsed) {
+        return false;
+    }
+    return sync_manager_->isPeerConnected(*parsed);
 }
 
 void SyncController::sendPageSnapshot(const QString& jsonPayload) {

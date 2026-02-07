@@ -50,15 +50,25 @@ Item {
         radius: ThemeManager.radiusSmall
     }
 
-    Rectangle {
-        id: remoteCursorIndicator
-        objectName: "remoteCursorIndicator"
-        visible: false
-        color: ThemeManager.remoteCursor
-        width: 2
-        height: 0
-        x: 0
-        y: 0
+    property var activeRemoteCursors: []
+
+    Item {
+        id: remoteCursorLayer
+        anchors.fill: parent
+
+        Repeater {
+            id: remoteCursorRepeater
+            model: root.activeRemoteCursors
+
+            delegate: Rectangle {
+                color: ThemeManager.remoteCursor
+                width: 2
+                x: modelData.x
+                y: modelData.y
+                height: modelData.height
+                visible: modelData.height > 0
+            }
+        }
     }
 
     Rectangle {
@@ -74,38 +84,62 @@ Item {
 
     function refreshRemoteCursorIndicator() {
         if (!root.editor || !root.textControl) {
-            remoteCursorIndicator.visible = false
+            root.activeRemoteCursors = []
             return
         }
         if (!("showRemoteCursor" in root.editor) || !root.editor.showRemoteCursor) {
-            remoteCursorIndicator.visible = false
+            root.activeRemoteCursors = []
             return
         }
-        if (!("remoteCursorPageId" in root.editor) || !("pageId" in root.editor)) {
-            remoteCursorIndicator.visible = false
-            return
-        }
-        if (root.editor.remoteCursorPageId !== root.editor.pageId) {
-            remoteCursorIndicator.visible = false
-            return
-        }
-        if (!("remoteCursorBlockIndex" in root.editor) || !("remoteCursorPos" in root.editor)) {
-            remoteCursorIndicator.visible = false
-            return
-        }
-        if (root.editor.remoteCursorBlockIndex !== root.blockIndex || root.editor.remoteCursorPos < 0) {
-            remoteCursorIndicator.visible = false
+        if (!("pageId" in root.editor)) {
+            root.activeRemoteCursors = []
             return
         }
 
-        remoteCursorIndicator.visible = true
         const textLen = (root.textControl.text || "").length
-        const pos = Math.max(0, Math.min(root.editor.remoteCursorPos, textLen))
-        const rect = root.textControl.positionToRectangle(pos)
-        const p = root.textControl.mapToItem(root, rect.x, rect.y)
-        remoteCursorIndicator.x = p.x
-        remoteCursorIndicator.y = p.y
-        remoteCursorIndicator.height = rect.height > 0 ? rect.height : root.textControl.cursorRectangle.height
+        const entries = []
+
+        const addEntry = function(cursorPos, slotIndex) {
+            if (cursorPos < 0) return
+            const pos = Math.max(0, Math.min(cursorPos, textLen))
+            const rect = root.textControl.positionToRectangle(pos)
+            const p = root.textControl.mapToItem(root, rect.x, rect.y)
+            const h = rect.height > 0 ? rect.height : root.textControl.cursorRectangle.height
+            entries.push({
+                x: p.x + (slotIndex * 3),
+                y: p.y,
+                height: h
+            })
+        }
+
+        const hasMulti =
+            ("remoteCursors" in root.editor) &&
+            root.editor.remoteCursors &&
+            root.editor.remoteCursors.length > 0
+        if (hasMulti) {
+            let slot = 0
+            for (let i = 0; i < root.editor.remoteCursors.length; i++) {
+                const c = root.editor.remoteCursors[i] || {}
+                if ((c.pageId || "") !== (root.editor.pageId || "")) continue
+                if ((c.blockIndex === undefined ? -1 : c.blockIndex) !== root.blockIndex) continue
+                addEntry(c.cursorPos === undefined ? -1 : c.cursorPos, slot)
+                slot++
+            }
+            root.activeRemoteCursors = entries
+            return
+        }
+
+        if (!("remoteCursorPageId" in root.editor) || !("remoteCursorBlockIndex" in root.editor) || !("remoteCursorPos" in root.editor)) {
+            root.activeRemoteCursors = []
+            return
+        }
+        if (root.editor.remoteCursorPageId !== root.editor.pageId ||
+            root.editor.remoteCursorBlockIndex !== root.blockIndex) {
+            root.activeRemoteCursors = []
+            return
+        }
+        addEntry(root.editor.remoteCursorPos, 0)
+        root.activeRemoteCursors = entries
     }
 
     function refreshLocalCursorIndicator() {
@@ -298,6 +332,7 @@ Item {
         ignoreUnknownSignals: true
 
         function onShowRemoteCursorChanged() { root.refreshRemoteCursorIndicator() }
+        function onRemoteCursorsChanged() { root.refreshRemoteCursorIndicator() }
         function onRemoteCursorPageIdChanged() { root.refreshRemoteCursorIndicator() }
         function onRemoteCursorBlockIndexChanged() { root.refreshRemoteCursorIndicator() }
         function onRemoteCursorPosChanged() { root.refreshRemoteCursorIndicator() }

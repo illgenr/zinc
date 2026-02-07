@@ -524,3 +524,18 @@ TEST_CASE("DataStore: multiple paired devices may share the same name", "[qml][d
     const auto devices = store.getPairedDevices();
     REQUIRE(devices.size() == 2);
 }
+
+TEST_CASE("DataStore: paired device name can be updated", "[qml][datastore]") {
+    zinc::ui::DataStore store;
+    REQUIRE(store.initialize());
+    REQUIRE(store.resetDatabase());
+
+    store.savePairedDevice("dev1", "Old Name", "ws1");
+    store.setPairedDeviceName("dev1", "Travel Phone");
+
+    const auto devices = store.getPairedDevices();
+    REQUIRE(devices.size() == 1);
+    const auto device = devices[0].toMap();
+    REQUIRE(device.value("deviceId").toString() == QStringLiteral("dev1"));
+    REQUIRE(device.value("deviceName").toString() == QStringLiteral("Travel Phone"));
+}

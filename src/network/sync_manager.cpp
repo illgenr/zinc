@@ -33,6 +33,17 @@ std::optional<QJsonObject> parse_object(const std::vector<uint8_t>& payload, QJs
     }
     return doc.object();
 }
+
+QString debug_peer_name(const PeerConnection* peer) {
+    if (!peer) {
+        return QStringLiteral("<unknown>");
+    }
+    const auto name = peer->device_name.trimmed();
+    if (!name.isEmpty()) {
+        return name;
+    }
+    return QString::fromStdString(peer->device_id.to_string());
+}
 } // namespace
 
 SyncManager::SyncManager(QObject* parent)
@@ -428,6 +439,15 @@ int SyncManager::connectedPeerCount() const {
     return count;
 }
 
+bool SyncManager::isPeerConnected(const Uuid& device_id) const {
+    const auto it = peers_.find(device_id);
+    if (it == peers_.end() || !it->second) {
+        return false;
+    }
+    const auto& peer = *it->second;
+    return peer.approved && peer.connection && peer.connection->isConnected();
+}
+
 uint16_t SyncManager::listeningPort() const {
     return server_ ? server_->port() : 0;
 }
@@ -505,6 +525,7 @@ void SyncManager::onConnectionConnected() {
             sendHello(*conn);
             qInfo() << "SYNC: connection established"
                     << "peer_id=" << QString::fromStdString(id.to_string())
+                    << "peer_name=" << debug_peer_name(peer.get())
                     << "endpoint=" << conn->peerAddress().toString()
                     << "port=" << conn->peerPort();
             if (sync_debug_enabled()) {
@@ -697,6 +718,11 @@ void SyncManager::onMessageReceived(MessageType type,
                 qInfo() << "SYNC: msg PagesSnapshot bytes=" << payload.size();
             }
             qInfo() << "SYNC: Received PagesSnapshot bytes=" << payload.size();
+            if (peer_ptr) {
+                qInfo() << "SYNC: PagesSnapshot from peer_id="
+                        << QString::fromStdString(peer_id.to_string())
+                        << "peer_name=" << debug_peer_name(peer_ptr);
+            }
             QByteArray data(
                 reinterpret_cast<const char*>(payload.data()),
                 static_cast<int>(payload.size()));
@@ -999,6 +1025,13 @@ void SyncManager::sendPageSnapshot(const std::vector<uint8_t>& payload) {
     }
     if (sync_debug_enabled() && targets.empty()) {
         qInfo() << "SYNC: sendPageSnapshot no connected peers; skipping send";
+    }
+    if (sync_debug_enabled()) {
+        for (const auto& [id, peer] : peers_) {
+            if (!peer || !peer->connection || !peer->connection->isConnected()) continue;
+            qInfo() << "SYNC: sendPageSnapshot target_id=" << QString::fromStdString(id.to_string())
+                    << "target_name=" << debug_peer_name(peer.get());
+        }
     }
     for (const auto& conn : targets) {
         if (conn && conn->isConnected()) {

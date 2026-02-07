@@ -358,6 +358,7 @@ ApplicationWindow {
                 remoteCursorPageId: appSyncController ? appSyncController.remoteCursorPageId : ""
                 remoteCursorBlockIndex: appSyncController ? appSyncController.remoteCursorBlockIndex : -1
                 remoteCursorPos: appSyncController ? appSyncController.remoteCursorPos : -1
+                remoteCursors: appSyncController ? appSyncController.remoteCursors : []
                 
                 Component.onCompleted: {
                     if (root.currentPage) {
@@ -647,6 +648,7 @@ ApplicationWindow {
                         remoteCursorPageId: appSyncController ? appSyncController.remoteCursorPageId : ""
                         remoteCursorBlockIndex: appSyncController ? appSyncController.remoteCursorBlockIndex : -1
                         remoteCursorPos: appSyncController ? appSyncController.remoteCursorPos : -1
+                        remoteCursors: appSyncController ? appSyncController.remoteCursors : []
 
                         onTitleEdited: function(newTitle) {
                             if (currentPage) {
@@ -1598,6 +1600,7 @@ ApplicationWindow {
             root.suppressOutgoingSnapshots++
             DataStore.applyAttachmentUpdates(attachments)
             root.suppressOutgoingSnapshots--
+            root.scheduleOutgoingSnapshot()
         }
 
         function onPageSnapshotReceivedPages(pages) {
@@ -1609,6 +1612,7 @@ ApplicationWindow {
             root.suppressOutgoingSnapshots++
             DataStore.applyPageUpdates(pages)
             root.suppressOutgoingSnapshots--
+            root.scheduleOutgoingSnapshot()
         }
 
         function onDeletedPageSnapshotReceivedPages(deletedPages) {
@@ -1620,6 +1624,7 @@ ApplicationWindow {
             root.suppressOutgoingSnapshots++
             DataStore.applyDeletedPageUpdates(deletedPages)
             root.suppressOutgoingSnapshots--
+            root.scheduleOutgoingSnapshot()
         }
 
         function onNotebookSnapshotReceivedNotebooks(notebooks) {
@@ -1633,6 +1638,7 @@ ApplicationWindow {
                 DataStore.applyNotebookUpdates(notebooks)
             }
             root.suppressOutgoingSnapshots--
+            root.scheduleOutgoingSnapshot()
         }
 
         function onDeletedNotebookSnapshotReceivedNotebooks(deletedNotebooks) {
@@ -1646,6 +1652,7 @@ ApplicationWindow {
                 DataStore.applyDeletedNotebookUpdates(deletedNotebooks)
             }
             root.suppressOutgoingSnapshots--
+            root.scheduleOutgoingSnapshot()
         }
 
         function onBlockSnapshotReceivedBlocks(blocks) {
@@ -1655,6 +1662,7 @@ ApplicationWindow {
             if (!DataStore || !blocks) return
             console.log("SYNC: received blocks", blocks.length)
             DataStore.applyBlockUpdates(blocks)
+            root.scheduleOutgoingSnapshot()
         }
     }
 
@@ -1911,7 +1919,6 @@ ApplicationWindow {
             tryStartSync()
             if (!DataStore || !appSyncController) return
             if (!appSyncController.syncing) return
-            if (appSyncController.peerCount > 0) return
 
             var devices = DataStore.getPairedDevices()
             for (var i = 0; i < devices.length; i++) {
@@ -1920,6 +1927,7 @@ ApplicationWindow {
                 if (!d.deviceId || !d.host || !d.port) continue
                 if (d.port <= 0) continue
                 if (d.workspaceId && d.workspaceId !== "" && d.workspaceId !== appSyncController.workspaceId) continue
+                if (appSyncController.isPeerConnected && appSyncController.isPeerConnected(d.deviceId)) continue
                 var blockedUntil = blockedReconnectUntilByDeviceId[d.deviceId]
                 if (blockedUntil && Date.now() < blockedUntil) continue
                 if (blockedUntil && Date.now() >= blockedUntil) delete blockedReconnectUntilByDeviceId[d.deviceId]

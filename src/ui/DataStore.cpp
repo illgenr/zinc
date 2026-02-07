@@ -3190,6 +3190,32 @@ void DataStore::savePairedDevice(const QString& deviceId,
     emit pairedDevicesChanged();
 }
 
+void DataStore::setPairedDeviceName(const QString& deviceId,
+                                    const QString& deviceName) {
+    if (!m_ready) return;
+    const auto trimmedId = deviceId.trimmed();
+    const auto trimmedName = deviceName.trimmed();
+    if (trimmedId.isEmpty() || trimmedName.isEmpty()) return;
+
+    QSqlQuery query(m_db);
+    query.prepare(R"SQL(
+        UPDATE paired_devices
+        SET device_name = ?,
+            last_seen = CURRENT_TIMESTAMP
+        WHERE device_id = ?;
+    )SQL");
+    query.addBindValue(trimmedName);
+    query.addBindValue(trimmedId);
+
+    if (!query.exec()) {
+        qWarning() << "DataStore: Failed to rename paired device:" << query.lastError().text();
+        return;
+    }
+    if (query.numRowsAffected() > 0) {
+        emit pairedDevicesChanged();
+    }
+}
+
 void DataStore::updatePairedDeviceEndpoint(const QString& deviceId,
                                           const QString& host,
                                           int port) {

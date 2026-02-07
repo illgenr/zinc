@@ -1008,28 +1008,71 @@ Dialog {
                             }
                         }
 
-                        Button {
-                            text: "Remove"
-                            Layout.preferredHeight: 28
-                            Layout.preferredWidth: 80
-                            Layout.minimumWidth: 80
+                        Item {
+                            Layout.preferredWidth: 172
+                            Layout.minimumWidth: 172
+                            Layout.alignment: Qt.AlignVCenter
+                            implicitHeight: actionFlow.implicitHeight
 
-                            background: Rectangle {
-                                radius: ThemeManager.radiusSmall
-                                color: parent.pressed ? ThemeManager.surfaceActive : ThemeManager.surface
-                                border.width: 1
-                                border.color: ThemeManager.border
+                            Flow {
+                                id: actionFlow
+                                width: parent.width
+                                spacing: ThemeManager.spacingSmall
+                                layoutDirection: Qt.LeftToRight
+                                flow: Flow.LeftToRight
+
+                                Button {
+                                    text: "Rename…"
+                                    width: 84
+                                    height: 28
+
+                                    background: Rectangle {
+                                        radius: ThemeManager.radiusSmall
+                                        color: parent.pressed ? ThemeManager.surfaceActive : ThemeManager.surface
+                                        border.width: 1
+                                        border.color: ThemeManager.border
+                                    }
+
+                                    contentItem: Text {
+                                        text: parent.text
+                                        color: ThemeManager.text
+                                        font.pixelSize: ThemeManager.fontSizeSmall
+                                        horizontalAlignment: Text.AlignHCenter
+                                        verticalAlignment: Text.AlignVCenter
+                                    }
+
+                                    onClicked: {
+                                        deviceNameEditDialog.deviceId = deviceId
+                                        deviceNameEditDialog.currentName = deviceName
+                                        deviceNameEditDialog.nameText = deviceName
+                                        deviceNameEditDialog.statusText = ""
+                                        deviceNameEditDialog.open()
+                                    }
+                                }
+
+                                Button {
+                                    text: "Remove"
+                                    width: 80
+                                    height: 28
+
+                                    background: Rectangle {
+                                        radius: ThemeManager.radiusSmall
+                                        color: parent.pressed ? ThemeManager.surfaceActive : ThemeManager.surface
+                                        border.width: 1
+                                        border.color: ThemeManager.border
+                                    }
+
+                                    contentItem: Text {
+                                        text: parent.text
+                                        color: ThemeManager.text
+                                        font.pixelSize: ThemeManager.fontSizeSmall
+                                        horizontalAlignment: Text.AlignHCenter
+                                        verticalAlignment: Text.AlignVCenter
+                                    }
+
+                                    onClicked: DataStore.removePairedDevice(deviceId)
+                                }
                             }
-
-                            contentItem: Text {
-                                text: parent.text
-                                color: ThemeManager.text
-                                font.pixelSize: ThemeManager.fontSizeSmall
-                                horizontalAlignment: Text.AlignHCenter
-                                verticalAlignment: Text.AlignVCenter
-                            }
-
-                            onClicked: DataStore.removePairedDevice(deviceId)
                         }
                     }
                 }
@@ -1080,6 +1123,87 @@ Dialog {
                 onClicked: {
                     root.pairDeviceRequested()
                     root.close()
+                }
+            }
+        }
+    }
+
+    Dialog {
+        id: deviceNameEditDialog
+        objectName: "deviceNameEditDialog"
+        title: "Rename Device"
+        modal: true
+        anchors.centerIn: parent
+        width: Math.min(420, root.width - 40)
+        standardButtons: Dialog.NoButton
+
+        property string deviceId: ""
+        property string currentName: ""
+        property string nameText: ""
+        property string statusText: ""
+
+        function trimmed(text) { return text ? text.trim() : "" }
+
+        background: Rectangle {
+            color: ThemeManager.surface
+            border.width: 1
+            border.color: ThemeManager.border
+            radius: ThemeManager.radiusMedium
+        }
+
+        contentItem: ColumnLayout {
+            spacing: ThemeManager.spacingMedium
+            anchors.margins: ThemeManager.spacingMedium
+
+            Text {
+                Layout.fillWidth: true
+                text: deviceNameEditDialog.currentName
+                color: ThemeManager.text
+                font.pixelSize: ThemeManager.fontSizeNormal
+                font.weight: Font.Medium
+                wrapMode: Text.Wrap
+            }
+
+            TextField {
+                Layout.fillWidth: true
+                placeholderText: "Device name"
+                text: deviceNameEditDialog.nameText
+                onTextChanged: deviceNameEditDialog.nameText = text
+            }
+
+            Text {
+                Layout.fillWidth: true
+                text: deviceNameEditDialog.statusText
+                visible: deviceNameEditDialog.statusText !== ""
+                color: ThemeManager.textMuted
+                font.pixelSize: ThemeManager.fontSizeSmall
+                wrapMode: Text.Wrap
+            }
+
+            Flow {
+                Layout.fillWidth: true
+                spacing: ThemeManager.spacingSmall
+
+                Button {
+                    text: "Cancel"
+                    width: Math.max(120, (deviceNameEditDialog.width - ThemeManager.spacingMedium * 3) / 2)
+                    onClicked: deviceNameEditDialog.close()
+                }
+
+                Button {
+                    text: "Save"
+                    objectName: "deviceNameEditSaveButton"
+                    width: Math.max(120, (deviceNameEditDialog.width - ThemeManager.spacingMedium * 3) / 2)
+                    enabled: DataStore && deviceNameEditDialog.trimmed(deviceNameEditDialog.nameText).length > 0
+                    onClicked: {
+                        const name = deviceNameEditDialog.trimmed(deviceNameEditDialog.nameText)
+                        if (name === "") {
+                            deviceNameEditDialog.statusText = "Device name is required"
+                            return
+                        }
+                        DataStore.setPairedDeviceName(deviceNameEditDialog.deviceId, name)
+                        deviceNameEditDialog.close()
+                    }
                 }
             }
         }

@@ -1535,18 +1535,6 @@ Item {
                     }
                 }
             }
-
-            MenuSeparator {}
-
-            MenuItem {
-                text: "Reset all pages to defaults"
-                onTriggered: {
-                    root.createDefaultPages()
-                    if (pageModel.count > 0) {
-                        root.ensureInitialPage("")
-                    }
-                }
-            }
         }
     }
     } // End ColumnLayout
