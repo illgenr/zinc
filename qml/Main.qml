@@ -128,6 +128,13 @@ ApplicationWindow {
             }
         }
     }
+
+    Shortcut {
+        enabled: !isMobile
+        context: Qt.ApplicationShortcut
+        sequence: "Ctrl+Alt+S"
+        onActivated: settingsDialog.open()
+    }
     
     // Mobile layout using StackView
     StackView {

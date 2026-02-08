@@ -12,6 +12,73 @@ Dialog {
     signal manualDeviceAddRequested(string host, int port)
     property var syncController: null
 
+    function isDescendantOf(node, ancestor) {
+        let cur = node || null
+        while (cur) {
+            if (cur === ancestor) return true
+            cur = cur.parent || null
+        }
+        return false
+    }
+
+    function activeFocusInDesktopTabList() {
+        return isDescendantOf(root.activeFocusItem, desktopTabList)
+    }
+
+    function activeFocusInSettingsContent() {
+        return isDescendantOf(root.activeFocusItem, settingsTabs)
+    }
+
+    function focusFirstSettingControl() {
+        const page = settingsTabs.currentItem
+        if (!page) return
+
+        function findFocusable(node) {
+            if (!node) return null
+            const wantsFocus = node.visible !== false
+                && node.enabled !== false
+                && node.activeFocusOnTab === true
+                && ("forceActiveFocus" in node)
+            if (wantsFocus) return node
+            const children = node.children || []
+            for (let i = 0; i < children.length; i++) {
+                const found = findFocusable(children[i])
+                if (found) return found
+            }
+            return null
+        }
+
+        const target = findFocusable(page)
+        if (target) {
+            target.forceActiveFocus()
+            return
+        }
+        if ("forceActiveFocus" in page) {
+            page.forceActiveFocus()
+        }
+    }
+
+    Keys.onPressed: function(event) {
+        if (isMobile) return
+        if (!root.visible) return
+
+        const key = event.key
+        const isShiftTab = key === Qt.Key_Backtab || (key === Qt.Key_Tab && (event.modifiers & Qt.ShiftModifier))
+        if (isShiftTab && activeFocusInSettingsContent()) {
+            event.accepted = true
+            desktopTabList.forceActiveFocus()
+            return
+        }
+
+        const isForwardTab = key === Qt.Key_Tab && !(event.modifiers & Qt.ShiftModifier)
+        const isEnter = key === Qt.Key_Return || key === Qt.Key_Enter
+        if ((isForwardTab || isEnter) && activeFocusInDesktopTabList()) {
+            event.accepted = true
+            focusFirstSettingControl()
+            return
+        }
+    }
+
     function openDevicesTab() {
         // Devices tab index matches tabModel ordering.
         settingsTabs.currentIndex = 3
@@ -225,9 +292,33 @@ Dialog {
                 color: ThemeManager.background
                 
                 ColumnLayout {
+                    id: desktopTabList
                     anchors.fill: parent
                     anchors.margins: ThemeManager.spacingSmall
                     spacing: 2
+                    focus: !isMobile && root.visible
+                    activeFocusOnTab: !isMobile
+
+                    Keys.onPressed: function(event) {
+                        if (event.key === Qt.Key_Down) {
+                            event.accepted = true
+                            settingsTabs.currentIndex = Math.min(tabModel.length - 1, settingsTabs.currentIndex + 1)
+                            return
+                        }
+                        if (event.key === Qt.Key_Up) {
+                            event.accepted = true
+                            settingsTabs.currentIndex = Math.max(0, settingsTabs.currentIndex - 1)
+                            return
+                        }
+                        if (event.key === Qt.Key_Tab
+                                || event.key === Qt.Key_Return
+                                || event.key === Qt.Key_Enter
+                                || event.key === Qt.Key_Right) {
+                            event.accepted = true
+                            root.focusFirstSettingControl()
+                            return
+                        }
+                    }
                     
                     Repeater {
                         model: tabModel
@@ -300,10 +391,12 @@ Dialog {
             
             // Menu list
             ListView {
+                id: settingsMenuList
                 anchors.fill: parent
                 visible: settingsTabs.currentIndex < 0
                 model: tabModel
                 clip: true
+                activeFocusOnTab: true
                 
                 delegate: Rectangle {
                     width: ListView.view.width
@@ -374,8 +467,10 @@ Dialog {
         refreshAvailableDevices()
         if (isMobile) {
             settingsTabs.currentIndex = -1  // Show menu first on mobile
+            Qt.callLater(() => settingsMenuList.forceActiveFocus())
         } else {
             settingsTabs.currentIndex = 0
+            Qt.callLater(() => desktopTabList.forceActiveFocus())
         }
     }
     

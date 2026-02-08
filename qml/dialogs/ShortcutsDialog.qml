@@ -20,6 +20,7 @@ Dialog {
         { key: "Ctrl+F", desc: "Find" },
         { key: "Ctrl+\\", desc: "Toggle sidebar" },
         { key: "Ctrl+E", desc: "Focus page tree" },
+        { key: "Ctrl+Alt+S", desc: "Open settings" },
         { key: "Ctrl+B", desc: "Bold (hybrid editor)" },
         { key: "Ctrl+I", desc: "Italic (hybrid editor)" },
         { key: "Ctrl+U", desc: "Underline (hybrid editor)" },

@@ -22,10 +22,8 @@ FocusScope {
     Shortcut { sequences: ["Ctrl+L", "Meta+L"]; onActivated: formatBar.link() }
     Shortcut { sequences: ["Ctrl+Shift+M", "Meta+Shift+M"]; onActivated: formatBar.collapsed = !formatBar.collapsed }
 
-    Shortcut { sequences: ["Ctrl+Home", "Meta+Home"]; onActivated: root.focusDocumentStart() }
-    Shortcut { sequences: ["Ctrl+End", "Meta+End"]; onActivated: root.focusDocumentEnd() }
-    Shortcut { sequences: ["PgUp", "PageUp"]; onActivated: root.pageNavigate(-1) }
-    Shortcut { sequences: ["PgDown", "PageDown"]; onActivated: root.pageNavigate(1) }
+    Shortcut { context: Qt.WidgetWithChildrenShortcut; sequences: ["Ctrl+Home", "Meta+Home"]; onActivated: root.focusDocumentStart() }
+    Shortcut { context: Qt.WidgetWithChildrenShortcut; sequences: ["Ctrl+End", "Meta+End"]; onActivated: root.focusDocumentEnd() }
 
     // Cursor restore for undo/redo (best-effort, grouped typing).
     property bool typingMacroActive: false
@@ -1169,27 +1167,31 @@ FocusScope {
         const viewH = flickable.height - root.keyboardInset
         const step = Math.max(48, viewH * 0.85)
 
-        // Prefer moving the caret to a new block/position (otherwise ensureFocusedCursorVisible
-        // will "snap back" the scroll and it looks like a shake).
+        // Move in content space first, then place caret near the same viewport Y.
+        // This avoids getting "stuck" on repeated PageDown at the same cursor hit.
         const focused = (root.currentBlockIndex >= 0 && root.currentBlockIndex < blockRepeater.count)
             ? blockRepeater.itemAt(root.currentBlockIndex)
             : null
         const tc = focused && focused.textControl ? focused.textControl : null
-        if (!tc || !("cursorRectangle" in tc)) {
-            flickable.contentY = clampContentY(flickable.contentY + (direction >= 0 ? step : -step))
-            return
-        }
+        const prevContentY = flickable.contentY
+        const nextContentY = clampContentY(prevContentY + (direction >= 0 ? step : -step))
+        flickable.contentY = nextContentY
+
+        if (!tc || !("cursorRectangle" in tc)) return
 
         const rect = tc.cursorRectangle
         const p = tc.mapToItem(root, rect.x, rect.y + rect.height * 0.5)
-        const targetY = Math.max(0, Math.min(flickable.height - root.keyboardInset - 1, p.y + (direction >= 0 ? step : -step)))
-        const hit = blockTextControlAtEditorPoint(Qt.point(p.x, targetY))
-        if (hit && hit.index >= 0) {
-            focusBlockAt(hit.index, hit.pos)
+        const anchorY = Math.max(0, Math.min(flickable.height - root.keyboardInset - 1, p.y))
+        const hit = blockTextControlAtEditorPoint(Qt.point(p.x, anchorY))
+        if (!hit || hit.index < 0) return
+
+        focusBlockAt(hit.index, hit.pos)
+        // If scrolling had no effect, still keep cursor visible in-place.
+        if (nextContentY === prevContentY) {
             scheduleEnsureFocusedCursorVisible()
-        } else {
-            flickable.contentY = clampContentY(flickable.contentY + (direction >= 0 ? step : -step))
+            return
         }
+        scheduleEnsureFocusedCursorVisible()
     }
 
     function handleEditorKeyEvent(event) {
@@ -1223,6 +1225,16 @@ FocusScope {
             return true
         }
         if (ctrl && event.key === Qt.Key_Home) {
+            event.accepted = true
+            focusDocumentStart()
+            return true
+        }
+        if ((mod & (Qt.ControlModifier | Qt.MetaModifier | Qt.AltModifier)) === 0 && event.key === Qt.Key_End) {
+            event.accepted = true
+            focusDocumentEnd()
+            return true
+        }
+        if ((mod & (Qt.ControlModifier | Qt.MetaModifier | Qt.AltModifier)) === 0 && event.key === Qt.Key_Home) {
             event.accepted = true
             focusDocumentStart()
             return true

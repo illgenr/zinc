@@ -38,6 +38,8 @@ QQuickWindow* requireWindow(QObject* root) {
     return window;
 }
 
+QObject* findOrNull(QObject* root, const char* objectName);
+
 template <typename Predicate>
 bool waitUntil(Predicate&& predicate, int timeoutMs = 1500) {
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
@@ -162,6 +164,138 @@ TEST_CASE("QML: Enter activates selected page even when single-tap activation is
     // Enter should activate the selected page.
     QTest::keyClick(window, Qt::Key_Return);
     REQUIRE(waitUntil([&]() { return root->property("activatedPageId").toString() == QStringLiteral("4"); }));
+}
+
+TEST_CASE("QML: PageTree PageUp/PageDown/Home/End navigate visible rows", "[qml][pagetree][shortcuts]") {
+    registerTypesOnce();
+
+    QQmlEngine engine;
+    QQmlComponent component(&engine);
+    component.setData(
+        "import QtQuick\n"
+        "import QtQuick.Controls\n"
+        "import zinc\n"
+        "ApplicationWindow {\n"
+        "    width: 480\n"
+        "    height: 220\n"
+        "    visible: true\n"
+        "    Shortcut {\n"
+        "        context: Qt.ApplicationShortcut\n"
+        "        sequence: \"Ctrl+E\"\n"
+        "        onActivated: pageTree.focusTree()\n"
+        "    }\n"
+        "    PageTree {\n"
+        "        id: pageTree\n"
+        "        objectName: \"pageTree\"\n"
+        "        anchors.fill: parent\n"
+        "        showNewPageButton: false\n"
+        "        showNewNotebookButton: false\n"
+        "        showSortButton: false\n"
+        "        Component.onCompleted: {\n"
+        "            if (DataStore) DataStore.resetDatabase()\n"
+        "            resetToDefaults()\n"
+        "            selectPage(\"1\")\n"
+        "        }\n"
+        "    }\n"
+        "}\n",
+        QUrl(QStringLiteral("qrc:/qt/qml/zinc/tests/PageTreePagingKeysHost.qml")));
+
+    if (component.status() == QQmlComponent::Error) {
+        FAIL(formatErrors(component.errors()).toStdString());
+    }
+    REQUIRE(component.status() == QQmlComponent::Ready);
+
+    std::unique_ptr<QObject> root(component.create());
+    REQUIRE(root);
+
+    auto* window = requireWindow(root.get());
+    window->show();
+    QTest::qWait(50);
+
+    auto* pageTree = findOrNull(root.get(), "pageTree");
+    REQUIRE(pageTree);
+    REQUIRE(waitUntil([&]() { return pageTree->property("selectedPageId").toString() == QStringLiteral("1"); }));
+
+    QTest::keyPress(window, Qt::Key_E, Qt::ControlModifier);
+
+    QTest::keyClick(window, Qt::Key_End);
+    REQUIRE(waitUntil([&]() { return pageTree->property("selectedPageId").toString() == QStringLiteral("3"); }));
+
+    QTest::keyClick(window, Qt::Key_Home);
+    REQUIRE(waitUntil([&]() { return pageTree->property("selectedPageId").toString() == QStringLiteral("1"); }));
+
+    QTest::keyClick(window, Qt::Key_PageDown);
+    REQUIRE(waitUntil([&]() {
+        const auto id = pageTree->property("selectedPageId").toString();
+        return id == QStringLiteral("4") || id == QStringLiteral("2") || id == QStringLiteral("3");
+    }));
+
+    QTest::keyClick(window, Qt::Key_PageUp);
+    REQUIRE(waitUntil([&]() { return pageTree->property("selectedPageId").toString() == QStringLiteral("1"); }));
+}
+
+TEST_CASE("QML: PageTree Up/Down traverses notebook rows without toggling collapse", "[qml][pagetree][shortcuts]") {
+    registerTypesOnce();
+
+    QQmlEngine engine;
+    QQmlComponent component(&engine);
+    component.setData(
+        "import QtQuick\n"
+        "import QtQuick.Controls\n"
+        "import zinc\n"
+        "ApplicationWindow {\n"
+        "    width: 480\n"
+        "    height: 220\n"
+        "    visible: true\n"
+        "    Shortcut {\n"
+        "        context: Qt.ApplicationShortcut\n"
+        "        sequence: \"Ctrl+E\"\n"
+        "        onActivated: pageTree.focusTree()\n"
+        "    }\n"
+        "    PageTree {\n"
+        "        id: pageTree\n"
+        "        objectName: \"pageTree\"\n"
+        "        anchors.fill: parent\n"
+        "        showNewPageButton: false\n"
+        "        showNewNotebookButton: false\n"
+        "        showSortButton: false\n"
+        "        Component.onCompleted: {\n"
+        "            if (DataStore) DataStore.resetDatabase()\n"
+        "            resetToDefaults()\n"
+        "            selectPage(\"1\")\n"
+        "        }\n"
+        "    }\n"
+        "}\n",
+        QUrl(QStringLiteral("qrc:/qt/qml/zinc/tests/PageTreeArrowNotebookTraversalHost.qml")));
+
+    if (component.status() == QQmlComponent::Error) {
+        FAIL(formatErrors(component.errors()).toStdString());
+    }
+    REQUIRE(component.status() == QQmlComponent::Ready);
+
+    std::unique_ptr<QObject> root(component.create());
+    REQUIRE(root);
+
+    auto* window = requireWindow(root.get());
+    window->show();
+    QTest::qWait(50);
+
+    auto* pageTree = findOrNull(root.get(), "pageTree");
+    REQUIRE(pageTree);
+    auto* pageList = findOrNull(pageTree, "pageTree_list");
+    REQUIRE(pageList);
+
+    REQUIRE(waitUntil([&]() { return pageTree->property("selectedPageId").toString() == QStringLiteral("1"); }));
+    QTest::keyPress(window, Qt::Key_E, Qt::ControlModifier);
+    REQUIRE(waitUntil([&]() { return pageList->property("currentIndex").toInt() == 1; }));
+
+    // Move to notebook row (index 0) without collapsing it.
+    QTest::keyClick(window, Qt::Key_Up);
+    REQUIRE(waitUntil([&]() { return pageList->property("currentIndex").toInt() == 0; }));
+
+    // Move back down: if notebook had toggled collapsed on Up, this would stay at index 0.
+    QTest::keyClick(window, Qt::Key_Down);
+    REQUIRE(waitUntil([&]() { return pageList->property("currentIndex").toInt() == 1; }));
 }
 
 namespace {

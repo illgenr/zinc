@@ -355,6 +355,24 @@ Item {
         return -1
     }
 
+    function nextVisiblePageIndex(fromIndex) {
+        for (let i = fromIndex + 1; i < pageModel.count; i++) {
+            if (!rowVisible(i)) continue
+            const row = pageModel.get(i)
+            if (row && row.kind === "page") return i
+        }
+        return -1
+    }
+
+    function previousVisiblePageIndex(fromIndex) {
+        for (let i = fromIndex - 1; i >= 0; i--) {
+            if (!rowVisible(i)) continue
+            const row = pageModel.get(i)
+            if (row && row.kind === "page") return i
+        }
+        return -1
+    }
+
     function currentKeyboardIndex() {
         if (pageList.currentIndex >= 0) return pageList.currentIndex
         return indexOfPageId(root.selectedPageId)
@@ -414,6 +432,51 @@ Item {
         return true
     }
 
+    function estimatedVisibleRowStepCount() {
+        const rowHeight = collapsed
+            ? 32
+            : (root._isMobile ? Math.max(44, root.actionButtonSize) : 28)
+        const approxGap = 2
+        const perRow = Math.max(1, rowHeight + approxGap)
+        const viewHeight = Math.max(1, pageList.height)
+        return Math.max(1, Math.floor(viewHeight / perRow))
+    }
+
+    function pageStepIndex(fromIndex, direction) {
+        const stepCount = estimatedVisibleRowStepCount()
+        let idx = fromIndex
+        for (let i = 0; i < stepCount; i++) {
+            const next = direction >= 0 ? nextVisiblePageIndex(idx) : previousVisiblePageIndex(idx)
+            if (next < 0) break
+            idx = next
+        }
+        return idx
+    }
+
+    function navigatePageByScreen(direction) {
+        const from = currentKeyboardIndex()
+        if (from < 0) {
+            return selectIndex(direction >= 0 ? nextVisiblePageIndex(-1) : previousVisiblePageIndex(pageModel.count))
+        }
+        const target = pageStepIndex(from, direction)
+        if (target < 0 || target === from) return false
+        const selected = selectIndex(target)
+        if (selected) {
+            pageList.positionViewAtIndex(target, ListView.Visible)
+        }
+        return selected
+    }
+
+    function navigateToBoundary(direction) {
+        const target = direction < 0 ? nextVisiblePageIndex(-1) : previousVisiblePageIndex(pageModel.count)
+        if (target < 0) return false
+        const selected = selectIndex(target)
+        if (selected) {
+            pageList.positionViewAtIndex(target, ListView.Visible)
+        }
+        return selected
+    }
+
     function focusTree() {
         syncCurrentIndexToSelection()
         pageList.focus = true
@@ -436,6 +499,7 @@ Item {
         pageList.currentIndex = idx
         const row = pageModel.get(idx)
         if (!row) return false
+        if (row.kind === "notebook") return true
         root.handleRowTap(row.kind || "page", row.pageId || "", row.notebookId || "", row.title || "")
         return true
     }
@@ -1267,6 +1331,26 @@ Item {
                     }
                     return
                 }
+                if (event.key === Qt.Key_PageDown) {
+                    event.accepted = true
+                    navigatePageByScreen(1)
+                    return
+                }
+                if (event.key === Qt.Key_PageUp) {
+                    event.accepted = true
+                    navigatePageByScreen(-1)
+                    return
+                }
+                if (event.key === Qt.Key_Home) {
+                    event.accepted = true
+                    navigateToBoundary(-1)
+                    return
+                }
+                if (event.key === Qt.Key_End) {
+                    event.accepted = true
+                    navigateToBoundary(1)
+                    return
+                }
                 if (root.handleTypeahead(event)) {
                     event.accepted = true
                     return
@@ -1301,10 +1385,13 @@ Item {
                     visible: delegateItem.visible
                     radius: ThemeManager.radiusSmall
                     readonly property bool selected: root.selectedPageId === model.pageId
+                    readonly property bool keyboardCurrent: pageList.activeFocus && pageList.currentIndex === index
                     readonly property string pageId: model.pageId || ""
                     color: selected
                         ? ThemeManager.surfaceActive
-                        : (delegateItem.rowHovered || delegateMouseArea.pressed ? ThemeManager.surfaceHover : "transparent")
+                        : (keyboardCurrent
+                            ? ThemeManager.surfaceHover
+                            : (delegateItem.rowHovered || delegateMouseArea.pressed ? ThemeManager.surfaceHover : "transparent"))
 
                     Drag.active: root._isMobile ? mobileDragHandler.active : desktopDragHandler.active
                     Drag.supportedActions: Qt.MoveAction
