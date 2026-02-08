@@ -19,7 +19,7 @@ SettingsPage {
         }
 
         Text {
-            text: "Version 0.3.0"
+            text: "Version 0.4.0"
             color: ThemeManager.textSecondary
             font.pixelSize: ThemeManager.fontSizeNormal
         }
