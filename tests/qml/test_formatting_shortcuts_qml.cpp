@@ -24,11 +24,11 @@ TEST_CASE("QML: BlockEditor defines inline formatting shortcuts", "[qml][editor]
     const auto contents = readAllText(QStringLiteral(":/qt/qml/zinc/qml/components/BlockEditor.qml"));
     REQUIRE(!contents.isEmpty());
 
-    REQUIRE(contents.contains(QStringLiteral("Ctrl+B")));
-    REQUIRE(contents.contains(QStringLiteral("Ctrl+I")));
-    REQUIRE(contents.contains(QStringLiteral("Ctrl+U")));
-    REQUIRE(contents.contains(QStringLiteral("Ctrl+L")));
-    REQUIRE(contents.contains(QStringLiteral("Ctrl+Shift+M")));
+    REQUIRE(contents.contains(QStringLiteral("ShortcutPreferences.boldShortcut")));
+    REQUIRE(contents.contains(QStringLiteral("ShortcutPreferences.italicShortcut")));
+    REQUIRE(contents.contains(QStringLiteral("ShortcutPreferences.underlineShortcut")));
+    REQUIRE(contents.contains(QStringLiteral("ShortcutPreferences.linkShortcut")));
+    REQUIRE(contents.contains(QStringLiteral("ShortcutPreferences.toggleFormatBarShortcut")));
 
     REQUIRE(containsRegex(contents, QRegularExpression(QStringLiteral(R"(onActivated:\s*formatBar\.bold\(\))"))));
     REQUIRE(containsRegex(contents, QRegularExpression(QStringLiteral(R"(onActivated:\s*formatBar\.italic\(\))"))));
@@ -42,9 +42,9 @@ TEST_CASE("QML: ShortcutsDialog lists inline formatting shortcuts", "[qml][short
     const auto contents = readAllText(QStringLiteral(":/qt/qml/zinc/qml/dialogs/ShortcutsDialog.qml"));
     REQUIRE(!contents.isEmpty());
 
-    REQUIRE(contents.contains(QStringLiteral("{ key: \"Ctrl+B\"")));
-    REQUIRE(contents.contains(QStringLiteral("{ key: \"Ctrl+I\"")));
-    REQUIRE(contents.contains(QStringLiteral("{ key: \"Ctrl+U\"")));
-    REQUIRE(contents.contains(QStringLiteral("{ key: \"Ctrl+L\"")));
-    REQUIRE(contents.contains(QStringLiteral("{ key: \"Ctrl+Shift+M\"")));
+    REQUIRE(contents.contains(QStringLiteral("{ key: ShortcutPreferences.boldShortcut")));
+    REQUIRE(contents.contains(QStringLiteral("{ key: ShortcutPreferences.italicShortcut")));
+    REQUIRE(contents.contains(QStringLiteral("{ key: ShortcutPreferences.underlineShortcut")));
+    REQUIRE(contents.contains(QStringLiteral("{ key: ShortcutPreferences.linkShortcut")));
+    REQUIRE(contents.contains(QStringLiteral("{ key: ShortcutPreferences.toggleFormatBarShortcut")));
 }

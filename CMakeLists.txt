@@ -358,6 +358,7 @@ set(ZINC_QML_FILES
     qml/sync/SyncPreferences.qml
     qml/editor/EditorPreferences.qml
     qml/preferences/GeneralPreferences.qml
+    qml/preferences/ShortcutPreferences.qml
     qml/components/MarkdownEditor.qml
     qml/components/BlockEditor.qml
     qml/components/InlineFormatBar.qml
@@ -392,6 +393,7 @@ set(ZINC_QML_FILES
     qml/dialogs/settings/SettingsSwitch.qml
     qml/dialogs/settings/GeneralSettingsPage.qml
     qml/dialogs/settings/EditorSettingsPage.qml
+    qml/dialogs/settings/KeyboardShortcutsSettingsPage.qml
     qml/dialogs/settings/SyncSettingsPage.qml
     qml/dialogs/settings/DevicesSettingsPage.qml
     qml/dialogs/settings/DataSettingsPage.qml
@@ -418,6 +420,7 @@ set_source_files_properties(qml/theme/ThemeManager.qml PROPERTIES QT_QML_SINGLET
 set_source_files_properties(qml/sync/SyncPreferences.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
 set_source_files_properties(qml/editor/EditorPreferences.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
 set_source_files_properties(qml/preferences/GeneralPreferences.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
+set_source_files_properties(qml/preferences/ShortcutPreferences.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
 
 qt_add_qml_module(appzinc
     URI zinc
@@ -645,6 +648,7 @@ if(ZINC_BUILD_TESTS)
 		        tests/qml/test_startup_page_settings.cpp
 		        tests/qml/test_startup_cursor_settings.cpp
 		        tests/qml/test_editor_mode_settings.cpp
+		        tests/qml/test_keyboard_shortcuts_settings_qml.cpp
 		        tests/qml/test_formatting_shortcuts_qml.cpp
 		        tests/qml/test_pairing_dialog_qml.cpp
 		        tests/qml/test_search_dialog_qml.cpp

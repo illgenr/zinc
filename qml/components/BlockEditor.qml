@@ -16,11 +16,11 @@ FocusScope {
     Shortcut { sequences: ["Ctrl+Shift+Z", "Meta+Shift+Z", "Ctrl+Y", "Meta+Y"]; onActivated: root.performRedo() }
 
     // Inline formatting shortcuts (hybrid editor).
-    Shortcut { sequences: ["Ctrl+B", "Meta+B"]; onActivated: formatBar.bold() }
-    Shortcut { sequences: ["Ctrl+I", "Meta+I"]; onActivated: formatBar.italic() }
-    Shortcut { sequences: ["Ctrl+U", "Meta+U"]; onActivated: formatBar.underline() }
-    Shortcut { sequences: ["Ctrl+L", "Meta+L"]; onActivated: formatBar.link() }
-    Shortcut { sequences: ["Ctrl+Shift+M", "Meta+Shift+M"]; onActivated: formatBar.collapsed = !formatBar.collapsed }
+    Shortcut { sequence: ShortcutPreferences.boldShortcut; onActivated: formatBar.bold() }
+    Shortcut { sequence: ShortcutPreferences.italicShortcut; onActivated: formatBar.italic() }
+    Shortcut { sequence: ShortcutPreferences.underlineShortcut; onActivated: formatBar.underline() }
+    Shortcut { sequence: ShortcutPreferences.linkShortcut; onActivated: formatBar.link() }
+    Shortcut { sequence: ShortcutPreferences.toggleFormatBarShortcut; onActivated: formatBar.collapsed = !formatBar.collapsed }
 
     Shortcut { context: Qt.WidgetWithChildrenShortcut; sequences: ["Ctrl+Home", "Meta+Home"]; onActivated: root.focusDocumentStart() }
     Shortcut { context: Qt.WidgetWithChildrenShortcut; sequences: ["Ctrl+End", "Meta+End"]; onActivated: root.focusDocumentEnd() }

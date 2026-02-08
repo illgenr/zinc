@@ -182,7 +182,7 @@ Dialog {
 
     function openDevicesTab() {
         // Devices tab index matches tabModel ordering.
-        settingsTabs.currentIndex = 3
+        settingsTabs.currentIndex = 4
     }
     function openManualAddDialog() {
         manualAddDialog.hostText = ""
@@ -372,6 +372,7 @@ Dialog {
     property var tabModel: [
         { label: "General", icon: "⚙️" },
         { label: "Editor", icon: "✍️" },
+        { label: "Shortcuts", icon: "⌨️" },
         { label: "Sync", icon: "🔄" },
         { label: "Devices", icon: "📱" },
         //{ label: "Security", icon: "🔒" },
@@ -485,6 +486,7 @@ Dialog {
 
                 SettingsPages.GeneralSettingsPage {}
                 SettingsPages.EditorSettingsPage {}
+                SettingsPages.KeyboardShortcutsSettingsPage {}
                 SettingsPages.SyncSettingsPage { syncController: root.syncController }
                 SettingsPages.DevicesSettingsPage {
                     pairedDevicesModel: pairedDevicesModel
@@ -588,6 +590,7 @@ Dialog {
 
                 SettingsPages.GeneralSettingsPage {}
                 SettingsPages.EditorSettingsPage {}
+                SettingsPages.KeyboardShortcutsSettingsPage {}
                 SettingsPages.SyncSettingsPage { syncController: root.syncController }
                 SettingsPages.DevicesSettingsPage {
                     pairedDevicesModel: pairedDevicesModel

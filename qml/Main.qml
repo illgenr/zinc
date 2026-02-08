@@ -78,21 +78,21 @@ ApplicationWindow {
     
     // Keyboard shortcuts (desktop)
     Shortcut {
-        sequence: "Ctrl+N"
+        sequence: ShortcutPreferences.newPageShortcut
         enabled: !isMobile && root.databaseActive
         context: Qt.ApplicationShortcut
         onActivated: pageTree.createPage("")
     }
     
     Shortcut {
-        sequence: "Ctrl+F"
+        sequence: ShortcutPreferences.findShortcut
         enabled: !isMobile
         context: Qt.ApplicationShortcut
         onActivated: searchDialog.open()
     }
     
     Shortcut {
-        sequence: "Ctrl+\\"
+        sequence: ShortcutPreferences.toggleSidebarShortcut
         enabled: !isMobile
         onActivated: sidebarCollapsed = !sidebarCollapsed
     }
@@ -100,7 +100,7 @@ ApplicationWindow {
     Shortcut {
         enabled: !isMobile
         context: Qt.ApplicationShortcut
-        sequence: "Ctrl+E"
+        sequence: ShortcutPreferences.focusPageTreeShortcut
         onActivated: {
             sidebarCollapsed = false
             pageTree.focusTree()
@@ -114,14 +114,14 @@ ApplicationWindow {
     Shortcut {
         enabled: !isMobile
         context: Qt.ApplicationShortcut
-        sequences: ["Ctrl+Shift+?", "Ctrl+Shift+/"]
+        sequence: ShortcutPreferences.showShortcutHelpShortcut
         onActivated: shortcutsDialog.open()
     }
 
     Shortcut {
         enabled: !isMobile
         context: Qt.ApplicationShortcut
-        sequence: "Ctrl+End"
+        sequence: ShortcutPreferences.focusDocumentEndShortcut
         onActivated: {
             if (blockEditor && blockEditor.focusDocumentEnd) {
                 blockEditor.focusDocumentEnd()
@@ -132,7 +132,7 @@ ApplicationWindow {
     Shortcut {
         enabled: !isMobile
         context: Qt.ApplicationShortcut
-        sequence: "Ctrl+Alt+S"
+        sequence: ShortcutPreferences.openSettingsShortcut
         onActivated: settingsDialog.open()
     }
     

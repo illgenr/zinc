@@ -16,17 +16,17 @@ Dialog {
     height: isMobile ? parent.height * 0.9 : Math.min(520, parent.height * 0.85)
 
     readonly property var shortcuts: [
-        { key: "Ctrl+N", desc: "New page" },
-        { key: "Ctrl+F", desc: "Find" },
-        { key: "Ctrl+\\", desc: "Toggle sidebar" },
-        { key: "Ctrl+E", desc: "Focus page tree" },
-        { key: "Ctrl+Alt+S", desc: "Open settings" },
-        { key: "Ctrl+B", desc: "Bold (hybrid editor)" },
-        { key: "Ctrl+I", desc: "Italic (hybrid editor)" },
-        { key: "Ctrl+U", desc: "Underline (hybrid editor)" },
-        { key: "Ctrl+L", desc: "Insert link (hybrid editor)" },
-        { key: "Ctrl+Shift+M", desc: "Toggle formatting bar (hybrid editor)" },
-        { key: "Ctrl+Shift+?", desc: "Show this screen" },
+        { key: ShortcutPreferences.newPageShortcut, desc: "New page" },
+        { key: ShortcutPreferences.findShortcut, desc: "Find" },
+        { key: ShortcutPreferences.toggleSidebarShortcut, desc: "Toggle sidebar" },
+        { key: ShortcutPreferences.focusPageTreeShortcut, desc: "Focus page tree" },
+        { key: ShortcutPreferences.openSettingsShortcut, desc: "Open settings" },
+        { key: ShortcutPreferences.boldShortcut, desc: "Bold (hybrid editor)" },
+        { key: ShortcutPreferences.italicShortcut, desc: "Italic (hybrid editor)" },
+        { key: ShortcutPreferences.underlineShortcut, desc: "Underline (hybrid editor)" },
+        { key: ShortcutPreferences.linkShortcut, desc: "Insert link (hybrid editor)" },
+        { key: ShortcutPreferences.toggleFormatBarShortcut, desc: "Toggle formatting bar (hybrid editor)" },
+        { key: ShortcutPreferences.showShortcutHelpShortcut, desc: "Show this screen" },
         { key: "Shift+Enter", desc: "Insert newline in text blocks" },
         { key: "Alt+↑ / Alt+↓", desc: "Move block up/down" }
     ]
