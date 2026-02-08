@@ -1528,16 +1528,19 @@ FocusScope {
             spacing: 0
             
             // Page title
-            TextInput {
+            TextEdit {
                 id: titleInput
                 
                 Layout.fillWidth: true
+                Layout.preferredHeight: Math.max(ThemeManager.fontSizeH1 + ThemeManager.spacingSmall, contentHeight)
                 Layout.topMargin: ThemeManager.spacingXLarge
                 Layout.bottomMargin: ThemeManager.spacingLarge
                 Layout.leftMargin: ThemeManager.spacingSmall
                 Layout.rightMargin: ThemeManager.spacingSmall
                 
                 text: pageTitle
+                textFormat: TextEdit.PlainText
+                wrapMode: TextEdit.Wrap
                 color: ThemeManager.text
                 font.pixelSize: ThemeManager.fontSizeH1
                 font.weight: Font.Bold

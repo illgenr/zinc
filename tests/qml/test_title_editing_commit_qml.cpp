@@ -33,6 +33,7 @@ TEST_CASE("QML: Title editing commits on focus loss", "[qml][editor][title]") {
     REQUIRE(blockEditor.contains(QStringLiteral("function remoteTitleCursorPos()")));
     REQUIRE(blockEditor.contains(QStringLiteral("visible: root.showRemoteCursor && remotePos >= 0 && !titleInput.activeFocus")));
     REQUIRE(blockEditor.contains(QStringLiteral("root.cursorMoved(-1, cursorPosition)")));
+    REQUIRE(blockEditor.contains(QStringLiteral("wrapMode: TextEdit.Wrap")));
 
     const auto markdownEditor = readAllText(QStringLiteral(":/qt/qml/zinc/qml/components/MarkdownEditor.qml"));
     REQUIRE(!markdownEditor.isEmpty());
