@@ -576,6 +576,11 @@ void SyncManager::onConnectionStateChanged(Connection::State state) {
     for (auto it = peers_.begin(); it != peers_.end(); ++it) {
         if (it->second->connection.get() == conn) {
             const auto id = it->first;
+            const auto endpoint = conn->peerAddress().toString();
+            const auto port = conn->peerPort();
+            emit error(QStringLiteral("Failed to connect to %1:%2")
+                           .arg(endpoint)
+                           .arg(port));
             if (it->second->connection) {
                 auto* raw = it->second->connection.release();
                 if (raw) raw->deleteLater();

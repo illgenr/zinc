@@ -13,6 +13,91 @@ Dialog {
     signal manualDeviceAddRequested(string host, int port)
     property var syncController: null
     property bool focusDebugLogging: true
+    property bool connectProbeDebugLogging: true
+    property var connectProbePending: null
+
+    function logConnectProbe(eventName, details) {
+        if (!connectProbeDebugLogging) return
+        console.log("SettingsDialog connect probe:", eventName, details ? details : "")
+    }
+
+    function resolveConnectProbe(reachable, detail) {
+        if (!connectProbePending) return
+        logConnectProbe("resolve", {
+                            reachable: reachable,
+                            detail: detail,
+                            pending: connectProbePending
+                        })
+        connectProbeTimer.stop()
+        const pending = connectProbePending
+        connectProbePending = null
+        const label = (pending.deviceName && pending.deviceName !== "") ? pending.deviceName : pending.deviceId
+        connectResultDialog.standardButtons = Dialog.Ok
+        connectResultDialog.title = reachable ? "Device Reachable" : "Device Unreachable"
+        connectResultDialog.resultText = reachable
+                ? (label + " responded at " + pending.host + ":" + pending.port + ".")
+                : (label + " did not respond at " + pending.host + ":" + pending.port + ".")
+        connectResultDialog.detailText = detail ? detail : ""
+        connectResultDialog.open()
+    }
+
+    function startConnectProbe(deviceId, deviceName, host, port) {
+        if (syncController && syncController.isPeerConnected && syncController.isPeerConnected(deviceId)) {
+            connectProbePending = {
+                deviceId: deviceId,
+                deviceName: deviceName ? deviceName : "",
+                host: host ? host : "",
+                port: port
+            }
+            resolveConnectProbe(true, "Peer is already connected.")
+            return
+        }
+        connectProbePending = {
+            deviceId: deviceId,
+            deviceName: deviceName ? deviceName : "",
+            host: host ? host : "",
+            port: port
+        }
+        logConnectProbe("start", connectProbePending)
+        const label = (deviceName && deviceName !== "") ? deviceName : deviceId
+        connectResultDialog.title = "Checking Device"
+        connectResultDialog.resultText = "Trying " + label + " at " + host + ":" + port + "…"
+        connectResultDialog.detailText = ""
+        connectResultDialog.standardButtons = Dialog.NoButton
+        connectResultDialog.open()
+        connectProbeTimer.restart()
+    }
+
+    function isCurrentConnectProbe(deviceId, host, port) {
+        if (!connectProbePending) return false
+        if (!deviceId || connectProbePending.deviceId !== deviceId) {
+            logConnectProbe("match-miss-device", {
+                                probeDeviceId: connectProbePending.deviceId,
+                                signalDeviceId: deviceId
+                            })
+            return false
+        }
+        if (host && host !== "" && connectProbePending.host && connectProbePending.host !== host) {
+            logConnectProbe("match-miss-host", {
+                                probeHost: connectProbePending.host,
+                                signalHost: host
+                            })
+            return false
+        }
+        if (port && port > 0 && connectProbePending.port > 0 && connectProbePending.port !== port) {
+            logConnectProbe("match-miss-port", {
+                                probePort: connectProbePending.port,
+                                signalPort: port
+                            })
+            return false
+        }
+        logConnectProbe("match-hit", {
+                            deviceId: deviceId,
+                            host: host,
+                            port: port
+                        })
+        return true
+    }
 
     function currentWindowFocusItem() {
         const win = Window.window ? Window.window : Qt.application.activeWindow
@@ -212,6 +297,15 @@ Dialog {
         if (!syncController) return
         var devices = syncController.discoveredPeers
         if (!devices) return
+        var pairedNames = {}
+        var pairedDevices = DataStore ? DataStore.getPairedDevices() : []
+        for (var j = 0; j < pairedDevices.length; j++) {
+            var paired = pairedDevices[j]
+            if (!paired) continue
+            if (!paired.deviceId || paired.deviceId === "") continue
+            if (!paired.deviceName || paired.deviceName === "") continue
+            pairedNames[paired.deviceId] = paired.deviceName
+        }
         for (var i = 0; i < devices.length; i++) {
             var d = devices[i]
             if (!d) continue
@@ -221,7 +315,27 @@ Dialog {
                 d.workspaceId !== syncController.workspaceId) {
                 continue
             }
-            availableDevicesModel.append(d)
+            availableDevicesModel.append({
+                deviceId: d.deviceId,
+                deviceName: d.deviceName,
+                pairedDeviceName: pairedNames[d.deviceId] ? pairedNames[d.deviceId] : "",
+                workspaceId: d.workspaceId,
+                host: d.host,
+                port: d.port,
+                lastSeen: d.lastSeen
+            })
+        }
+    }
+
+    Timer {
+        id: connectProbeTimer
+        interval: 8000
+        repeat: false
+        running: false
+        onTriggered: {
+            if (!connectProbePending) return
+            logConnectProbe("timeout", connectProbePending)
+            resolveConnectProbe(false, "No response was received before timeout.")
         }
     }
 
@@ -247,8 +361,12 @@ Dialog {
 
         function onError(message) {
             console.log("SettingsDialog: sync error:", message)
+            logConnectProbe("signal-error", message)
             if (manualAddDialog.visible) manualAddDialog.statusText = message
             if (endpointEditDialog.visible) endpointEditDialog.statusText = message
+            if (connectProbePending) {
+                resolveConnectProbe(false, message)
+            }
 
             if (manualAddDialog.visible && manualAddDialog.pending && message && message.indexOf("closed the connection") >= 0) {
                 manualAddDialog.statusText =
@@ -258,15 +376,27 @@ Dialog {
 
         function onPeerApprovalRequired(deviceId, deviceName, host, port) {
             console.log("SettingsDialog: peerApprovalRequired", deviceId, deviceName, host, port)
+            logConnectProbe("signal-peerApprovalRequired", {
+                                deviceId: deviceId, deviceName: deviceName, host: host, port: port
+                            })
             if (manualAddDialog.visible && manualAddDialog.pending) {
                 manualAddDialog.statusText = "Awaiting confirmation on the other device…"
+            }
+            if (isCurrentConnectProbe(deviceId, host, port)) {
+                resolveConnectProbe(true, "The device responded and requires approval on the remote side.")
             }
         }
 
         function onPeerHelloReceived(deviceId, deviceName, host, port) {
             console.log("SettingsDialog: peerHelloReceived", deviceId, deviceName, host, port)
+            logConnectProbe("signal-peerHelloReceived", {
+                                deviceId: deviceId, deviceName: deviceName, host: host, port: port
+                            })
             if (DataStore && deviceId && deviceId !== "" && host && host !== "" && port && port > 0) {
                 DataStore.updatePairedDeviceEndpoint(deviceId, host, port)
+            }
+            if (isCurrentConnectProbe(deviceId, host, port)) {
+                resolveConnectProbe(true, "Handshake succeeded.")
             }
             if (!manualAddDialog.visible) return
             if (!manualAddDialog.pending) return
@@ -278,22 +408,73 @@ Dialog {
         function onPeerIdentityMismatch(expectedDeviceId, actualDeviceId, deviceName, host, port) {
             console.log("SettingsDialog: peerIdentityMismatch expected=", expectedDeviceId,
                         "actual=", actualDeviceId, deviceName, host, port)
+            logConnectProbe("signal-peerIdentityMismatch", {
+                                expectedDeviceId: expectedDeviceId,
+                                actualDeviceId: actualDeviceId,
+                                deviceName: deviceName,
+                                host: host,
+                                port: port
+                            })
             if (manualAddDialog.visible && manualAddDialog.pending) {
                 manualAddDialog.statusText = "Device was reset/reinstalled. Re-pair is required."
             }
             if (endpointEditDialog.visible) {
                 endpointEditDialog.statusText = "Device was reset/reinstalled. Re-pair is required."
             }
+            if (isCurrentConnectProbe(expectedDeviceId, host, port)) {
+                resolveConnectProbe(true, "Device responded, but identity mismatch means re-pairing is required.")
+            }
         }
 
         function onPeerWorkspaceMismatch(deviceId, remoteWorkspaceId, localWorkspaceId, deviceName, host, port) {
             console.log("SettingsDialog: peerWorkspaceMismatch", deviceId, remoteWorkspaceId, localWorkspaceId, deviceName, host, port)
+            logConnectProbe("signal-peerWorkspaceMismatch", {
+                                deviceId: deviceId,
+                                remoteWorkspaceId: remoteWorkspaceId,
+                                localWorkspaceId: localWorkspaceId,
+                                deviceName: deviceName,
+                                host: host,
+                                port: port
+                            })
             if (manualAddDialog.visible && manualAddDialog.pending) {
                 manualAddDialog.statusText = "Device is not in this workspace. Re-pair is required."
             }
             if (endpointEditDialog.visible) {
                 endpointEditDialog.statusText = "Device is not in this workspace. Re-pair is required."
             }
+            if (isCurrentConnectProbe(deviceId, host, port)) {
+                resolveConnectProbe(true, "Device responded, but it belongs to a different workspace.")
+            }
+        }
+
+        function onPeerConnected(deviceId) {
+            logConnectProbe("signal-peerConnected", { deviceId: deviceId })
+            if (isCurrentConnectProbe(deviceId, "", 0)) {
+                resolveConnectProbe(true, "Connection established.")
+            }
+        }
+
+        function onPeerDisconnected(deviceId) {
+            logConnectProbe("signal-peerDisconnected", { deviceId: deviceId })
+            if (isCurrentConnectProbe(deviceId, "", 0)) {
+                resolveConnectProbe(false, "Connection failed or was closed before handshake completed.")
+            }
+        }
+
+        function onPageSnapshotReceived(jsonPayload) {
+            if (!connectProbePending) return
+            logConnectProbe("signal-pageSnapshotReceived", {
+                                bytes: jsonPayload ? jsonPayload.length : 0
+                            })
+            resolveConnectProbe(true, "Sync traffic received from a connected peer.")
+        }
+
+        function onPageSnapshotReceivedPages(pages) {
+            if (!connectProbePending) return
+            logConnectProbe("signal-pageSnapshotReceivedPages", {
+                                count: pages ? pages.length : 0
+                            })
+            resolveConnectProbe(true, "Sync data was received from a connected peer.")
         }
     }
 
@@ -491,11 +672,13 @@ Dialog {
                 SettingsPages.DevicesSettingsPage {
                     pairedDevicesModel: pairedDevicesModel
                     availableDevicesModel: availableDevicesModel
+                    syncController: root.syncController
                     refreshPairedDevices: root.refreshPairedDevices
                     refreshAvailableDevices: root.refreshAvailableDevices
-                    connectToPeer: function(deviceId, host, port) {
-                        if (!syncController) return
-                        syncController.connectToPeer(deviceId, host, port)
+                    connectToPeer: function(deviceId, deviceName, host, port) {
+                        if (!root.syncController) return
+                        root.startConnectProbe(deviceId, deviceName, host, port)
+                        root.syncController.connectToPeer(deviceId, host, port)
                     }
                     openEndpointEditor: function(deviceId, deviceName, host, portText) {
                         endpointEditDialog.deviceId = deviceId
@@ -595,11 +778,13 @@ Dialog {
                 SettingsPages.DevicesSettingsPage {
                     pairedDevicesModel: pairedDevicesModel
                     availableDevicesModel: availableDevicesModel
+                    syncController: root.syncController
                     refreshPairedDevices: root.refreshPairedDevices
                     refreshAvailableDevices: root.refreshAvailableDevices
-                    connectToPeer: function(deviceId, host, port) {
-                        if (!syncController) return
-                        syncController.connectToPeer(deviceId, host, port)
+                    connectToPeer: function(deviceId, deviceName, host, port) {
+                        if (!root.syncController) return
+                        root.startConnectProbe(deviceId, deviceName, host, port)
+                        root.syncController.connectToPeer(deviceId, host, port)
                     }
                     openEndpointEditor: function(deviceId, deviceName, host, portText) {
                         endpointEditDialog.deviceId = deviceId
@@ -718,6 +903,46 @@ Dialog {
             }
         }
     }
+    Dialog {
+        id: connectResultDialog
+        objectName: "connectResultDialog"
+        modal: true
+        anchors.centerIn: parent
+        width: Math.min(420, root.width - 40)
+        standardButtons: Dialog.Ok
+        property string resultText: ""
+        property string detailText: ""
+
+        background: Rectangle {
+            color: ThemeManager.surface
+            border.width: 1
+            border.color: (parent && parent.visualFocus) ? ThemeManager.accent : ThemeManager.border
+            radius: ThemeManager.radiusMedium
+        }
+
+        contentItem: ColumnLayout {
+            spacing: ThemeManager.spacingSmall
+            anchors.margins: ThemeManager.spacingMedium
+
+            Text {
+                Layout.fillWidth: true
+                text: connectResultDialog.resultText
+                color: ThemeManager.text
+                font.pixelSize: ThemeManager.fontSizeNormal
+                wrapMode: Text.Wrap
+            }
+
+            Text {
+                Layout.fillWidth: true
+                text: connectResultDialog.detailText
+                visible: connectResultDialog.detailText !== ""
+                color: ThemeManager.textMuted
+                font.pixelSize: ThemeManager.fontSizeSmall
+                wrapMode: Text.Wrap
+            }
+        }
+    }
+
     Dialog {
         id: deviceNameEditDialog
         objectName: "deviceNameEditDialog"

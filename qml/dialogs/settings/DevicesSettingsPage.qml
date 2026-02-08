@@ -37,6 +37,12 @@ SettingsPage {
         return (Date.now() - t) < 15000
     }
 
+    function resolvedDeviceName(deviceId, discoveredName, pairedName) {
+        if (pairedName && pairedName !== "") return pairedName
+        if (discoveredName && discoveredName !== "") return discoveredName
+        return deviceId
+    }
+
     Component.onCompleted: {
         if (page.refreshPairedDevices) page.refreshPairedDevices()
         if (page.refreshAvailableDevices) page.refreshAvailableDevices()
@@ -83,7 +89,7 @@ SettingsPage {
                         clip: true
 
                         Text {
-                            text: deviceName && deviceName !== "" ? deviceName : deviceId
+                            text: page.resolvedDeviceName(deviceId, deviceName, pairedDeviceName)
                             color: ThemeManager.text
                             font.pixelSize: ThemeManager.fontSizeNormal
                             font.weight: Font.Medium
@@ -128,7 +134,7 @@ SettingsPage {
 
                         onClicked: {
                             if (page.openEndpointEditor) {
-                                page.openEndpointEditor(deviceId, deviceName && deviceName !== "" ? deviceName : deviceId,
+                                page.openEndpointEditor(deviceId, page.resolvedDeviceName(deviceId, deviceName, pairedDeviceName),
                                                         host && host !== "" ? host : "",
                                                         port && port > 0 ? ("" + port) : "")
                             }
@@ -159,7 +165,11 @@ SettingsPage {
 
                         onClicked: {
                             console.log("SettingsDialog: connect to discovered peer", deviceId, host, port)
-                            if (page.connectToPeer) page.connectToPeer(deviceId, host, port)
+                            if (page.connectToPeer) page.connectToPeer(
+                                        deviceId,
+                                        page.resolvedDeviceName(deviceId, deviceName, pairedDeviceName),
+                                        host,
+                                        port)
                         }
                     }
                 }

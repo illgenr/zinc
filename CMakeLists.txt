@@ -622,6 +622,7 @@ if(ZINC_BUILD_TESTS)
                     tests/qml/test_settings_dialog_path_pickings_qml.cpp
                     tests/qml/test_settings_dialog_endpoint_edit_qml.cpp
                     tests/qml/test_settings_dialog_device_name_qml.cpp
+                    tests/qml/test_devices_settings_connect_feedback_qml.cpp
 			        tests/qml/test_attachments_disk_storage.cpp
 			        tests/qml/test_block_editor_cursor_visibility_qml.cpp
                     tests/qml/test_block_editor_remote_refresh_focus_qml.cpp
