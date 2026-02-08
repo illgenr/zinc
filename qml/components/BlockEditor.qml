@@ -1229,16 +1229,6 @@ FocusScope {
             focusDocumentStart()
             return true
         }
-        if ((mod & (Qt.ControlModifier | Qt.MetaModifier | Qt.AltModifier)) === 0 && event.key === Qt.Key_End) {
-            event.accepted = true
-            focusDocumentEnd()
-            return true
-        }
-        if ((mod & (Qt.ControlModifier | Qt.MetaModifier | Qt.AltModifier)) === 0 && event.key === Qt.Key_Home) {
-            event.accepted = true
-            focusDocumentStart()
-            return true
-        }
         if (event.key === Qt.Key_PageDown) {
             event.accepted = true
             pageNavigate(1)

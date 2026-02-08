@@ -628,6 +628,7 @@ if(ZINC_BUILD_TESTS)
                     tests/qml/test_block_editor_remote_refresh_focus_qml.cpp
 			        tests/qml/test_block_editor_enter_logic_qml.cpp
 			        tests/qml/test_block_editor_backspace_delete_empty_block_qml.cpp
+                    tests/qml/test_block_editor_home_end_shortcuts_qml.cpp
 			        tests/qml/test_paragraph_block_destroy_qml.cpp
 			        tests/qml/test_block_model.cpp
 		        tests/qml/test_block_model_undo.cpp
