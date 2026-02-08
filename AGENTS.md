@@ -192,6 +192,19 @@ Build:
 cmake --build . --parallel
 ```
 
+## Mac OS
+
+Configure
+```bash
+cmake -S . -B ./build/build-debug -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCMAKE_PREFIX_PATH=~/Qt/6.10.2/macos/lib/cmake -DZINC_BUILD_TESTS=OFF
+```
+
+Build
+```bash
+ninja -C ./build/build-debug
+```
+
+
 ## Packaging
 
 ### Windows
