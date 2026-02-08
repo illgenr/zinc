@@ -39,3 +39,42 @@ TEST_CASE("QML: Main relays incoming snapshots after applying updates", "[qml][s
     REQUIRE(handlerSchedulesRelay(main, QStringLiteral("onDeletedNotebookSnapshotReceivedNotebooks")));
     REQUIRE(handlerSchedulesRelay(main, QStringLiteral("onBlockSnapshotReceivedBlocks")));
 }
+
+TEST_CASE("QML: Main title preview helper guards mobile tree on desktop", "[qml][sync][title]") {
+    const auto main = readAllText(QStringLiteral(":/qt/qml/zinc/qml/Main.qml"));
+    REQUIRE(!main.isEmpty());
+
+    const auto fnPos = main.indexOf(QStringLiteral("function previewPageTitleInTrees("));
+    REQUIRE(fnPos >= 0);
+    const auto fnBlock = main.mid(fnPos, 600);
+    REQUIRE(fnBlock.contains(QStringLiteral("typeof mobilePageTree !== \"undefined\"")));
+}
+
+TEST_CASE("QML: Main keeps title edits as preview until commit", "[qml][sync][title]") {
+    const auto main = readAllText(QStringLiteral(":/qt/qml/zinc/qml/Main.qml"));
+    REQUIRE(!main.isEmpty());
+
+    REQUIRE(main.contains(QStringLiteral("root.previewPageTitleInTrees(")));
+    REQUIRE(main.contains(QStringLiteral("root.commitPageTitleInTrees(pageId, newTitle)")));
+    REQUIRE(!main.contains(QStringLiteral("function schedulePageTitleSync(pageId, newTitle)")));
+    REQUIRE(!main.contains(QStringLiteral("id: pageTitleSyncTimer")));
+}
+
+TEST_CASE("QML: Main presence includes title fallback from current page", "[qml][sync][title]") {
+    const auto main = readAllText(QStringLiteral(":/qt/qml/zinc/qml/Main.qml"));
+    REQUIRE(!main.isEmpty());
+
+    REQUIRE(main.contains(QStringLiteral("function presenceTitlePreviewForPage(pageId)")));
+    REQUIRE(main.contains(QStringLiteral("if (currentPage && currentPage.id === pageId)")));
+    REQUIRE(main.contains(QStringLiteral("return currentPage.title || \"\"")));
+    REQUIRE(main.contains(QStringLiteral("const titlePreview = root.presenceTitlePreviewForPage(presencePageId)")));
+}
+
+TEST_CASE("QML: Main displays remote title preview in active page title", "[qml][sync][title]") {
+    const auto main = readAllText(QStringLiteral(":/qt/qml/zinc/qml/Main.qml"));
+    REQUIRE(!main.isEmpty());
+
+    REQUIRE(main.contains(QStringLiteral("function remoteTitlePreviewForPage(pageId)")));
+    REQUIRE(main.contains(QStringLiteral("function displayPageTitle(pageId, fallbackTitle)")));
+    REQUIRE(main.contains(QStringLiteral("pageTitle: currentPage ? root.displayPageTitle(currentPage.id, currentPage.title) : \"\"")));
+}

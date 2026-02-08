@@ -27,4 +27,13 @@ TEST_CASE("QML: Main passes remoteCursors into block editors", "[qml][cursor][sy
     const auto mainQml = readAllText(QStringLiteral(":/qt/qml/zinc/qml/Main.qml"));
     REQUIRE(!mainQml.isEmpty());
     REQUIRE(mainQml.contains(QStringLiteral("remoteCursors: appSyncController ? appSyncController.remoteCursors : []")));
+    REQUIRE(mainQml.contains(QStringLiteral("showRemoteCursor: root.bothAutoSyncEnabled")));
+}
+
+TEST_CASE("QML: Main passes remoteCursors into page trees", "[qml][cursor][sync]") {
+    const auto mainQml = readAllText(QStringLiteral(":/qt/qml/zinc/qml/Main.qml"));
+    REQUIRE(!mainQml.isEmpty());
+    REQUIRE(mainQml.contains(QStringLiteral("id: pageTree")));
+    REQUIRE(mainQml.contains(QStringLiteral("id: mobilePageTree")));
+    REQUIRE(mainQml.contains(QStringLiteral("remoteCursors: appSyncController ? appSyncController.remoteCursors : []")));
 }

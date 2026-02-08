@@ -9,6 +9,7 @@
 #include <QSettings>
 #include <QDateTime>
 #include <algorithm>
+#include <vector>
 
 namespace zinc::ui {
 
@@ -30,6 +31,17 @@ Uuid get_or_create_device_id(QSettings& settings) {
     auto id = Uuid::generate();
     settings.setValue(device_id_key, QString::fromStdString(id.to_string()));
     return id;
+}
+
+const SyncPresence* newest_presence(const std::map<Uuid, SyncPresence>& presences) {
+    if (presences.empty()) return nullptr;
+    const auto it = std::max_element(
+        presences.begin(),
+        presences.end(),
+        [](const auto& a, const auto& b) {
+            return a.second.updated_at_ms < b.second.updated_at_ms;
+        });
+    return it != presences.end() ? &it->second : nullptr;
 }
 
 } // namespace
@@ -263,7 +275,8 @@ SyncController::SyncController(QObject* parent)
                             << "autoSyncEnabled=" << parsed->auto_sync_enabled
                             << "pageId=" << parsed->page_id
                             << "blockIndex=" << parsed->block_index
-                            << "cursorPos=" << parsed->cursor_pos;
+                            << "cursorPos=" << parsed->cursor_pos
+                            << "titlePreview=" << parsed->title_preview;
                 }
                 const auto it = remote_presences_.find(peer_id);
                 const auto changed =
@@ -271,11 +284,14 @@ SyncController::SyncController(QObject* parent)
                     (it->second.auto_sync_enabled != parsed->auto_sync_enabled) ||
                     (it->second.page_id != parsed->page_id) ||
                     (it->second.block_index != parsed->block_index) ||
-                    (it->second.cursor_pos != parsed->cursor_pos);
+                    (it->second.cursor_pos != parsed->cursor_pos) ||
+                    (it->second.title_preview != parsed->title_preview);
                 if (!changed) {
                     return;
                 }
-                remote_presences_[peer_id] = *parsed;
+                auto updated = *parsed;
+                updated.updated_at_ms = QDateTime::currentMSecsSinceEpoch();
+                remote_presences_[peer_id] = updated;
                 emit remotePresenceChanged();
             });
     connect(sync_manager_.get(), &network::SyncManager::error,
@@ -314,30 +330,46 @@ bool SyncController::remoteAutoSyncEnabled() const {
 }
 
 QString SyncController::remoteCursorPageId() const {
-    if (remote_presences_.empty()) return QString{};
-    return remote_presences_.begin()->second.page_id;
+    const auto* latest = newest_presence(remote_presences_);
+    if (!latest) return QString{};
+    return latest->page_id;
 }
 
 int SyncController::remoteCursorBlockIndex() const {
-    if (remote_presences_.empty()) return -1;
-    return remote_presences_.begin()->second.block_index;
+    const auto* latest = newest_presence(remote_presences_);
+    if (!latest) return -1;
+    return latest->block_index;
 }
 
 int SyncController::remoteCursorPos() const {
-    if (remote_presences_.empty()) return -1;
-    return remote_presences_.begin()->second.cursor_pos;
+    const auto* latest = newest_presence(remote_presences_);
+    if (!latest) return -1;
+    return latest->cursor_pos;
 }
 
 QVariantList SyncController::remoteCursors() const {
     QVariantList out;
     out.reserve(static_cast<int>(remote_presences_.size()));
-    for (const auto& [peerId, presence] : remote_presences_) {
+    std::vector<std::pair<Uuid, SyncPresence>> ordered;
+    ordered.reserve(remote_presences_.size());
+    for (const auto& entry : remote_presences_) {
+        ordered.push_back(entry);
+    }
+    std::sort(ordered.begin(), ordered.end(), [](const auto& a, const auto& b) {
+        if (a.second.updated_at_ms != b.second.updated_at_ms) {
+            return a.second.updated_at_ms > b.second.updated_at_ms;
+        }
+        return a.first.to_string() < b.first.to_string();
+    });
+
+    for (const auto& [peerId, presence] : ordered) {
         QVariantMap cursor;
         cursor.insert(QStringLiteral("deviceId"), QString::fromStdString(peerId.to_string()));
         cursor.insert(QStringLiteral("pageId"), presence.page_id);
         cursor.insert(QStringLiteral("blockIndex"), presence.block_index);
         cursor.insert(QStringLiteral("cursorPos"), presence.cursor_pos);
         cursor.insert(QStringLiteral("autoSyncEnabled"), presence.auto_sync_enabled);
+        cursor.insert(QStringLiteral("titlePreview"), presence.title_preview);
         out.append(cursor);
     }
     return out;
@@ -541,18 +573,24 @@ void SyncController::sendPageSnapshot(const QString& jsonPayload) {
     sync_manager_->sendPageSnapshot(payload);
 }
 
-void SyncController::sendPresence(const QString& pageId, int blockIndex, int cursorPos, bool autoSyncEnabled) {
+void SyncController::sendPresence(const QString& pageId,
+                                  int blockIndex,
+                                  int cursorPos,
+                                  bool autoSyncEnabled,
+                                  const QString& titlePreview) {
     SyncPresence presence;
     presence.auto_sync_enabled = autoSyncEnabled;
     presence.page_id = pageId;
     presence.block_index = blockIndex;
     presence.cursor_pos = cursorPos;
+    presence.title_preview = titlePreview;
     const auto bytes = serializeSyncPresence(presence);
     if (qEnvironmentVariableIsSet("ZINC_DEBUG_SYNC")) {
         qInfo() << "SYNC: sendPresence pageId=" << pageId
                 << "blockIndex=" << blockIndex
                 << "cursorPos=" << cursorPos
-                << "autoSyncEnabled=" << autoSyncEnabled;
+                << "autoSyncEnabled=" << autoSyncEnabled
+                << "titlePreview=" << titlePreview;
     }
     const std::vector<uint8_t> payload(bytes.begin(), bytes.end());
     sync_manager_->sendPresenceUpdate(payload);

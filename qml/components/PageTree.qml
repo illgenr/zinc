@@ -20,8 +20,13 @@ Item {
     property string selectedPageId: ""
     property string sortMode: "alphabetical" // "alphabetical" | "updatedAt" | "createdAt"
     property bool enableContextMenu: true
+    property var remoteCursors: []
+    property int remoteCursorsRevision: 0
+    readonly property bool debugSyncUi: Qt.application.arguments.indexOf("--debug-sync-ui") !== -1
     property bool typeaheadCaseSensitive: GeneralPreferences.pageTreeTypeaheadCaseSensitive
     property int typeaheadTimeoutMs: 700
+
+    onRemoteCursorsChanged: remoteCursorsRevision++
     
     signal pageSelected(string pageId, string title)
     signal pagesChanged()
@@ -674,6 +679,69 @@ Item {
             }
         }
     }
+
+    // Update only the visible tree row title without persisting or re-sorting.
+    function updatePageTitlePreview(pageId, newTitle) {
+        for (let i = 0; i < pageModel.count; i++) {
+            const row = pageModel.get(i)
+            if (row && row.kind === "page" && row.pageId === pageId) {
+                pageModel.setProperty(i, "title", newTitle)
+                break
+            }
+        }
+    }
+
+    function cursorTitleSuffixForPage(pageId) {
+        if (!pageId || pageId === "" || !remoteCursors || remoteCursors.length === 0) {
+            return ""
+        }
+
+        let matches = []
+        for (let i = 0; i < remoteCursors.length; i++) {
+            const c = remoteCursors[i] || {}
+            if ((c.pageId || "") !== pageId) continue
+            if ((c.blockIndex === undefined || c.blockIndex < 0) &&
+                (c.cursorPos === undefined || c.cursorPos < 0)) {
+                continue
+            }
+            matches.push(c)
+        }
+
+        if (matches.length === 0) return ""
+        if (matches.length > 1) return " (" + matches.length + " cursors)"
+
+        const one = matches[0]
+        const block = one.blockIndex === undefined ? -1 : one.blockIndex
+        const pos = one.cursorPos === undefined ? -1 : one.cursorPos
+        if (block >= 0 && pos >= 0) return " (cursor " + (block + 1) + ":" + (pos + 1) + ")"
+        if (block >= 0) return " (cursor " + (block + 1) + ")"
+        return ""
+    }
+
+    function remoteTitlePreviewForPage(pageId) {
+        if (!pageId || pageId === "" || !remoteCursors || remoteCursors.length === 0) {
+            return ""
+        }
+        for (let i = 0; i < remoteCursors.length; i++) {
+            const c = remoteCursors[i] || {}
+            if ((c.pageId || "") !== pageId) continue
+            const preview = c.titlePreview || ""
+            if (preview !== "") {
+                if (debugSyncUi) {
+                    console.log("SYNCUI: PageTree remoteTitlePreview pageId=", pageId,
+                                "deviceId=", (c.deviceId || ""),
+                                "preview=", preview)
+                }
+                return preview
+            }
+        }
+        return ""
+    }
+
+    function titleWithCursorSuffix(pageId, title) {
+        const displayTitle = remoteTitlePreviewForPage(pageId) || (title || "")
+        return displayTitle + cursorTitleSuffixForPage(pageId)
+    }
     
     // Delete a page and its children
     function deletePage(pageId) {
@@ -712,6 +780,12 @@ Item {
         let pages = getAllPages()
         DataStore.saveAllPages(pages)
     }
+
+    function clampPageListContentY(y) {
+        if (!pageList) return 0
+        const maxY = Math.max(0, pageList.contentHeight - pageList.height)
+        return Math.max(0, Math.min(y, maxY))
+    }
     
     function loadPagesFromStorage() {
         if (!DataStore || DataStore.schemaVersion < 0) {
@@ -721,9 +795,27 @@ Item {
             return false
         }
         try {
+            const previousContentY = pageList ? pageList.contentY : 0
+            const selectedPageId = root.selectedPageId || ""
             let pages = DataStore ? DataStore.getAllPages() : []
             let notebooks = (DataStore && DataStore.getAllNotebooks) ? DataStore.getAllNotebooks() : []
             rebuildModel(pages || [], notebooks || [])
+
+            if (selectedPageId !== "") {
+                const selectedIndex = indexOfPageId(selectedPageId)
+                if (selectedIndex >= 0) {
+                    pageList.currentIndex = selectedIndex
+                }
+            } else {
+                syncCurrentIndexToSelection()
+            }
+
+            const restoreY = previousContentY
+            Qt.callLater(() => {
+                if (!pageList) return
+                pageList.contentY = clampPageListContentY(restoreY)
+            })
+
             const hasAny = (pages && pages.length > 0) || (notebooks && notebooks.length > 0)
             if (!hasAny) {
                 cancelInlineEdit()
@@ -1369,9 +1461,13 @@ Item {
                     || arrowMouse.containsMouse
                     || addChildMouse.containsMouse
                     || menuMouse.containsMouse
-                readonly property int rowHeight: collapsed
+                readonly property int baseRowHeight: collapsed
                     ? 32
                     : (root._isMobile ? Math.max(44, root.actionButtonSize) : 28)
+                readonly property int rowHeight: Math.max(baseRowHeight,
+                                                         (!collapsed && titleText && titleText.visible)
+                                                            ? Math.ceil(titleText.paintedHeight) + 8
+                                                            : baseRowHeight)
                 readonly property bool hasNextVisible: rowIsVisible && root.nextVisibleIndex(index) !== -1
                 readonly property int rowGap: hasNextVisible ? 2 : 0
 
@@ -1522,12 +1618,17 @@ Item {
                          (root._inlineKind === "notebook" && (model.notebookId || "") === root._inlineNotebookId))
 
                     Text {
+                        id: titleText
                         anchors.fill: parent
-                        text: model.title || ""
+                        text: {
+                            const _presenceRevision = root.remoteCursorsRevision
+                            return root.titleWithCursorSuffix(model.pageId || "", model.title || "")
+                        }
                         color: ThemeManager.text
                         font.pixelSize: ThemeManager.fontSizeSmall
-                        elide: Text.ElideRight
-                        verticalAlignment: Text.AlignVCenter
+                        elide: Text.ElideNone
+                        wrapMode: Text.Wrap
+                        verticalAlignment: Text.AlignTop
                         visible: !parent.editingThisRow
                     }
 

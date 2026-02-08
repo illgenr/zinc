@@ -64,7 +64,11 @@ public:
     Q_INVOKABLE int listeningPort() const;
     Q_INVOKABLE bool isPeerConnected(const QString& deviceId) const;
     Q_INVOKABLE void sendPageSnapshot(const QString& jsonPayload);
-    Q_INVOKABLE void sendPresence(const QString& pageId, int blockIndex, int cursorPos, bool autoSyncEnabled);
+    Q_INVOKABLE void sendPresence(const QString& pageId,
+                                  int blockIndex,
+                                  int cursorPos,
+                                  bool autoSyncEnabled,
+                                  const QString& titlePreview = QString());
 
 signals:
     void syncingChanged();

@@ -6,10 +6,13 @@ import zinc
 Item {
     id: root
     readonly property bool debugSearchUi: Qt.application.arguments.indexOf("--debug-search-ui") !== -1
+    readonly property bool debugSyncUi: Qt.application.arguments.indexOf("--debug-sync-ui") !== -1
 
     property string pageTitle: ""
     property string pageId: ""
     property var availablePages: []
+    property bool showRemoteCursor: false
+    property var remoteCursors: []
 
     signal titleEdited(string newTitle)
     signal titleEditingFinished(string pageId, string newTitle)
@@ -22,6 +25,17 @@ Item {
     property var pendingDateInsertSpan: null
     property string titleEditingPageId: ""
     property string titleEditingOriginalTitle: ""
+
+    function remoteTitleCursorPos() {
+        if (!remoteCursors || remoteCursors.length === 0 || !pageId || pageId === "") return -1
+        for (let i = 0; i < remoteCursors.length; i++) {
+            const c = remoteCursors[i] || {}
+            if ((c.pageId || "") !== pageId) continue
+            const pos = c.cursorPos === undefined ? -1 : c.cursorPos
+            if (pos >= 0) return pos
+        }
+        return -1
+    }
 
     function pad2(n) {
         const s = "" + n
@@ -259,13 +273,34 @@ Item {
                     visible: parent.text.length === 0 && !parent.activeFocus
                 }
 
+                Rectangle {
+                    readonly property int remotePos: root.remoteTitleCursorPos()
+                    visible: root.showRemoteCursor && remotePos >= 0 && !titleInput.activeFocus
+                    color: ThemeManager.remoteCursor
+                    width: 2
+                    height: Math.max(20, titleInput.cursorRectangle.height)
+                    x: titleInput.positionToRectangle(remotePos).x
+                    y: titleInput.positionToRectangle(remotePos).y
+                }
+
                 onTextChanged: {
+                    if (root.debugSyncUi) {
+                        console.log("SYNCUI: MarkdownEditor titleInput textChanged pageId=", root.pageId,
+                                    "text=", text,
+                                    "pageTitle=", pageTitle,
+                                    "willEmit=", (text !== pageTitle))
+                    }
                     if (text !== pageTitle) {
                         root.titleEdited(text)
                     }
                 }
 
                 onActiveFocusChanged: {
+                    if (root.debugSyncUi) {
+                        console.log("SYNCUI: MarkdownEditor titleInput focusChanged pageId=", root.pageId,
+                                    "activeFocus=", activeFocus,
+                                    "text=", text)
+                    }
                     if (activeFocus) {
                         root.titleEditingPageId = root.pageId
                         root.titleEditingOriginalTitle = text

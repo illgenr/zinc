@@ -68,6 +68,44 @@ bool deletedPagePresent(zinc::ui::DataStore& store, const QString& pageId) {
     return false;
 }
 
+struct PageSyncCursor {
+    QString updatedAt;
+    QString pageId;
+};
+
+PageSyncCursor maxCursorFromPages(const QVariantList& pages) {
+    PageSyncCursor cursor;
+    for (const auto& entry : pages) {
+        const auto page = entry.toMap();
+        const auto at = page.value(QStringLiteral("updatedAt")).toString();
+        const auto id = page.value(QStringLiteral("pageId")).toString();
+        if (at.isEmpty() || id.isEmpty()) continue;
+        if (cursor.updatedAt.isEmpty() ||
+            at > cursor.updatedAt ||
+            (at == cursor.updatedAt && id > cursor.pageId)) {
+            cursor.updatedAt = at;
+            cursor.pageId = id;
+        }
+    }
+    return cursor;
+}
+
+class EnvVarGuard {
+public:
+    explicit EnvVarGuard(const QByteArray& key)
+        : m_key(key), m_old(qgetenv(key.constData())), m_had(!m_old.isNull()) {}
+
+    ~EnvVarGuard() {
+        if (m_had) qputenv(m_key.constData(), m_old);
+        else qunsetenv(m_key.constData());
+    }
+
+private:
+    QByteArray m_key;
+    QByteArray m_old;
+    bool m_had;
+};
+
 } // namespace
 
 TEST_CASE("DataStore: seedDefaultPages uses old timestamps", "[qml][datastore]") {
@@ -238,7 +276,7 @@ TEST_CASE("DataStore: applyPageUpdates records a conflict when both sides change
         localTime = QDateTime::fromString(localUpdated, "yyyy-MM-dd HH:mm:ss");
     }
     REQUIRE(localTime.isValid());
-    const auto remoteUpdated = localTime.addSecs(10).toUTC().toString("yyyy-MM-dd HH:mm:ss.zzz");
+    const auto remoteUpdated = localTime.addSecs(10).toString("yyyy-MM-dd HH:mm:ss.zzz");
 
     QVariantList incoming;
     incoming.append(makePage("p_conflict", QStringLiteral("Page"), remoteUpdated, QStringLiteral("Remote edit")));
@@ -270,7 +308,7 @@ TEST_CASE("DataStore: resolvePageConflict merge applies merged markdown", "[qml]
         localTime = QDateTime::fromString(localUpdated, "yyyy-MM-dd HH:mm:ss");
     }
     REQUIRE(localTime.isValid());
-    const auto remoteUpdated = localTime.addSecs(10).toUTC().toString("yyyy-MM-dd HH:mm:ss.zzz");
+    const auto remoteUpdated = localTime.addSecs(10).toString("yyyy-MM-dd HH:mm:ss.zzz");
 
     QVariantList incoming;
     incoming.append(makePage("p_merge", QStringLiteral("Page"), remoteUpdated, QStringLiteral("theirs\na\nb\nc")));
@@ -283,6 +321,87 @@ TEST_CASE("DataStore: resolvePageConflict merge applies merged markdown", "[qml]
     REQUIRE(merged.contains(QStringLiteral("theirs")));
     REQUIRE(merged.contains(QStringLiteral("ours")));
     REQUIRE_FALSE(merged.contains(QStringLiteral("<<<<<<<")));
+}
+
+TEST_CASE("DataStore: title-only divergence creates conflict and merge combines titles", "[qml][datastore][title]") {
+    zinc::ui::DataStore store;
+    REQUIRE(store.initialize());
+    REQUIRE(store.resetDatabase());
+
+    const auto baseTs = QStringLiteral("2026-01-11 00:00:00.000");
+    QVariantList base;
+    base.append(makePage("p_title_conflict", QStringLiteral("Page"), baseTs, QStringLiteral("Body")));
+    store.applyPageUpdates(base);
+
+    QVariantList localEdit;
+    localEdit.append(makePage("p_title_conflict", QStringLiteral("Local title"), QString(), QStringLiteral("Body")));
+    store.saveAllPages(localEdit);
+    const auto remoteUpdated = QStringLiteral("2099-01-01 00:00:00.000");
+
+    QVariantList incoming;
+    incoming.append(makePage("p_title_conflict", QStringLiteral("Remote title"), remoteUpdated, QStringLiteral("Body")));
+    store.applyPageUpdates(incoming);
+    REQUIRE(store.hasPageConflict(QStringLiteral("p_title_conflict")));
+
+    const auto preview = store.previewMergeForPageConflict(QStringLiteral("p_title_conflict"));
+    REQUIRE(preview.value(QStringLiteral("mergedTitle")).toString() == QStringLiteral("Local title | Remote title"));
+
+    store.resolvePageConflict(QStringLiteral("p_title_conflict"), QStringLiteral("merge"));
+    REQUIRE_FALSE(store.hasPageConflict(QStringLiteral("p_title_conflict")));
+    REQUIRE(titleForPage(store, QStringLiteral("p_title_conflict")) == QStringLiteral("Local title | Remote title"));
+    REQUIRE(store.getPageContentMarkdown(QStringLiteral("p_title_conflict")) == QStringLiteral("Body"));
+}
+
+TEST_CASE("DataStore: multi-device title sync delta applies reliably with sync cursors", "[qml][datastore][sync][title]") {
+    EnvVarGuard pathGuard("ZINC_DB_PATH");
+    QTemporaryDir dir;
+    REQUIRE(dir.isValid());
+    const auto authorPath = dir.filePath(QStringLiteral("author.db"));
+    const auto peerPath = dir.filePath(QStringLiteral("peer.db"));
+
+    QVariantList fullToPeer;
+    QVariantList deltaToPeer;
+
+    {
+        qputenv("ZINC_DB_PATH", authorPath.toUtf8());
+        zinc::ui::DataStore author;
+        REQUIRE(author.initialize());
+        REQUIRE(author.resetDatabase());
+
+        // Author starts with one page and prepares full snapshot.
+        QVariantList authorInitial;
+        authorInitial.append(makePage("p_sync_title", QStringLiteral("Alpha"), QString(), QStringLiteral("Body")));
+        author.saveAllPages(authorInitial);
+        fullToPeer = author.getPagesForSync();
+        REQUIRE(fullToPeer.size() == 1);
+
+        const auto peerCursor = maxCursorFromPages(fullToPeer);
+        REQUIRE_FALSE(peerCursor.updatedAt.isEmpty());
+        REQUIRE_FALSE(peerCursor.pageId.isEmpty());
+
+        // Author renames title and prepares delta snapshot from cursor.
+        QVariantList authorRename;
+        authorRename.append(makePage("p_sync_title",
+                                     QStringLiteral("Alpha renamed"),
+                                     QStringLiteral("2099-01-01 00:00:00.000"),
+                                     QStringLiteral("Body")));
+        author.applyPageUpdates(authorRename);
+        deltaToPeer = author.getPagesForSyncSince(peerCursor.updatedAt, peerCursor.pageId);
+        REQUIRE(deltaToPeer.size() >= 1);
+    }
+
+    {
+        qputenv("ZINC_DB_PATH", peerPath.toUtf8());
+        zinc::ui::DataStore peer;
+        REQUIRE(peer.initialize());
+        REQUIRE(peer.resetDatabase());
+
+        peer.applyPageUpdates(fullToPeer);
+        REQUIRE(titleForPage(peer, QStringLiteral("p_sync_title")) == QStringLiteral("Alpha"));
+
+        peer.applyPageUpdates(deltaToPeer);
+        REQUIRE(titleForPage(peer, QStringLiteral("p_sync_title")) == QStringLiteral("Alpha renamed"));
+    }
 }
 
 TEST_CASE("DataStore: resolvePageConflict uses timestamp newer than both conflict sides", "[qml][datastore]") {

@@ -30,6 +30,8 @@ TEST_CASE("QML: Title editing commits on focus loss", "[qml][editor][title]") {
     REQUIRE(containsRegex(blockEditor, QRegularExpression(QStringLiteral(R"(Keys\.onPressed:\s*function\s*\(event\).*\b(Qt\.Key_Return|Qt\.Key_Enter)\b)"),
                                                          QRegularExpression::DotMatchesEverythingOption)));
     REQUIRE(blockEditor.contains(QStringLiteral("focusContent()")));
+    REQUIRE(blockEditor.contains(QStringLiteral("function remoteTitleCursorPos()")));
+    REQUIRE(blockEditor.contains(QStringLiteral("visible: root.showRemoteCursor && remotePos >= 0 && !titleInput.activeFocus")));
 
     const auto markdownEditor = readAllText(QStringLiteral(":/qt/qml/zinc/qml/components/MarkdownEditor.qml"));
     REQUIRE(!markdownEditor.isEmpty());
@@ -40,5 +42,6 @@ TEST_CASE("QML: Title editing commits on focus loss", "[qml][editor][title]") {
     REQUIRE(containsRegex(markdownEditor, QRegularExpression(QStringLiteral(R"(Keys\.onPressed:\s*function\s*\(event\).*\b(Qt\.Key_Return|Qt\.Key_Enter)\b)"),
                                                            QRegularExpression::DotMatchesEverythingOption)));
     REQUIRE(markdownEditor.contains(QStringLiteral("focusContent()")));
+    REQUIRE(markdownEditor.contains(QStringLiteral("function remoteTitleCursorPos()")));
+    REQUIRE(markdownEditor.contains(QStringLiteral("visible: root.showRemoteCursor && remotePos >= 0 && !titleInput.activeFocus")));
 }
-

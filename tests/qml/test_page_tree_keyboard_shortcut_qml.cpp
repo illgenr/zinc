@@ -370,6 +370,91 @@ TEST_CASE("QML: PageTree sortMode alphabetical orders siblings by title", "[qml]
     REQUIRE(pages[3].toMap().value("pageId").toString() == QStringLiteral("3"));
 }
 
+TEST_CASE("QML: PageTree live title preview updates text without re-sorting until commit", "[qml][pagetree][sort][title]") {
+    registerTypesOnce();
+
+    QQmlEngine engine;
+    QQmlComponent component(&engine);
+    component.setData(
+        "import QtQuick\n"
+        "import QtQuick.Controls\n"
+        "import zinc\n"
+        "ApplicationWindow {\n"
+        "    width: 800\n"
+        "    height: 600\n"
+        "    visible: true\n"
+        "    PageTree {\n"
+        "        id: pageTree\n"
+        "        objectName: \"pageTree\"\n"
+        "        anchors.fill: parent\n"
+        "        sortMode: \"alphabetical\"\n"
+        "        Component.onCompleted: {\n"
+        "            if (DataStore) {\n"
+        "                DataStore.resetDatabase()\n"
+        "                DataStore.saveAllPages([\n"
+        "                    { pageId: \"a\", title: \"Alpha\", parentId: \"\", depth: 0, sortOrder: 0 },\n"
+        "                    { pageId: \"b\", title: \"Beta\", parentId: \"\", depth: 0, sortOrder: 1 }\n"
+        "                ])\n"
+        "            }\n"
+        "        }\n"
+        "    }\n"
+        "}\n",
+        QUrl(QStringLiteral("qrc:/qt/qml/zinc/tests/PageTreeLiveTitlePreviewHost.qml")));
+
+    if (component.status() == QQmlComponent::Error) {
+        FAIL(formatErrors(component.errors()).toStdString());
+    }
+    REQUIRE(component.status() == QQmlComponent::Ready);
+
+    std::unique_ptr<QObject> root(component.create());
+    REQUIRE(root);
+    auto* window = requireWindow(root.get());
+    window->show();
+    QTest::qWait(50);
+
+    auto* pageTree = findOrNull(root.get(), "pageTree");
+    REQUIRE(pageTree);
+
+    REQUIRE(waitUntil([&]() {
+        QVariant value;
+        if (!QMetaObject::invokeMethod(pageTree, "getAllPages", Q_RETURN_ARG(QVariant, value))) {
+            return false;
+        }
+        const auto pages = value.toList();
+        if (pages.size() < 2) return false;
+        return pages[0].toMap().value("pageId").toString() == QStringLiteral("a")
+            && pages[1].toMap().value("pageId").toString() == QStringLiteral("b");
+    }));
+
+    QMetaObject::invokeMethod(pageTree,
+                              "updatePageTitlePreview",
+                              Q_ARG(QVariant, QStringLiteral("a")),
+                              Q_ARG(QVariant, QStringLiteral("Zulu")));
+
+    QVariant previewValue;
+    REQUIRE(QMetaObject::invokeMethod(pageTree, "getAllPages", Q_RETURN_ARG(QVariant, previewValue)));
+    const auto previewPages = previewValue.toList();
+    REQUIRE(previewPages.size() >= 2);
+    REQUIRE(previewPages[0].toMap().value("pageId").toString() == QStringLiteral("a"));
+    REQUIRE(previewPages[0].toMap().value("title").toString() == QStringLiteral("Zulu"));
+
+    QMetaObject::invokeMethod(pageTree,
+                              "updatePageTitle",
+                              Q_ARG(QVariant, QStringLiteral("a")),
+                              Q_ARG(QVariant, QStringLiteral("Zulu")));
+
+    REQUIRE(waitUntil([&]() {
+        QVariant value;
+        if (!QMetaObject::invokeMethod(pageTree, "getAllPages", Q_RETURN_ARG(QVariant, value))) {
+            return false;
+        }
+        const auto pages = value.toList();
+        if (pages.size() < 2) return false;
+        return pages[0].toMap().value("pageId").toString() == QStringLiteral("b")
+            && pages[1].toMap().value("pageId").toString() == QStringLiteral("a");
+    }));
+}
+
 TEST_CASE("QML: PageTree sortMode updatedAt puts recently updated pages first", "[qml][pagetree][sort]") {
     registerTypesOnce();
 

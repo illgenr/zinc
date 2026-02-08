@@ -112,6 +112,11 @@ int main(int argc, char *argv[])
         QStringLiteral("Enable search UI debug logging (also sets ZINC_DEBUG_SEARCH_UI=1)."));
     parser.addOption(debugSearchUiOption);
 
+    const QCommandLineOption debugSyncUiOption(
+        QStringList{QStringLiteral("debug-sync-ui")},
+        QStringLiteral("Enable sync UI debug logging (also sets ZINC_DEBUG_SYNC_UI=1)."));
+    parser.addOption(debugSyncUiOption);
+
     parser.addPositionalArgument(QStringLiteral("command"),
                                  QStringLiteral("Command to run (e.g. 'list')."));
     parser.process(app);
@@ -123,6 +128,7 @@ int main(int argc, char *argv[])
     const bool debugAttachments = parser.isSet(debugAttachmentsOption);
     const bool debugSync = parser.isSet(debugSyncOption);
     const bool debugSearchUi = parser.isSet(debugSearchUiOption);
+    const bool debugSyncUi = parser.isSet(debugSyncUiOption);
 
     if (debugAttachments) {
         qputenv("ZINC_DEBUG_ATTACHMENTS", "1");
@@ -133,6 +139,9 @@ int main(int argc, char *argv[])
     }
     if (debugSearchUi) {
         qputenv("ZINC_DEBUG_SEARCH_UI", "1");
+    }
+    if (debugSyncUi) {
+        qputenv("ZINC_DEBUG_SYNC_UI", "1");
     }
 
     const auto positional = parser.positionalArguments();

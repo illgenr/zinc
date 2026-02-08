@@ -999,6 +999,25 @@ QString monotonic_conflict_resolution_timestamp(const QVariantMap& conflict) {
     return candidate.toUTC().toString("yyyy-MM-dd HH:mm:ss.zzz");
 }
 
+QString merge_conflict_title(const QString& baseTitle,
+                             const QString& localTitle,
+                             const QString& remoteTitle) {
+    const auto base = normalize_title(baseTitle);
+    const auto local = normalize_title(localTitle);
+    const auto remote = normalize_title(remoteTitle);
+
+    if (local == remote) {
+        return local;
+    }
+    if (local == base && remote != base) {
+        return remote;
+    }
+    if (remote == base && local != base) {
+        return local;
+    }
+    return QStringLiteral("%1 | %2").arg(local, remote);
+}
+
 } // namespace
 
 DataStore::DataStore(QObject* parent)
@@ -1569,6 +1588,9 @@ QVariantMap DataStore::previewMergeForPageConflict(const QString& pageId) {
         : (result.kind == zinc::ThreeWayMergeResult::Kind::Conflict)
             ? QStringLiteral("conflict")
             : QStringLiteral("fallback");
+    out["mergedTitle"] = merge_conflict_title(conflict.value(QStringLiteral("baseTitle")).toString(),
+                                              conflict.value(QStringLiteral("localTitle")).toString(),
+                                              conflict.value(QStringLiteral("remoteTitle")).toString());
     return out;
 }
 
@@ -1582,6 +1604,7 @@ void DataStore::resolvePageConflict(const QString& pageId, const QString& resolu
 
     const auto localTitle = conflict.value(QStringLiteral("localTitle")).toString();
     const auto remoteTitle = conflict.value(QStringLiteral("remoteTitle")).toString();
+    const auto baseTitle = conflict.value(QStringLiteral("baseTitle")).toString();
     const auto localMd = conflict.value(QStringLiteral("localContentMarkdown")).toString();
     const auto remoteMd = conflict.value(QStringLiteral("remoteContentMarkdown")).toString();
 
@@ -1593,7 +1616,7 @@ void DataStore::resolvePageConflict(const QString& pageId, const QString& resolu
         resolvedMd = remoteMd;
     } else if (resolution == QStringLiteral("merge")) {
         const auto preview = previewMergeForPageConflict(pageId);
-        resolvedTitle = normalize_title(localTitle.isEmpty() ? remoteTitle : localTitle);
+        resolvedTitle = merge_conflict_title(baseTitle, localTitle, remoteTitle);
         resolvedMd = preview.value(QStringLiteral("mergedMarkdown")).toString();
     } else {
         // Default: keep local

@@ -640,6 +640,7 @@ if(ZINC_BUILD_TESTS)
 				        tests/qml/test_inline_format_bar_qml.cpp
 		        tests/qml/test_cursor_motion_indicator_logic_qml.cpp
                 tests/qml/test_multi_remote_cursor_qml.cpp
+                tests/qml/test_page_tree_remote_cursor_qml.cpp
 		        tests/qml/test_sync_controller_settings.cpp
                 tests/qml/test_sync_incoming_approval.cpp
 		        tests/qml/test_sync_buttons_qml.cpp

@@ -14,7 +14,7 @@ ApplicationWindow {
     minimumWidth: 400
     minimumHeight: 600
     visible: true
-    title: currentPage ? currentPage.title + " - Zinc" : "Zinc"
+    title: currentPage ? (root.displayPageTitle(currentPage.id, currentPage.title) + " - Zinc") : "Zinc"
     color: ThemeManager.background
     
     property var currentPage: null
@@ -232,6 +232,7 @@ ApplicationWindow {
                     objectName: "mobilePageTree"
                     Layout.fillWidth: true
                     Layout.fillHeight: true
+                    remoteCursors: appSyncController ? appSyncController.remoteCursors : []
                     showNewPageButton: false
                     showNewNotebookButton: false
                     showSortButton: false
@@ -330,7 +331,7 @@ ApplicationWindow {
                     
                     Text {
                         Layout.fillWidth: true
-                        text: root.currentPage ? root.currentPage.title : "Note"
+                        text: root.currentPage ? root.displayPageTitle(root.currentPage.id, root.currentPage.title) : "Note"
                         color: ThemeManager.text
                         font.pixelSize: ThemeManager.fontSizeLarge
                         font.weight: Font.Medium
@@ -357,7 +358,7 @@ ApplicationWindow {
                 id: mobileBlockEditor
                 anchors.fill: parent
                 enabled: root.databaseActive
-                pageTitle: root.currentPage ? root.currentPage.title : ""
+                pageTitle: root.currentPage ? root.displayPageTitle(root.currentPage.id, root.currentPage.title) : ""
                 availablePages: pageTree.getAllPages()
                 realtimeSyncEnabled: root.bothAutoSyncEnabled
                 debugSyncUi: root.debugSyncUi
@@ -384,12 +385,27 @@ ApplicationWindow {
                 onTitleEdited: function(newTitle) {
                     if (root.currentPage) {
                         root.currentPage.title = newTitle
+                        root.previewPageTitleInTrees(root.currentPage.id, newTitle)
+                        root.localTitlePreviewPageId = root.currentPage.id
+                        root.localTitlePreviewValue = newTitle
+                        if (root.debugSyncUi) {
+                            console.log("SYNCUI: titleEdited mobile pageId=", root.currentPage.id,
+                                        "titlePreview=", newTitle)
+                        }
+                        presenceTimer.restart()
                     }
                 }
 
                 onTitleEditingFinished: function(pageId, newTitle) {
                     if (!pageId || pageId === "") return
-                    pageTree.updatePageTitle(pageId, newTitle)
+                    root.commitPageTitleInTrees(pageId, newTitle)
+                    root.localTitlePreviewPageId = ""
+                    root.localTitlePreviewValue = ""
+                    if (root.debugSyncUi) {
+                        console.log("SYNCUI: titleEditingFinished mobile pageId=", pageId,
+                                    "committedTitle=", newTitle)
+                    }
+                    presenceTimer.restart()
                 }
 
                 onExternalLinkRequested: function(url) {
@@ -588,6 +604,7 @@ ApplicationWindow {
                     objectName: "pageTree"
                     Layout.fillWidth: true
                     Layout.fillHeight: true
+                    remoteCursors: appSyncController ? appSyncController.remoteCursors : []
                     visible: !sidebarCollapsed
                     showNewPageButton: false
                     showNewNotebookButton: false
@@ -647,7 +664,7 @@ ApplicationWindow {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
                         enabled: root.databaseActive
-                        pageTitle: currentPage ? currentPage.title : ""
+                        pageTitle: currentPage ? root.displayPageTitle(currentPage.id, currentPage.title) : ""
                         availablePages: pageTree.getAllPages()
                         realtimeSyncEnabled: root.bothAutoSyncEnabled
                         debugSyncUi: root.debugSyncUi
@@ -660,12 +677,27 @@ ApplicationWindow {
                         onTitleEdited: function(newTitle) {
                             if (currentPage) {
                                 currentPage.title = newTitle
+                                root.previewPageTitleInTrees(currentPage.id, newTitle)
+                                root.localTitlePreviewPageId = currentPage.id
+                                root.localTitlePreviewValue = newTitle
+                                if (root.debugSyncUi) {
+                                    console.log("SYNCUI: titleEdited block pageId=", currentPage.id,
+                                                "titlePreview=", newTitle)
+                                }
+                                presenceTimer.restart()
                             }
                         }
 
                         onTitleEditingFinished: function(pageId, newTitle) {
                             if (!pageId || pageId === "") return
-                            pageTree.updatePageTitle(pageId, newTitle)
+                            root.commitPageTitleInTrees(pageId, newTitle)
+                            root.localTitlePreviewPageId = ""
+                            root.localTitlePreviewValue = ""
+                            if (root.debugSyncUi) {
+                                console.log("SYNCUI: titleEditingFinished block pageId=", pageId,
+                                            "committedTitle=", newTitle)
+                            }
+                            presenceTimer.restart()
                         }
 
                         onExternalLinkRequested: function(url) {
@@ -737,18 +769,35 @@ ApplicationWindow {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
                         enabled: root.databaseActive
-                        pageTitle: currentPage ? currentPage.title : ""
+                        pageTitle: currentPage ? root.displayPageTitle(currentPage.id, currentPage.title) : ""
                         availablePages: pageTree.getAllPages()
+                        showRemoteCursor: root.bothAutoSyncEnabled
+                        remoteCursors: appSyncController ? appSyncController.remoteCursors : []
 
                         onTitleEdited: function(newTitle) {
                             if (currentPage) {
                                 currentPage.title = newTitle
+                                root.previewPageTitleInTrees(currentPage.id, newTitle)
+                                root.localTitlePreviewPageId = currentPage.id
+                                root.localTitlePreviewValue = newTitle
+                                if (root.debugSyncUi) {
+                                    console.log("SYNCUI: titleEdited markdown pageId=", currentPage.id,
+                                                "titlePreview=", newTitle)
+                                }
+                                presenceTimer.restart()
                             }
                         }
 
                         onTitleEditingFinished: function(pageId, newTitle) {
                             if (!pageId || pageId === "") return
-                            pageTree.updatePageTitle(pageId, newTitle)
+                            root.commitPageTitleInTrees(pageId, newTitle)
+                            root.localTitlePreviewPageId = ""
+                            root.localTitlePreviewValue = ""
+                            if (root.debugSyncUi) {
+                                console.log("SYNCUI: titleEditingFinished markdown pageId=", pageId,
+                                            "committedTitle=", newTitle)
+                            }
+                            presenceTimer.restart()
                         }
                     }
                 }
@@ -1384,6 +1433,44 @@ ApplicationWindow {
         }
     }
 
+    function previewPageTitleInTrees(pageId, newTitle) {
+        if (!pageId || pageId === "") return
+        if (pageTree && pageTree.updatePageTitlePreview) {
+            pageTree.updatePageTitlePreview(pageId, newTitle)
+        }
+        if (typeof mobilePageTree !== "undefined" && mobilePageTree && mobilePageTree.updatePageTitlePreview) {
+            mobilePageTree.updatePageTitlePreview(pageId, newTitle)
+        }
+    }
+
+    function remoteTitlePreviewForPage(pageId) {
+        if (!pageId || pageId === "" || !appSyncController) return ""
+        const cursors = appSyncController.remoteCursors || []
+        for (let i = 0; i < cursors.length; i++) {
+            const c = cursors[i] || {}
+            if ((c.pageId || "") !== pageId) continue
+            const preview = c.titlePreview || ""
+            if (preview !== "") return preview
+        }
+        return ""
+    }
+
+    function displayPageTitle(pageId, fallbackTitle) {
+        const preview = root.remoteTitlePreviewForPage(pageId)
+        return preview !== "" ? preview : (fallbackTitle || "")
+    }
+
+    function commitPageTitleInTrees(pageId, newTitle) {
+        if (!pageId || pageId === "") return
+        if (pageTree && pageTree.updatePageTitle) {
+            pageTree.updatePageTitle(pageId, newTitle)
+            return
+        }
+        if (typeof mobilePageTree !== "undefined" && mobilePageTree && mobilePageTree.updatePageTitle) {
+            mobilePageTree.updatePageTitle(pageId, newTitle)
+        }
+    }
+
     function applyStartupPageDesktop() {
         if (startupPageAppliedDesktop || isMobile) return
         const pages = pageTree ? pageTree.getAllPages() : []
@@ -1422,6 +1509,12 @@ ApplicationWindow {
         target: DataStore
 
         function onPagesChanged() {
+            if (root.currentPage && root.currentPage.id && root.currentPage.id !== "") {
+                const refreshed = DataStore ? DataStore.getPage(root.currentPage.id) : null
+                if (refreshed && refreshed.title !== undefined && refreshed.title !== root.currentPage.title) {
+                    root.currentPage = { id: root.currentPage.id, title: refreshed.title || "Untitled" }
+                }
+            }
             if (isMobile) {
                 Qt.callLater(function() {
                     root.mobilePagesList = DataStore.getAllPages()
@@ -1729,6 +1822,19 @@ ApplicationWindow {
     property string localCursorPageId: ""
     property int localCursorBlockIndex: -1
     property int localCursorPos: -1
+    property string localTitlePreviewPageId: ""
+    property string localTitlePreviewValue: ""
+
+    function presenceTitlePreviewForPage(pageId) {
+        if (!pageId || pageId === "") return ""
+        if (localTitlePreviewPageId === pageId) {
+            return localTitlePreviewValue || ""
+        }
+        if (currentPage && currentPage.id === pageId) {
+            return currentPage.title || ""
+        }
+        return ""
+    }
 
     Timer {
         id: presenceTimer
@@ -1748,9 +1854,19 @@ ApplicationWindow {
             if (root.debugSyncUi) {
                 console.log("SYNCUI: sendPresence pageId=", localCursorPageId,
                             "block=", localCursorBlockIndex, "pos=", localCursorPos,
+                            "titlePreviewPage=", localTitlePreviewPageId,
+                            "titlePreviewValue=", localTitlePreviewValue,
                             "bothAuto=", root.bothAutoSyncEnabled)
             }
-            appSyncController.sendPresence(localCursorPageId, localCursorBlockIndex, localCursorPos, SyncPreferences.autoSyncEnabled)
+            const presencePageId = (localTitlePreviewPageId && localTitlePreviewPageId !== "")
+                ? localTitlePreviewPageId
+                : localCursorPageId
+            const titlePreview = root.presenceTitlePreviewForPage(presencePageId)
+            appSyncController.sendPresence(presencePageId,
+                                           localCursorBlockIndex,
+                                           localCursorPos,
+                                           SyncPreferences.autoSyncEnabled,
+                                           titlePreview)
         }
     }
 
@@ -1803,7 +1919,8 @@ ApplicationWindow {
                 console.log("SYNCUI: remotePresenceChanged remoteAuto=", appSyncController.remoteAutoSyncEnabled,
                             "pageId=", appSyncController.remoteCursorPageId,
                             "block=", appSyncController.remoteCursorBlockIndex,
-                            "pos=", appSyncController.remoteCursorPos)
+                            "pos=", appSyncController.remoteCursorPos,
+                            "remoteCursors=", JSON.stringify(appSyncController.remoteCursors))
             }
         }
     }

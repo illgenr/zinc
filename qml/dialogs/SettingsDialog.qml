@@ -222,32 +222,59 @@ Dialog {
         if (focusDebugLogging) console.log("SettingsDialog focus: no focusable target found")
     }
 
-    Keys.onPressed: function(event) {
-        if (isMobile) return
-        if (!root.visible) return
-
-        const key = event.key
-        const isShiftTab = key === Qt.Key_Backtab || (key === Qt.Key_Tab && (event.modifiers & Qt.ShiftModifier))
-        if (isShiftTab && activeFocusInSettingsContent()) {
-            if (focusDebugLogging) {
-                console.log("SettingsDialog keys: reverse transfer requested key=", key,
-                            "activeFocusItem=", currentWindowFocusItem())
+    Shortcut {
+        sequence: "Backtab"
+        context: Qt.WindowShortcut
+        enabled: !isMobile && root.visible
+        onActivated: {
+            if (!root.activeFocusInSettingsContent()) return
+            if (root.focusDebugLogging) {
+                console.log("SettingsDialog keys: reverse transfer requested key=", Qt.Key_Backtab,
+                            "activeFocusItem=", root.currentWindowFocusItem())
             }
-            event.accepted = true
             desktopTabList.forceActiveFocus()
-            return
         }
+    }
 
-        const isForwardTab = key === Qt.Key_Tab && !(event.modifiers & Qt.ShiftModifier)
-        const isEnter = key === Qt.Key_Return || key === Qt.Key_Enter
-        if ((isForwardTab || isEnter) && activeFocusInDesktopTabList()) {
-            if (focusDebugLogging) {
-                console.log("SettingsDialog keys: transfer requested key=", key,
-                            "activeFocusItem=", currentWindowFocusItem())
+    Shortcut {
+        sequence: "Tab"
+        context: Qt.WindowShortcut
+        enabled: !isMobile && root.visible
+        onActivated: {
+            if (!root.activeFocusInDesktopTabList()) return
+            if (root.focusDebugLogging) {
+                console.log("SettingsDialog keys: transfer requested key=", Qt.Key_Tab,
+                            "activeFocusItem=", root.currentWindowFocusItem())
             }
-            event.accepted = true
-            focusFirstSettingControl()
-            return
+            root.focusFirstSettingControl()
+        }
+    }
+
+    Shortcut {
+        sequence: "Return"
+        context: Qt.WindowShortcut
+        enabled: !isMobile && root.visible
+        onActivated: {
+            if (!root.activeFocusInDesktopTabList()) return
+            if (root.focusDebugLogging) {
+                console.log("SettingsDialog keys: transfer requested key=", Qt.Key_Return,
+                            "activeFocusItem=", root.currentWindowFocusItem())
+            }
+            root.focusFirstSettingControl()
+        }
+    }
+
+    Shortcut {
+        sequence: "Enter"
+        context: Qt.WindowShortcut
+        enabled: !isMobile && root.visible
+        onActivated: {
+            if (!root.activeFocusInDesktopTabList()) return
+            if (root.focusDebugLogging) {
+                console.log("SettingsDialog keys: transfer requested key=", Qt.Key_Enter,
+                            "activeFocusItem=", root.currentWindowFocusItem())
+            }
+            root.focusFirstSettingControl()
         }
     }
 

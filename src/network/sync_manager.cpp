@@ -737,6 +737,16 @@ void SyncManager::onMessageReceived(MessageType type,
         case MessageType::PresenceUpdate: {
             if (sync_debug_enabled()) {
                 qInfo() << "SYNC: msg PresenceUpdate bytes=" << payload.size();
+                QJsonParseError err{};
+                const auto objOpt = parse_object(payload, &err);
+                if (objOpt) {
+                    qInfo() << "SYNC: msg PresenceUpdate decoded"
+                            << "peer_id=" << QString::fromStdString(peer_id.to_string())
+                            << "pageId=" << objOpt->value(QStringLiteral("pageId")).toString()
+                            << "titlePreview=" << objOpt->value(QStringLiteral("titlePreview")).toString();
+                } else {
+                    qInfo() << "SYNC: msg PresenceUpdate decode failed:" << err.errorString();
+                }
             }
             QByteArray data(
                 reinterpret_cast<const char*>(payload.data()),
@@ -1046,12 +1056,34 @@ void SyncManager::sendPageSnapshot(const std::vector<uint8_t>& payload) {
 }
 
 void SyncManager::sendPresenceUpdate(const std::vector<uint8_t>& payload) {
+    if (sync_debug_enabled()) {
+        QString preview;
+        QString pageId;
+        QJsonParseError err{};
+        const auto objOpt = parse_object(payload, &err);
+        if (objOpt) {
+            pageId = objOpt->value(QStringLiteral("pageId")).toString();
+            preview = objOpt->value(QStringLiteral("titlePreview")).toString();
+        }
+        qInfo() << "SYNC: sendPresenceUpdate bytes=" << payload.size()
+                << "pageId=" << pageId
+                << "titlePreview=" << preview
+                << "connectedPeers=" << connectedPeerCount();
+    }
     std::vector<QPointer<Connection>> targets;
     targets.reserve(peers_.size());
+    std::vector<QString> targetIds;
+    targetIds.reserve(peers_.size());
     for (const auto& [id, peer] : peers_) {
         if (peer && peer->connection && peer->connection->isConnected()) {
             targets.push_back(peer->connection.get());
+            if (sync_debug_enabled()) {
+                targetIds.push_back(QString::fromStdString(id.to_string()));
+            }
         }
+    }
+    if (sync_debug_enabled()) {
+        qInfo() << "SYNC: sendPresenceUpdate targets=" << targetIds;
     }
     for (const auto& conn : targets) {
         if (conn && conn->isConnected()) {

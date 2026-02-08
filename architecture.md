@@ -48,7 +48,9 @@ Core UI components:
 - `qml/components/BlockEditor.qml`: the note editor (block list, autosave, cursor movement signals, remote refresh behavior).
 - `qml/components/Block.qml`: wrapper for a single block; hosts the remote-cursor indicator and connects to per-block `TextEdit`.
 - `qml/components/blocks/*.qml`: block implementations (`ParagraphBlock.qml`, `TodoBlock.qml`, etc).
-- `qml/components/PageTree.qml`: page list/navigation.
+- `qml/components/PageTree.qml`: page list/navigation and page-title updates.
+  - `updatePageTitlePreview(pageId, newTitle)`: UI-only title update (no save/re-sort).
+  - `updatePageTitle(pageId, newTitle)`: persisted title update (saves + re-sorts according to `sortMode`).
 
 Dialogs:
 
@@ -192,7 +194,8 @@ Relevant files:
 4. `DataStore` writes new rows, emits:
    - `pagesChanged`
    - `pageContentChanged(pageId)` for content-bearing page updates
-5. `BlockEditor` listens to `pageContentChanged` and merges/reloads current page content from DB.
+5. `Main.qml` refreshes `currentPage.title` from `DataStore.getPage(currentPage.id)` on `pagesChanged` so incoming title-only sync updates are reflected in the active editor/title bar.
+6. `BlockEditor` listens to `pageContentChanged` and merges/reloads current page content from DB.
 
 Relevant files:
 
@@ -226,13 +229,31 @@ Conflict logic lives in `DataStore.applyPageUpdates`:
 - Tracks a “base” (`last_synced_*`) and detects when both local and remote diverged since the last sync base.
 - Stores conflict rows in `page_conflicts`.
 - Emits `pageConflictDetected(...)` which shows `qml/dialogs/SyncConflictDialog.qml`.
-- Uses `src/core/three_way_merge.*` for merge preview/resolution.
+- Uses `src/core/three_way_merge.*` for markdown merge preview/resolution.
+- Title conflicts are resolved alongside markdown:
+  - Merge strategy:
+    - if local == remote: use that title
+    - if one side stayed at base: take the changed side
+    - otherwise: combine as `"local | remote"`
+  - `previewMergeForPageConflict()` now returns `mergedTitle` in addition to markdown merge fields.
 
 Relevant files:
 
 - `src/ui/DataStore.cpp` (`applyPageUpdates`, conflict table)
 - `src/core/three_way_merge.*`
 - `qml/dialogs/SyncConflictDialog.qml`
+
+### 6) Page Title Editing vs Sorting
+
+Page title edits are split into two phases to avoid disruptive list reordering while typing:
+
+1. Editor `onTitleEdited` updates `currentPage.title` and calls `Main.qml::previewPageTitleInTrees(...)`.
+2. `previewPageTitleInTrees(...)` updates both trees via `PageTree.updatePageTitlePreview(...)` (no persistence, no sort).
+3. On focus loss (`onTitleEditingFinished`), `Main.qml::commitPageTitleInTrees(...)` calls `PageTree.updatePageTitle(...)` once, which persists and triggers normal sorted rebuild.
+
+Desktop/mobile guard note:
+
+- `Main.qml` must guard `mobilePageTree` references with `typeof mobilePageTree !== "undefined"` because the mobile component may not be instantiated on desktop.
 
 ## Settings & Preferences
 
@@ -288,5 +309,6 @@ Running QML tests:
 - **Sync transport/protocol:** `src/network/transport.hpp` (message types), `src/network/sync_manager.*`
 - **JSON snapshot parsing / signals:** `src/ui/controllers/SyncController.cpp`
 - **Conflict behavior:** `src/ui/DataStore.cpp` (conflict detection), `qml/dialogs/SyncConflictDialog.qml`
+- **Title preview vs commit-sort behavior:** `qml/Main.qml`, `qml/components/PageTree.qml`
 - **Settings UI:** `qml/dialogs/SettingsDialog.qml`, `qml/sync/SyncPreferences.qml`
 - **QML registration / exposing C++ to QML:** `src/ui/qml_types.cpp`

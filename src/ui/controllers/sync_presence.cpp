@@ -23,6 +23,7 @@ std::optional<SyncPresence> parseSyncPresence(const QByteArray& payload) {
     out.page_id = obj.value(QStringLiteral("pageId")).toString();
     out.block_index = obj.value(QStringLiteral("blockIndex")).toInt(-1);
     out.cursor_pos = obj.value(QStringLiteral("cursorPos")).toInt(-1);
+    out.title_preview = obj.value(QStringLiteral("titlePreview")).toString();
     return out;
 }
 
@@ -32,8 +33,8 @@ QByteArray serializeSyncPresence(const SyncPresence& presence) {
     obj.insert(QStringLiteral("pageId"), presence.page_id);
     obj.insert(QStringLiteral("blockIndex"), presence.block_index);
     obj.insert(QStringLiteral("cursorPos"), presence.cursor_pos);
+    obj.insert(QStringLiteral("titlePreview"), presence.title_preview);
     return QJsonDocument(obj).toJson(QJsonDocument::Compact);
 }
 
 } // namespace zinc::ui
-

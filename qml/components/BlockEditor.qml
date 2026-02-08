@@ -142,6 +142,17 @@ FocusScope {
     property int remoteCursorBlockIndex: -1
     property int remoteCursorPos: -1
     property var remoteCursors: []
+
+    function remoteTitleCursorPos() {
+        if (!remoteCursors || remoteCursors.length === 0 || !pageId || pageId === "") return -1
+        for (let i = 0; i < remoteCursors.length; i++) {
+            const c = remoteCursors[i] || {}
+            if ((c.pageId || "") !== pageId) continue
+            const pos = c.cursorPos === undefined ? -1 : c.cursorPos
+            if (pos >= 0) return pos
+        }
+        return -1
+    }
     
     property var availablePages: []  // Set by parent to provide page list for linking
     property bool selectionDragging: false
@@ -1538,14 +1549,35 @@ FocusScope {
                     font: parent.font
                     visible: parent.text.length === 0 && !parent.activeFocus
                 }
+
+                Rectangle {
+                    readonly property int remotePos: root.remoteTitleCursorPos()
+                    visible: root.showRemoteCursor && remotePos >= 0 && !titleInput.activeFocus
+                    color: ThemeManager.remoteCursor
+                    width: 2
+                    height: Math.max(20, titleInput.cursorRectangle.height)
+                    x: titleInput.positionToRectangle(remotePos).x
+                    y: titleInput.positionToRectangle(remotePos).y
+                }
                 
                 onTextChanged: {
+                    if (root.debugSyncUi) {
+                        console.log("SYNCUI: BlockEditor titleInput textChanged pageId=", root.pageId,
+                                    "text=", text,
+                                    "pageTitle=", pageTitle,
+                                    "willEmit=", (text !== pageTitle))
+                    }
                     if (text !== pageTitle) {
                         root.titleEdited(text)
                     }
                 }
 
                 onActiveFocusChanged: {
+                    if (root.debugSyncUi) {
+                        console.log("SYNCUI: BlockEditor titleInput focusChanged pageId=", root.pageId,
+                                    "activeFocus=", activeFocus,
+                                    "text=", text)
+                    }
                     if (activeFocus) {
                         root.titleEditingPageId = root.pageId
                         root.titleEditingOriginalTitle = text
