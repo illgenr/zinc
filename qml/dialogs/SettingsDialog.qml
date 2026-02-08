@@ -2,7 +2,8 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Dialogs
 import QtQuick.Layouts
-import Qt.labs.folderlistmodel
+import QtQuick.Window
+import "settings" as SettingsPages
 import zinc
 
 Dialog {
@@ -11,6 +12,44 @@ Dialog {
     signal pairDeviceRequested()
     signal manualDeviceAddRequested(string host, int port)
     property var syncController: null
+    property bool focusDebugLogging: true
+
+    function currentWindowFocusItem() {
+        const win = Window.window ? Window.window : Qt.application.activeWindow
+        if (win && win.activeFocusItem) return win.activeFocusItem
+        return null
+    }
+
+    function hasActiveFocusWithin(node) {
+        if (!node) return false
+        if (node.activeFocus === true) return true
+        const descendents = []
+        const children = node.children || []
+        for (let i = 0; i < children.length; i++) descendents.push(children[i])
+        const contentChildren = node.contentChildren || []
+        for (let i = 0; i < contentChildren.length; i++) descendents.push(contentChildren[i])
+        const data = node.data || []
+        for (let i = 0; i < data.length; i++) descendents.push(data[i])
+        for (let i = 0; i < descendents.length; i++) {
+            if (hasActiveFocusWithin(descendents[i])) return true
+        }
+        return false
+    }
+
+    function settingsPageAt(index) {
+        if (!settingsTabs || index < 0) return null
+        const pages = []
+        const children = settingsTabs.children || []
+        for (let i = 0; i < children.length; i++) {
+            const child = children[i]
+            if (!child) continue
+            // Keep only actual page items, skip layout internals.
+            if (typeof child.focusFirstControl === "function" || "forceActiveFocus" in child) {
+                pages.push(child)
+            }
+        }
+        return (index >= 0 && index < pages.length) ? pages[index] : null
+    }
 
     function isDescendantOf(node, ancestor) {
         let cur = node || null
@@ -22,16 +61,37 @@ Dialog {
     }
 
     function activeFocusInDesktopTabList() {
-        return isDescendantOf(root.activeFocusItem, desktopTabList)
+        const focusItem = currentWindowFocusItem()
+        return isDescendantOf(focusItem, desktopTabList) || hasActiveFocusWithin(desktopTabList)
     }
 
     function activeFocusInSettingsContent() {
-        return isDescendantOf(root.activeFocusItem, settingsTabs)
+        const focusItem = currentWindowFocusItem()
+        return isDescendantOf(focusItem, settingsTabs) || hasActiveFocusWithin(settingsTabs)
     }
 
     function focusFirstSettingControl() {
-        const page = settingsTabs.currentItem
-        if (!page) return
+        const page = settingsPageAt(settingsTabs.currentIndex)
+        if (!page) {
+            if (focusDebugLogging) {
+                console.log("SettingsDialog focus: no current page for index=", settingsTabs.currentIndex,
+                            "children=", settingsTabs.children ? settingsTabs.children.length : 0)
+            }
+            return
+        }
+
+        if (focusDebugLogging) {
+            console.log("SettingsDialog focus: current page=", page, "objectName=", page.objectName ? page.objectName : "")
+        }
+
+        if (typeof page.focusFirstControl === "function") {
+            const handled = page.focusFirstControl()
+            if (focusDebugLogging) {
+                console.log("SettingsDialog focus: page.focusFirstControl handled=", handled,
+                            "activeFocusItem=", currentWindowFocusItem())
+            }
+            if (handled) return
+        }
 
         function findFocusable(node) {
             if (!node) return null
@@ -40,9 +100,15 @@ Dialog {
                 && node.activeFocusOnTab === true
                 && ("forceActiveFocus" in node)
             if (wantsFocus) return node
+            const descendents = []
             const children = node.children || []
-            for (let i = 0; i < children.length; i++) {
-                const found = findFocusable(children[i])
+            for (let i = 0; i < children.length; i++) descendents.push(children[i])
+            const contentChildren = node.contentChildren || []
+            for (let i = 0; i < contentChildren.length; i++) descendents.push(contentChildren[i])
+            const data = node.data || []
+            for (let i = 0; i < data.length; i++) descendents.push(data[i])
+            for (let i = 0; i < descendents.length; i++) {
+                const found = findFocusable(descendents[i])
                 if (found) return found
             }
             return null
@@ -50,12 +116,25 @@ Dialog {
 
         const target = findFocusable(page)
         if (target) {
+            if (focusDebugLogging) {
+                console.log("SettingsDialog focus: fallback target=", target,
+                            "objectName=", target.objectName ? target.objectName : "")
+            }
             target.forceActiveFocus()
+            if (focusDebugLogging) {
+                console.log("SettingsDialog focus: fallback focused activeFocusItem=", currentWindowFocusItem())
+            }
             return
         }
         if ("forceActiveFocus" in page) {
+            if (focusDebugLogging) console.log("SettingsDialog focus: focusing page directly")
             page.forceActiveFocus()
+            if (focusDebugLogging) {
+                console.log("SettingsDialog focus: page focused activeFocusItem=", currentWindowFocusItem())
+            }
+            return
         }
+        if (focusDebugLogging) console.log("SettingsDialog focus: no focusable target found")
     }
 
     Keys.onPressed: function(event) {
@@ -65,6 +144,10 @@ Dialog {
         const key = event.key
         const isShiftTab = key === Qt.Key_Backtab || (key === Qt.Key_Tab && (event.modifiers & Qt.ShiftModifier))
         if (isShiftTab && activeFocusInSettingsContent()) {
+            if (focusDebugLogging) {
+                console.log("SettingsDialog keys: reverse transfer requested key=", key,
+                            "activeFocusItem=", currentWindowFocusItem())
+            }
             event.accepted = true
             desktopTabList.forceActiveFocus()
             return
@@ -73,9 +156,27 @@ Dialog {
         const isForwardTab = key === Qt.Key_Tab && !(event.modifiers & Qt.ShiftModifier)
         const isEnter = key === Qt.Key_Return || key === Qt.Key_Enter
         if ((isForwardTab || isEnter) && activeFocusInDesktopTabList()) {
+            if (focusDebugLogging) {
+                console.log("SettingsDialog keys: transfer requested key=", key,
+                            "activeFocusItem=", currentWindowFocusItem())
+            }
             event.accepted = true
             focusFirstSettingControl()
             return
+        }
+    }
+
+    Shortcut {
+        sequence: "Shift+Tab"
+        context: Qt.WindowShortcut
+        enabled: !isMobile && root.visible
+        onActivated: {
+            if (!root.activeFocusInSettingsContent()) return
+            if (root.focusDebugLogging) {
+                console.log("SettingsDialog shortcut: Shift+Tab -> sidebar",
+                            "activeFocusItem=", root.currentWindowFocusItem())
+            }
+            desktopTabList.forceActiveFocus()
         }
     }
 
@@ -210,7 +311,7 @@ Dialog {
     background: Rectangle {
         color: ThemeManager.surface
         border.width: isMobile ? 0 : 1
-        border.color: ThemeManager.border
+        border.color: (parent && parent.visualFocus) ? ThemeManager.accent : ThemeManager.border
         radius: ThemeManager.radiusLarge
     }
     
@@ -300,6 +401,11 @@ Dialog {
                     activeFocusOnTab: !isMobile
 
                     Keys.onPressed: function(event) {
+                        if (root.focusDebugLogging) {
+                            console.log("SettingsDialog tablist keys: key=", event.key,
+                                        "currentIndex=", settingsTabs.currentIndex,
+                                        "activeFocusItem=", root.currentWindowFocusItem())
+                        }
                         if (event.key === Qt.Key_Down) {
                             event.accepted = true
                             settingsTabs.currentIndex = Math.min(tabModel.length - 1, settingsTabs.currentIndex + 1)
@@ -352,7 +458,10 @@ Dialog {
                                 anchors.fill: parent
                                 hoverEnabled: true
                                 cursorShape: Qt.PointingHandCursor
-                                onClicked: settingsTabs.currentIndex = index
+                                onClicked: {
+                                    settingsTabs.currentIndex = index
+                                    desktopTabList.forceActiveFocus()
+                                }
                             }
                         }
                     }
@@ -373,14 +482,40 @@ Dialog {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 currentIndex: 0
-                
-                GeneralSettings {}
-                EditorSettings {}
-                SyncSettings {}
-                DevicesSettings { onPairDevice: { root.pairDeviceRequested(); root.close() } }
-                //SecuritySettings {}
-                DataSettings {}
-                AboutSettings {}
+
+                SettingsPages.GeneralSettingsPage {}
+                SettingsPages.EditorSettingsPage {}
+                SettingsPages.SyncSettingsPage { syncController: root.syncController }
+                SettingsPages.DevicesSettingsPage {
+                    pairedDevicesModel: pairedDevicesModel
+                    availableDevicesModel: availableDevicesModel
+                    refreshPairedDevices: root.refreshPairedDevices
+                    refreshAvailableDevices: root.refreshAvailableDevices
+                    connectToPeer: function(deviceId, host, port) {
+                        if (!syncController) return
+                        syncController.connectToPeer(deviceId, host, port)
+                    }
+                    openEndpointEditor: function(deviceId, deviceName, host, portText) {
+                        endpointEditDialog.deviceId = deviceId
+                        endpointEditDialog.deviceName = deviceName
+                        endpointEditDialog.hostText = host
+                        endpointEditDialog.portText = portText
+                        endpointEditDialog.open()
+                    }
+                    openRenameDeviceDialog: function(deviceId, deviceName) {
+                        deviceNameEditDialog.deviceId = deviceId
+                        deviceNameEditDialog.currentName = deviceName
+                        deviceNameEditDialog.nameText = deviceName
+                        deviceNameEditDialog.statusText = ""
+                        deviceNameEditDialog.open()
+                    }
+                    onPairDevice: { root.pairDeviceRequested(); root.close() }
+                }
+                SettingsPages.DataSettingsPage {
+                    isMobile: root.isMobile
+                    onResetAllDataRequested: resetConfirmDialog.open()
+                }
+                SettingsPages.AboutSettingsPage {}
             }
         }
         
@@ -450,14 +585,40 @@ Dialog {
                 anchors.fill: parent
                 visible: settingsTabs.currentIndex >= 0
                 currentIndex: Math.max(0, settingsTabs.currentIndex)
-                
-                GeneralSettings {}
-                EditorSettings {}
-                SyncSettings {}
-                DevicesSettings { onPairDevice: { root.pairDeviceRequested(); root.close() } }
-                //SecuritySettings {}
-                DataSettings {}
-                AboutSettings {}
+
+                SettingsPages.GeneralSettingsPage {}
+                SettingsPages.EditorSettingsPage {}
+                SettingsPages.SyncSettingsPage { syncController: root.syncController }
+                SettingsPages.DevicesSettingsPage {
+                    pairedDevicesModel: pairedDevicesModel
+                    availableDevicesModel: availableDevicesModel
+                    refreshPairedDevices: root.refreshPairedDevices
+                    refreshAvailableDevices: root.refreshAvailableDevices
+                    connectToPeer: function(deviceId, host, port) {
+                        if (!syncController) return
+                        syncController.connectToPeer(deviceId, host, port)
+                    }
+                    openEndpointEditor: function(deviceId, deviceName, host, portText) {
+                        endpointEditDialog.deviceId = deviceId
+                        endpointEditDialog.deviceName = deviceName
+                        endpointEditDialog.hostText = host
+                        endpointEditDialog.portText = portText
+                        endpointEditDialog.open()
+                    }
+                    openRenameDeviceDialog: function(deviceId, deviceName) {
+                        deviceNameEditDialog.deviceId = deviceId
+                        deviceNameEditDialog.currentName = deviceName
+                        deviceNameEditDialog.nameText = deviceName
+                        deviceNameEditDialog.statusText = ""
+                        deviceNameEditDialog.open()
+                    }
+                    onPairDevice: { root.pairDeviceRequested(); root.close() }
+                }
+                SettingsPages.DataSettingsPage {
+                    isMobile: root.isMobile
+                    onResetAllDataRequested: resetConfirmDialog.open()
+                }
+                SettingsPages.AboutSettingsPage {}
             }
         }
     }
@@ -485,7 +646,7 @@ Dialog {
         background: Rectangle {
             color: ThemeManager.surface
             border.width: 1
-            border.color: ThemeManager.border
+            border.color: (parent && parent.visualFocus) ? ThemeManager.accent : ThemeManager.border
             radius: ThemeManager.radiusMedium
         }
         
@@ -504,7 +665,7 @@ Dialog {
                 Layout.fillWidth: true
                 spacing: ThemeManager.spacingSmall
                 
-                Button {
+                SettingsPages.SettingsButton {
                     Layout.fillWidth: true
                     text: "Cancel"
                     
@@ -513,7 +674,7 @@ Dialog {
                         radius: ThemeManager.radiusSmall
                         color: parent.pressed ? ThemeManager.surfaceActive : ThemeManager.surfaceHover
                         border.width: 1
-                        border.color: ThemeManager.border
+                        border.color: (parent && parent.visualFocus) ? ThemeManager.accent : ThemeManager.border
                     }
                     
                     contentItem: Text {
@@ -527,7 +688,7 @@ Dialog {
                     onClicked: resetConfirmDialog.close()
                 }
                 
-                Button {
+                SettingsPages.SettingsButton {
                     Layout.fillWidth: true
                     text: "Reset"
                     
@@ -554,675 +715,6 @@ Dialog {
             }
         }
     }
-    
-    // Settings page components
-    component SettingsPage: ScrollView {
-        id: settingsPage
-        default property alias pageContent: pageColumn.children
-        clip: true
-        ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
-        
-        ColumnLayout {
-            id: pageColumn
-            width: settingsPage.width - ThemeManager.spacingLarge
-            spacing: ThemeManager.spacingLarge
-        }
-    }
-    
-    component SettingsSection: ColumnLayout {
-        property string title: ""
-        default property alias content: sectionContent.children
-        
-        Layout.fillWidth: true
-        Layout.margins: ThemeManager.spacingMedium
-        spacing: ThemeManager.spacingSmall
-        
-        Text {
-            text: title
-            color: ThemeManager.text
-            font.pixelSize: ThemeManager.fontSizeNormal
-            font.weight: Font.Medium
-        }
-        
-        ColumnLayout {
-            id: sectionContent
-            Layout.fillWidth: true
-            spacing: ThemeManager.spacingSmall
-        }
-    }
-    
-    component SettingsRow: RowLayout {
-        property string label: ""
-        default property alias control: rowControl.children
-        
-        Layout.fillWidth: true
-        spacing: ThemeManager.spacingSmall
-        
-        Text {
-            Layout.fillWidth: true
-            text: label
-            color: ThemeManager.textSecondary
-            font.pixelSize: ThemeManager.fontSizeNormal
-            wrapMode: Text.Wrap
-        }
-        
-        Item {
-            id: rowControl
-            Layout.preferredWidth: 110
-            Layout.preferredHeight: 32
-        }
-    }
-
-    // Editor Settings
-    component EditorSettings: SettingsPage {
-        SettingsSection {
-            title: "Layout"
-
-            SettingsRow {
-                label: "Gutter position (px)"
-
-                TextField {
-                    id: gutterPositionField
-                    width: parent.width
-                    text: "" + EditorPreferences.gutterPositionPx
-                    inputMethodHints: Qt.ImhPreferNumbers
-                    validator: IntValidator { bottom: -9999; top: 9999 }
-
-                    background: Rectangle {
-                        implicitHeight: 32
-                        radius: ThemeManager.radiusSmall
-                        color: gutterPositionField.activeFocus ? ThemeManager.surfaceActive : ThemeManager.surfaceHover
-                        border.width: 1
-                        border.color: ThemeManager.border
-                    }
-
-                    color: ThemeManager.text
-                    font.pixelSize: ThemeManager.fontSizeSmall
-                    verticalAlignment: Text.AlignVCenter
-                    leftPadding: 8
-
-                    onEditingFinished: {
-                        const parsed = parseInt(text, 10)
-                        EditorPreferences.gutterPositionPx = isNaN(parsed) ? 0 : parsed
-                        text = "" + EditorPreferences.gutterPositionPx
-                    }
-
-                    Connections {
-                        target: EditorPreferences
-                        function onGutterPositionPxChanged() {
-                            if (gutterPositionField.activeFocus) return
-                            gutterPositionField.text = "" + EditorPreferences.gutterPositionPx
-                        }
-                    }
-                }
-            }
-
-            Text {
-                Layout.fillWidth: true
-                text: "Positive values move the gutter right; negative values move it left."
-                color: ThemeManager.textMuted
-                font.pixelSize: ThemeManager.fontSizeSmall
-                wrapMode: Text.Wrap
-            }
-        }
-    }
-
-    // General Settings
-    component GeneralSettings: SettingsPage {
-        property ListModel startupPagesModel: ListModel {}
-
-        function refreshStartupPages() {
-            startupPagesModel.clear()
-            const pages = DataStore ? DataStore.getAllPages() : []
-            for (let i = 0; i < pages.length; i++) {
-                const p = pages[i] || {}
-                const depth = p.depth || 0
-                let prefix = ""
-                for (let d = 0; d < depth; d++) prefix += "  "
-                if (p.pageId) {
-                    startupPagesModel.append({
-                        pageId: p.pageId,
-                        title: prefix + (p.title || "Untitled")
-                    })
-                }
-            }
-
-            const fixedId = DataStore ? DataStore.startupFixedPageId() : ""
-            if (!fixedId || fixedId === "") return
-            if (!startupPageCombo) return
-            for (let i = 0; i < startupPagesModel.count; i++) {
-                if (startupPagesModel.get(i).pageId === fixedId) {
-                    startupPageCombo.currentIndex = i
-                    break
-                }
-            }
-        }
-
-        Component.onCompleted: refreshStartupPages()
-
-        property Connections _dataStoreConnections: Connections {
-            target: DataStore
-            function onPagesChanged() {
-                refreshStartupPages()
-            }
-        }
-
-        SettingsSection {
-            title: "Appearance"
-            
-            SettingsRow {
-                label: "Theme"
-                ComboBox {
-                    id: themeCombo
-                    width: parent.width
-                    model: ["Dark", "Light", "System"]
-                    currentIndex: ThemeManager.currentMode
-                    
-                    background: Rectangle {
-                        implicitHeight: 32
-                        radius: ThemeManager.radiusSmall
-                        color: themeCombo.pressed ? ThemeManager.surfaceActive : ThemeManager.surfaceHover
-                        border.width: 1
-                        border.color: ThemeManager.border
-                    }
-                    
-                    contentItem: Text {
-                        leftPadding: 8
-                        text: themeCombo.displayText
-                        font.pixelSize: ThemeManager.fontSizeSmall
-                        color: ThemeManager.text
-                        verticalAlignment: Text.AlignVCenter
-                    }
-                    
-                    onCurrentIndexChanged: ThemeManager.setMode(currentIndex)
-                }
-            }
-            
-            SettingsRow {
-                label: "Font size"
-                ComboBox {
-                    id: fontCombo
-                    width: parent.width
-                    model: ["Small", "Medium", "Large"]
-                    currentIndex: ThemeManager.fontSizeScale
-                    
-                    background: Rectangle {
-                        implicitHeight: 32
-                        radius: ThemeManager.radiusSmall
-                        color: fontCombo.pressed ? ThemeManager.surfaceActive : ThemeManager.surfaceHover
-                        border.width: 1
-                        border.color: ThemeManager.border
-                    }
-                    
-                    contentItem: Text {
-                        leftPadding: 8
-                        text: fontCombo.displayText
-                        font.pixelSize: ThemeManager.fontSizeSmall
-                        color: ThemeManager.text
-                        verticalAlignment: Text.AlignVCenter
-                    }
-                    
-                    onCurrentIndexChanged: ThemeManager.setFontScale(currentIndex)
-                }
-            }
-        }
-
-        SettingsSection {
-            title: "Navigation"
-
-            SettingsRow {
-                label: "Jump to new page on creation"
-
-                Switch {
-                    id: jumpToNewPageSwitch
-                    checked: GeneralPreferences.jumpToNewPageOnCreate
-                    onToggled: GeneralPreferences.jumpToNewPageOnCreate = checked
-                }
-            }
-        }
-
-        SettingsSection {
-            title: "Startup"
-
-            SettingsRow {
-                label: "Open on launch"
-                ComboBox {
-                    id: startupModeCombo
-                    width: parent.width
-                    model: ["Last viewed page", "Always open a page"]
-                    Component.onCompleted: {
-                        startupModeCombo.currentIndex = DataStore ? DataStore.startupPageMode() : 0
-                    }
-
-                    onActivated: {
-                        if (DataStore) DataStore.setStartupPageMode(currentIndex)
-                    }
-                }
-            }
-
-            SettingsRow {
-                visible: startupModeCombo.currentIndex === 1
-                label: "Page"
-                ComboBox {
-                    id: startupPageCombo
-                    width: parent.width
-                    model: startupPagesModel
-                    textRole: "title"
-                    valueRole: "pageId"
-
-                    Component.onCompleted: {
-                        const fixedId = DataStore ? DataStore.startupFixedPageId() : ""
-                        for (let i = 0; i < startupPagesModel.count; i++) {
-                            if (startupPagesModel.get(i).pageId === fixedId) {
-                                startupPageCombo.currentIndex = i
-                                break
-                            }
-                        }
-                    }
-
-                    onActivated: {
-                        if (DataStore) DataStore.setStartupFixedPageId(currentValue)
-                    }
-                }
-            }
-        }
-    }
-    
-    // Sync Settings
-    component SyncSettings: SettingsPage {
-        SettingsSection {
-            title: "Sync Settings"
-            
-            SettingsRow {
-                label: "Enable sync"
-                Switch { checked: true }
-            }
-
-            SettingsRow {
-                label: "Workspace ID"
-
-                TextField {
-                    Layout.fillWidth: true
-                    readOnly: true
-                    text: (syncController && syncController.workspaceId && syncController.workspaceId !== "")
-                        ? syncController.workspaceId
-                        : "Not configured"
-                    selectByMouse: true
-                }
-            }
-            
-            SettingsRow {
-                label: "Auto sync"
-
-                Switch {
-                    checked: SyncPreferences.autoSyncEnabled
-                    onToggled: SyncPreferences.autoSyncEnabled = checked
-                }
-            }
-
-            SettingsRow {
-                label: "Deleted pages history"
-
-                SpinBox {
-                    id: deletedPagesRetentionSpin
-                    from: 0
-                    to: 10000
-                    value: DataStore ? DataStore.deletedPagesRetentionLimit() : 100
-                    editable: true
-
-                    onValueModified: {
-                        if (DataStore) {
-                            DataStore.setDeletedPagesRetentionLimit(value)
-                        }
-                    }
-                }
-            }
-        }
-    }
-    
-    // Devices Settings
-    component DevicesSettings: SettingsPage {
-        signal pairDevice()
-
-        function trimmed(text) { return text ? text.trim() : "" }
-
-        function isDevicePaired(deviceId) {
-            if (!deviceId) return false
-            for (let i = 0; i < pairedDevicesModel.count; i++) {
-                const d = pairedDevicesModel.get(i)
-                if (d && d.deviceId === deviceId) return true
-            }
-            return false
-        }
-        
-        Component.onCompleted: {
-            root.refreshPairedDevices()
-            root.refreshAvailableDevices()
-        }
-        onVisibleChanged: if (visible) {
-            root.refreshPairedDevices()
-            root.refreshAvailableDevices()
-        }
-
-        SettingsSection {
-            title: "Available Devices"
-
-            Text {
-                text: "No devices discovered"
-                color: ThemeManager.textSecondary
-                font.pixelSize: ThemeManager.fontSizeNormal
-                visible: availableDevicesModel.count === 0
-            }
-
-            Repeater {
-                model: availableDevicesModel
-
-                Rectangle {
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: implicitHeight
-                    implicitHeight: deviceRow.implicitHeight + ThemeManager.spacingSmall * 2
-                    radius: ThemeManager.radiusSmall
-                    color: ThemeManager.surfaceHover
-                    border.width: 1
-                    border.color: ThemeManager.border
-
-                    RowLayout {
-                        id: deviceRow
-                        anchors.fill: parent
-                        anchors.margins: ThemeManager.spacingSmall
-                        spacing: ThemeManager.spacingSmall
-
-                        ColumnLayout {
-                            Layout.fillWidth: true
-                            Layout.minimumWidth: 0
-                            spacing: 2
-                            clip: true
-
-                            Text {
-                                text: deviceName && deviceName !== "" ? deviceName : deviceId
-                                color: ThemeManager.text
-                                font.pixelSize: ThemeManager.fontSizeNormal
-                                font.weight: Font.Medium
-                                elide: Text.ElideRight
-                                wrapMode: Text.NoWrap
-                                maximumLineCount: 1
-                                Layout.fillWidth: true
-                            }
-
-                            Text {
-                                Layout.fillWidth: true
-                                color: ThemeManager.textSecondary
-                                font.pixelSize: ThemeManager.fontSizeSmall
-                                elide: Text.ElideRight
-                                wrapMode: Text.NoWrap
-                                maximumLineCount: 1
-                                text: (host && host !== "" && port && port > 0) ? (host + ":" + port) : "unknown"
-                            }
-                        }
-
-                        Button {
-                            text: "Endpoint…"
-                            enabled: DataStore && deviceId && deviceId !== ""
-                            Layout.preferredHeight: 28
-                            Layout.preferredWidth: 92
-                            Layout.minimumWidth: 92
-
-                            background: Rectangle {
-                                radius: ThemeManager.radiusSmall
-                                color: parent.pressed ? ThemeManager.surfaceActive : ThemeManager.surface
-                                border.width: 1
-                                border.color: ThemeManager.border
-                            }
-
-                            contentItem: Text {
-                                text: parent.text
-                                color: ThemeManager.text
-                                font.pixelSize: ThemeManager.fontSizeSmall
-                                horizontalAlignment: Text.AlignHCenter
-                                verticalAlignment: Text.AlignVCenter
-                            }
-
-                            onClicked: {
-                                endpointEditDialog.deviceId = deviceId
-                                endpointEditDialog.deviceName = deviceName && deviceName !== "" ? deviceName : deviceId
-                                endpointEditDialog.hostText = host && host !== "" ? host : ""
-                                endpointEditDialog.portText = port && port > 0 ? ("" + port) : ""
-                                endpointEditDialog.open()
-                            }
-                        }
-
-                        Button {
-                            text: "Connect"
-                            enabled: syncController && syncController.syncing &&
-                                     deviceId && deviceId !== "" &&
-                                     host && host !== "" && port && port > 0
-                            Layout.preferredHeight: 28
-                            Layout.preferredWidth: 80
-                            Layout.minimumWidth: 80
-
-                            background: Rectangle {
-                                radius: ThemeManager.radiusSmall
-                                color: parent.pressed ? ThemeManager.accentHover : ThemeManager.accent
-                            }
-
-                            contentItem: Text {
-                                text: parent.text
-                                color: "white"
-                                font.pixelSize: ThemeManager.fontSizeSmall
-                                horizontalAlignment: Text.AlignHCenter
-                                verticalAlignment: Text.AlignVCenter
-                            }
-
-                            onClicked: {
-                                console.log("SettingsDialog: connect to discovered peer", deviceId, host, port)
-                                syncController.connectToPeer(deviceId, host, port)
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        
-        SettingsSection {
-            title: "Paired Devices"
-            
-            Text {
-                text: "No devices paired"
-                color: ThemeManager.textSecondary
-                font.pixelSize: ThemeManager.fontSizeNormal
-                visible: pairedDevicesModel.count === 0
-            }
-
-            Repeater {
-                model: pairedDevicesModel
-
-                Rectangle {
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: implicitHeight
-                    implicitHeight: deviceRow.implicitHeight + ThemeManager.spacingSmall * 2
-                    radius: ThemeManager.radiusSmall
-                    color: ThemeManager.surfaceHover
-                    border.width: 1
-                    border.color: ThemeManager.border
-
-                    RowLayout {
-                        id: deviceRow
-                        anchors.fill: parent
-                        anchors.margins: ThemeManager.spacingSmall
-                        spacing: ThemeManager.spacingSmall
-
-                        ColumnLayout {
-                            Layout.fillWidth: true
-                            Layout.minimumWidth: 0
-                            spacing: 2
-                            clip: true
-
-                            Text {
-                                text: deviceName
-                                color: ThemeManager.text
-                                font.pixelSize: ThemeManager.fontSizeNormal
-                                font.weight: Font.Medium
-                                elide: Text.ElideRight
-                                wrapMode: Text.NoWrap
-                                maximumLineCount: 1
-                                Layout.fillWidth: true
-                            }
-
-                            Text {
-                                text: workspaceId
-                                color: ThemeManager.textMuted
-                                font.pixelSize: ThemeManager.fontSizeSmall
-                                elide: Text.ElideRight
-                                wrapMode: Text.NoWrap
-                                maximumLineCount: 1
-                                Layout.fillWidth: true
-                            }
-
-                            Text {
-                                Layout.fillWidth: true
-                                color: ThemeManager.textSecondary
-                                font.pixelSize: ThemeManager.fontSizeSmall
-                                elide: Text.ElideRight
-                                wrapMode: Text.NoWrap
-                                maximumLineCount: 1
-
-                function isOnline(lastSeen) {
-                    if (!lastSeen || lastSeen === "") return false
-                    // Stored as "yyyy-MM-dd HH:mm:ss" (UTC) or ISO; normalize for JS Date parsing.
-                    var iso = lastSeen.indexOf("T") >= 0 ? lastSeen : lastSeen.replace(" ", "T") + "Z"
-                    var t = Date.parse(iso)
-                    if (isNaN(t)) return false
-                    return (Date.now() - t) < 15000
-                }
-
-                                text: {
-                                    var online = isOnline(lastSeen)
-                                    var endpoint = (host && host !== "" && port && port > 0) ? (host + ":" + port) : "unknown"
-                                    return online ? ("Available (" + endpoint + ")") : ("Offline (" + endpoint + ")")
-                                }
-                            }
-                        }
-
-                        Item {
-                            Layout.preferredWidth: 172
-                            Layout.minimumWidth: 172
-                            Layout.alignment: Qt.AlignVCenter
-                            implicitHeight: actionFlow.implicitHeight
-
-                            Flow {
-                                id: actionFlow
-                                width: parent.width
-                                spacing: ThemeManager.spacingSmall
-                                layoutDirection: Qt.LeftToRight
-                                flow: Flow.LeftToRight
-
-                                Button {
-                                    text: "Rename…"
-                                    width: 84
-                                    height: 28
-
-                                    background: Rectangle {
-                                        radius: ThemeManager.radiusSmall
-                                        color: parent.pressed ? ThemeManager.surfaceActive : ThemeManager.surface
-                                        border.width: 1
-                                        border.color: ThemeManager.border
-                                    }
-
-                                    contentItem: Text {
-                                        text: parent.text
-                                        color: ThemeManager.text
-                                        font.pixelSize: ThemeManager.fontSizeSmall
-                                        horizontalAlignment: Text.AlignHCenter
-                                        verticalAlignment: Text.AlignVCenter
-                                    }
-
-                                    onClicked: {
-                                        deviceNameEditDialog.deviceId = deviceId
-                                        deviceNameEditDialog.currentName = deviceName
-                                        deviceNameEditDialog.nameText = deviceName
-                                        deviceNameEditDialog.statusText = ""
-                                        deviceNameEditDialog.open()
-                                    }
-                                }
-
-                                Button {
-                                    text: "Remove"
-                                    width: 80
-                                    height: 28
-
-                                    background: Rectangle {
-                                        radius: ThemeManager.radiusSmall
-                                        color: parent.pressed ? ThemeManager.surfaceActive : ThemeManager.surface
-                                        border.width: 1
-                                        border.color: ThemeManager.border
-                                    }
-
-                                    contentItem: Text {
-                                        text: parent.text
-                                        color: ThemeManager.text
-                                        font.pixelSize: ThemeManager.fontSizeSmall
-                                        horizontalAlignment: Text.AlignHCenter
-                                        verticalAlignment: Text.AlignVCenter
-                                    }
-
-                                    onClicked: DataStore.removePairedDevice(deviceId)
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            Button {
-                Layout.fillWidth: true
-                text: "Remove All Devices"
-                visible: pairedDevicesModel.count > 0
-
-                background: Rectangle {
-                    implicitHeight: 44
-                    radius: ThemeManager.radiusSmall
-                    color: parent.pressed ? ThemeManager.surfaceActive : ThemeManager.surface
-                    border.width: 1
-                    border.color: ThemeManager.border
-                }
-
-                contentItem: Text {
-                    text: parent.text
-                    color: ThemeManager.text
-                    font.pixelSize: ThemeManager.fontSizeNormal
-                    horizontalAlignment: Text.AlignHCenter
-                    verticalAlignment: Text.AlignVCenter
-                }
-
-                onClicked: DataStore.clearPairedDevices()
-            }
-            
-            Button {
-                Layout.fillWidth: true
-                text: "+ Pair New Device"
-                
-                background: Rectangle {
-                    implicitHeight: 44
-                    radius: ThemeManager.radiusSmall
-                    color: parent.pressed ? ThemeManager.accentHover : ThemeManager.accent
-                }
-                
-                contentItem: Text {
-                    text: parent.text
-                    color: "white"
-                    font.pixelSize: ThemeManager.fontSizeNormal
-                    horizontalAlignment: Text.AlignHCenter
-                    verticalAlignment: Text.AlignVCenter
-                }
-                
-                onClicked: {
-                    root.pairDeviceRequested()
-                    root.close()
-                }
-            }
-        }
-    }
-
     Dialog {
         id: deviceNameEditDialog
         objectName: "deviceNameEditDialog"
@@ -1242,7 +734,7 @@ Dialog {
         background: Rectangle {
             color: ThemeManager.surface
             border.width: 1
-            border.color: ThemeManager.border
+            border.color: (parent && parent.visualFocus) ? ThemeManager.accent : ThemeManager.border
             radius: ThemeManager.radiusMedium
         }
 
@@ -1279,13 +771,13 @@ Dialog {
                 Layout.fillWidth: true
                 spacing: ThemeManager.spacingSmall
 
-                Button {
+                SettingsPages.SettingsButton {
                     text: "Cancel"
                     width: Math.max(120, (deviceNameEditDialog.width - ThemeManager.spacingMedium * 3) / 2)
                     onClicked: deviceNameEditDialog.close()
                 }
 
-                Button {
+                SettingsPages.SettingsButton {
                     text: "Save"
                     objectName: "deviceNameEditSaveButton"
                     width: Math.max(120, (deviceNameEditDialog.width - ThemeManager.spacingMedium * 3) / 2)
@@ -1331,7 +823,7 @@ Dialog {
         background: Rectangle {
             color: ThemeManager.surface
             border.width: 1
-            border.color: ThemeManager.border
+            border.color: (parent && parent.visualFocus) ? ThemeManager.accent : ThemeManager.border
             radius: ThemeManager.radiusMedium
         }
 
@@ -1376,13 +868,13 @@ Dialog {
                 Layout.fillWidth: true
                 spacing: ThemeManager.spacingSmall
 
-                Button {
+                SettingsPages.SettingsButton {
                     Layout.fillWidth: true
                     text: "Cancel"
                     onClicked: endpointEditDialog.close()
                 }
 
-                Button {
+                SettingsPages.SettingsButton {
                     Layout.fillWidth: true
                     text: "Save"
                     objectName: "endpointEditSaveButton"
@@ -1415,7 +907,7 @@ Dialog {
                     }
                 }
 
-                Button {
+                SettingsPages.SettingsButton {
                     Layout.fillWidth: true
                     text: "Save & Connect"
                     enabled: DataStore && syncController && syncController.syncing &&
@@ -1476,7 +968,7 @@ Dialog {
         background: Rectangle {
             color: ThemeManager.surface
             border.width: 1
-            border.color: ThemeManager.border
+            border.color: (parent && parent.visualFocus) ? ThemeManager.accent : ThemeManager.border
             radius: ThemeManager.radiusMedium
         }
 
@@ -1526,7 +1018,7 @@ Dialog {
                     Layout.fillWidth: true
                     spacing: ThemeManager.spacingSmall
 
-                    Button {
+                    SettingsPages.SettingsButton {
                         Layout.fillWidth: true
                         text: "Cancel"
                         onClicked: {
@@ -1535,7 +1027,7 @@ Dialog {
                         }
                     }
 
-                    Button {
+                    SettingsPages.SettingsButton {
                         Layout.fillWidth: true
                         text: "Add Device"
                         enabled: manualAddDialog.trimmed(manualAddDialog.hostText).length > 0
@@ -1557,1723 +1049,6 @@ Dialog {
                         }
                     }
                 }
-            }
-        }
-    }
-    
-    // Security Settings
-    component SecuritySettings: SettingsPage {
-        SettingsSection {
-            title: "Encryption"
-            
-            SettingsRow {
-                label: "Encrypt database"
-                Switch { checked: false }
-            }
-            
-            Text {
-                Layout.fillWidth: true
-                text: "Database encryption protects your notes at rest"
-                color: ThemeManager.textMuted
-                font.pixelSize: ThemeManager.fontSizeSmall
-                wrapMode: Text.Wrap
-            }
-        }
-    }
-    
-    // Data Settings
-    component DataSettings: SettingsPage {
-        property ListModel notebooksModel: ListModel {}
-        property bool exportAllNotebooks: true
-        property bool exportIncludeAttachments: true
-        property url exportDestinationFolder: ""
-        property int exportFormatIndex: 0 // 0=markdown, 1=html
-        property string exportStatus: ""
-        property bool exportSucceeded: false
-        property string exportFolderPickerStatus: ""
-        property url folderPickerCurrentFolder: ""
-        property url folderPickerSelectedFolder: ""
-        property string exportFolderPickerPathText: ""
-        property url importSourceFolder: ""
-        property int importFormatIndex: 0 // 0=auto, 1=markdown, 2=html
-        property bool importReplaceExisting: false
-        property string importStatus: ""
-        property bool importSucceeded: false
-        property string importFolderPickerStatus: ""
-        property url importFolderPickerCurrentFolder: ""
-        property url importFolderPickerSelectedFolder: ""
-        property string importFolderPickerPathText: ""
-        property string newFolderName: ""
-        property string newFolderTarget: "export" // export | import | db
-        property string databaseStatus: ""
-        property bool databaseSucceeded: false
-        property string databaseFolderPickerStatus: ""
-        property string databaseFolderPickerMode: "move" // move | select
-        property url databaseFolderPickerCurrentFolder: ""
-        property url databaseFolderPickerSelectedFolder: ""
-        property string databaseFolderPickerPathText: ""
-        property url databaseCreateFolder: ""
-        property string newDbFileName: "zinc.db"
-        property string databaseFilePickerStatus: ""
-        property url databaseFilePickerCurrentFolder: ""
-        property url databaseFilePickerSelectedFile: ""
-        property string databaseFilePickerPathText: ""
-
-        function _normalizePathText(text) {
-            return text ? text.trim() : ""
-        }
-
-        function _localPathFromUrl(url) {
-            if (!url || url === "") return ""
-            const s = url.toString ? url.toString() : ("" + url)
-            return s.replace("file://", "")
-        }
-
-        function _urlFromUserPathText(text) {
-            const t = _normalizePathText(text)
-            if (t === "") return ""
-            if (t.indexOf("file:") === 0) return t
-            return "file://" + t
-        }
-
-        function _looksLikeFilePath(pathText) {
-            const t = _normalizePathText(pathText)
-            if (t === "" || t.endsWith("/")) return false
-            const lastSlash = Math.max(t.lastIndexOf("/"), t.lastIndexOf("\\"))
-            const lastDot = t.lastIndexOf(".")
-            return lastDot > lastSlash
-        }
-
-        function refreshNotebooks() {
-            notebooksModel.clear()
-            const notebooks = DataStore ? DataStore.getAllNotebooks() : []
-            for (let i = 0; i < notebooks.length; i++) {
-                const nb = notebooks[i] || {}
-                if (!nb.notebookId) continue
-                notebooksModel.append({
-                    notebookId: nb.notebookId,
-                    name: nb.name || "Untitled Notebook",
-                    selected: true
-                })
-            }
-        }
-
-        function selectedNotebookIds() {
-            const ids = []
-            for (let i = 0; i < notebooksModel.count; i++) {
-                const nb = notebooksModel.get(i)
-                if (nb.selected) ids.push(nb.notebookId)
-            }
-            return ids
-        }
-
-        function canExport() {
-            if (!exportDestinationFolder || exportDestinationFolder === "") return false
-            if (exportAllNotebooks) return true
-            return selectedNotebookIds().length > 0
-        }
-
-        function ensureExportDestinationFolder() {
-            const hasFolder = exportDestinationFolder && exportDestinationFolder !== "" &&
-                exportDestinationFolder.toString().indexOf("file:") === 0
-            if (hasFolder) return
-            exportDestinationFolder = DataStore ? DataStore.exportLastFolder() : ""
-        }
-
-        function openFolderPicker() {
-            ensureExportDestinationFolder()
-            exportFolderPickerStatus = ""
-            folderPickerCurrentFolder = exportDestinationFolder
-            folderPickerSelectedFolder = ""
-            exportFolderPickerPathText = _localPathFromUrl(folderPickerCurrentFolder)
-            exportFolderPickerDialog.open()
-        }
-
-        function ensureImportSourceFolder() {
-            const hasFolder = importSourceFolder && importSourceFolder !== "" &&
-                importSourceFolder.toString().indexOf("file:") === 0
-            if (hasFolder) return
-            importSourceFolder = DataStore ? DataStore.exportLastFolder() : ""
-        }
-
-        function openImportFolderPicker() {
-            ensureImportSourceFolder()
-            importFolderPickerStatus = ""
-            importFolderPickerCurrentFolder = importSourceFolder
-            importFolderPickerSelectedFolder = ""
-            importFolderPickerPathText = _localPathFromUrl(importFolderPickerCurrentFolder)
-            importFolderPickerDialog.open()
-        }
-
-        function ensureDatabaseFolderPicker() {
-            const folder = DataStore ? DataStore.databaseFolder() : ""
-            const hasFolder = folder && folder !== "" && folder.toString().indexOf("file:") === 0
-            databaseFolderPickerCurrentFolder = hasFolder ? folder : (DataStore ? DataStore.exportLastFolder() : "")
-            databaseFolderPickerSelectedFolder = ""
-            databaseFolderPickerStatus = ""
-        }
-
-        function openDatabaseFolderPicker() {
-            databaseFolderPickerMode = "move"
-            ensureDatabaseFolderPicker()
-            databaseFolderPickerPathText = _localPathFromUrl(databaseFolderPickerCurrentFolder)
-            databaseFolderPickerDialog.open()
-        }
-
-        function openDatabaseCreateFolderPicker() {
-            databaseFolderPickerMode = "select"
-            ensureDatabaseFolderPicker()
-            databaseFolderPickerPathText = _localPathFromUrl(databaseFolderPickerCurrentFolder)
-            databaseFolderPickerDialog.open()
-        }
-
-        function openDatabaseFilePicker() {
-            const folder = DataStore ? DataStore.databaseFolder() : ""
-            const hasFolder = folder && folder !== "" && folder.toString().indexOf("file:") === 0
-            databaseFilePickerCurrentFolder = hasFolder ? folder : (DataStore ? DataStore.exportLastFolder() : "")
-            databaseFilePickerSelectedFile = ""
-            databaseFilePickerStatus = ""
-            databaseFilePickerPathText = _localPathFromUrl(databaseFilePickerCurrentFolder)
-            databaseFilePickerDialog.open()
-        }
-
-        Component.onCompleted: {
-            refreshNotebooks()
-            ensureExportDestinationFolder()
-            ensureImportSourceFolder()
-        }
-
-        property Connections _dataStoreConnections: Connections {
-            target: DataStore
-            function onNotebooksChanged() { refreshNotebooks() }
-            function onError(message) {
-                if (newFolderDialog && newFolderDialog.visible) {
-                    if (newFolderTarget === "import") {
-                        importFolderPickerStatus = message
-                    } else if (newFolderTarget === "db") {
-                        if (databaseFilePickerDialog && databaseFilePickerDialog.visible) {
-                            databaseFilePickerStatus = message
-                        } else {
-                            databaseFolderPickerStatus = message
-                        }
-                    } else {
-                        exportFolderPickerStatus = message
-                    }
-                    return
-                }
-                if (databaseFolderPickerDialog && databaseFolderPickerDialog.visible) {
-                    databaseFolderPickerStatus = message
-                    return
-                }
-                if (databaseFilePickerDialog && databaseFilePickerDialog.visible) {
-                    databaseFilePickerStatus = message
-                    return
-                }
-                if (createDatabaseDialog && createDatabaseDialog.visible) {
-                    databaseStatus = message
-                    databaseSucceeded = false
-                    return
-                }
-                if (importFolderPickerDialog && importFolderPickerDialog.visible) {
-                    importFolderPickerStatus = message
-                    return
-                }
-                if (exportFolderPickerDialog && exportFolderPickerDialog.visible) {
-                    exportFolderPickerStatus = message
-                    return
-                }
-                if (importDialog && importDialog.visible) {
-                    importStatus = message
-                    importSucceeded = false
-                } else {
-                    exportStatus = message
-                    exportSucceeded = false
-                }
-            }
-        }
-
-        SettingsSection {
-            title: "Database"
-            
-            Text {
-                Layout.fillWidth: true
-                text: "Path: " + (DataStore ? DataStore.databasePath : "N/A")
-                color: ThemeManager.textSecondary
-                font.pixelSize: ThemeManager.fontSizeSmall
-                wrapMode: Text.WrapAnywhere
-            }
-            
-            Text {
-                text: "Schema: " + (DataStore && DataStore.schemaVersion >= 0 ? ("v" + DataStore.schemaVersion) : "N/A")
-                color: ThemeManager.textSecondary
-                font.pixelSize: ThemeManager.fontSizeSmall
-            }
-
-            Text {
-                Layout.fillWidth: true
-                visible: databaseStatus && databaseStatus.length > 0
-                text: databaseStatus
-                color: databaseSucceeded ? ThemeManager.success : ThemeManager.danger
-                font.pixelSize: ThemeManager.fontSizeSmall
-                wrapMode: Text.Wrap
-            }
-
-            Button {
-                Layout.fillWidth: true
-                text: "Move Database…"
-
-                background: Rectangle {
-                    implicitHeight: 40
-                    radius: ThemeManager.radiusSmall
-                    color: parent.pressed ? ThemeManager.surfaceActive : ThemeManager.surfaceHover
-                    border.width: 1
-                    border.color: ThemeManager.border
-                }
-
-                contentItem: Text {
-                    text: parent.text
-                    color: ThemeManager.text
-                    font.pixelSize: ThemeManager.fontSizeNormal
-                    horizontalAlignment: Text.AlignHCenter
-                    verticalAlignment: Text.AlignVCenter
-                }
-
-                onClicked: {
-                    databaseStatus = ""
-                    databaseSucceeded = false
-                    openDatabaseFolderPicker()
-                }
-            }
-
-            Button {
-                Layout.fillWidth: true
-                text: "Create New Database…"
-
-                background: Rectangle {
-                    implicitHeight: 40
-                    radius: ThemeManager.radiusSmall
-                    color: parent.pressed ? ThemeManager.surfaceActive : ThemeManager.surfaceHover
-                    border.width: 1
-                    border.color: ThemeManager.border
-                }
-
-                contentItem: Text {
-                    text: parent.text
-                    color: ThemeManager.text
-                    font.pixelSize: ThemeManager.fontSizeNormal
-                    horizontalAlignment: Text.AlignHCenter
-                    verticalAlignment: Text.AlignVCenter
-                }
-
-                onClicked: {
-                    databaseStatus = ""
-                    databaseSucceeded = false
-                    ensureDatabaseFolderPicker()
-                    newDbFileName = "zinc.db"
-                    databaseCreateFolder = DataStore ? DataStore.databaseFolder() : ""
-                    createDatabaseDialog.open()
-                }
-            }
-
-            Button {
-                Layout.fillWidth: true
-                text: "Open Database…"
-
-                background: Rectangle {
-                    implicitHeight: 40
-                    radius: ThemeManager.radiusSmall
-                    color: parent.pressed ? ThemeManager.surfaceActive : ThemeManager.surfaceHover
-                    border.width: 1
-                    border.color: ThemeManager.border
-                }
-
-                contentItem: Text {
-                    text: parent.text
-                    color: ThemeManager.text
-                    font.pixelSize: ThemeManager.fontSizeNormal
-                    horizontalAlignment: Text.AlignHCenter
-                    verticalAlignment: Text.AlignVCenter
-                }
-
-                onClicked: {
-                    databaseStatus = ""
-                    databaseSucceeded = false
-                    openDatabaseFilePicker()
-                }
-            }
-
-            Button {
-                Layout.fillWidth: true
-                text: "Close Database"
-                enabled: DataStore && DataStore.schemaVersion >= 0
-
-                background: Rectangle {
-                    implicitHeight: 40
-                    radius: ThemeManager.radiusSmall
-                    color: parent.pressed ? ThemeManager.surfaceActive : ThemeManager.surfaceHover
-                    border.width: 1
-                    border.color: ThemeManager.border
-                }
-
-                contentItem: Text {
-                    text: parent.text
-                    color: ThemeManager.text
-                    font.pixelSize: ThemeManager.fontSizeNormal
-                    horizontalAlignment: Text.AlignHCenter
-                    verticalAlignment: Text.AlignVCenter
-                }
-
-                onClicked: {
-                    if (!DataStore) return
-                    DataStore.closeDatabase()
-                    databaseSucceeded = true
-                    databaseStatus = "Database closed."
-                }
-            }
-            
-            Button {
-                Layout.fillWidth: true
-                text: "Run Migrations"
-                
-                background: Rectangle {
-                    implicitHeight: 40
-                    radius: ThemeManager.radiusSmall
-                    color: parent.pressed ? ThemeManager.surfaceActive : ThemeManager.surfaceHover
-                    border.width: 1
-                    border.color: ThemeManager.border
-                }
-                
-                contentItem: Text {
-                    text: parent.text
-                    color: ThemeManager.text
-                    font.pixelSize: ThemeManager.fontSizeNormal
-                    horizontalAlignment: Text.AlignHCenter
-                    verticalAlignment: Text.AlignVCenter
-                }
-                
-                onClicked: {
-                    if (DataStore && DataStore.runMigrations()) {
-                        console.log("Migrations complete")
-                    }
-                }
-            }
-        }
-
-        SettingsSection {
-            title: "Export"
-
-            Button {
-                Layout.fillWidth: true
-                text: "Export Notebooks…"
-
-                background: Rectangle {
-                    implicitHeight: 40
-                    radius: ThemeManager.radiusSmall
-                    color: parent.pressed ? ThemeManager.surfaceActive : ThemeManager.surfaceHover
-                    border.width: 1
-                    border.color: ThemeManager.border
-                }
-
-                contentItem: Text {
-                    text: parent.text
-                    color: ThemeManager.text
-                    font.pixelSize: ThemeManager.fontSizeNormal
-                    horizontalAlignment: Text.AlignHCenter
-                    verticalAlignment: Text.AlignVCenter
-                }
-
-                onClicked: {
-                    exportStatus = ""
-                    exportSucceeded = false
-                    refreshNotebooks()
-                    ensureExportDestinationFolder()
-                    exportDialog.open()
-                }
-            }
-        }
-
-        SettingsSection {
-            title: "Import"
-
-            Button {
-                Layout.fillWidth: true
-                text: "Import Notebooks…"
-
-                background: Rectangle {
-                    implicitHeight: 40
-                    radius: ThemeManager.radiusSmall
-                    color: parent.pressed ? ThemeManager.surfaceActive : ThemeManager.surfaceHover
-                    border.width: 1
-                    border.color: ThemeManager.border
-                }
-
-                contentItem: Text {
-                    text: parent.text
-                    color: ThemeManager.text
-                    font.pixelSize: ThemeManager.fontSizeNormal
-                    horizontalAlignment: Text.AlignHCenter
-                    verticalAlignment: Text.AlignVCenter
-                }
-
-                onClicked: {
-                    importStatus = ""
-                    importSucceeded = false
-                    ensureImportSourceFolder()
-                    importDialog.open()
-                }
-            }
-        }
-        
-        SettingsSection {
-            title: "⚠️ Danger Zone"
-            
-            Button {
-                Layout.fillWidth: true
-                text: "Reset All Data"
-                
-                background: Rectangle {
-                    implicitHeight: 44
-                    radius: ThemeManager.radiusSmall
-                    color: parent.pressed ? "#7a2020" : "transparent"
-                    border.width: 2
-                    border.color: ThemeManager.danger
-                }
-                
-                contentItem: Text {
-                    text: parent.text
-                    color: ThemeManager.danger
-                    font.pixelSize: ThemeManager.fontSizeNormal
-                    horizontalAlignment: Text.AlignHCenter
-                    verticalAlignment: Text.AlignVCenter
-                }
-                
-                onClicked: resetConfirmDialog.open()
-            }
-        }
-
-        property Dialog _exportDialog: Dialog {
-            id: exportDialog
-            title: "Export Notebooks"
-            anchors.centerIn: parent
-            modal: true
-            standardButtons: Dialog.NoButton
-
-            width: isMobile ? parent.width * 0.95 : Math.min(520, parent.width * 0.9)
-
-            background: Rectangle {
-                color: ThemeManager.surface
-                border.width: isMobile ? 0 : 1
-                border.color: ThemeManager.border
-                radius: ThemeManager.radiusLarge
-            }
-
-            contentItem: ColumnLayout {
-                anchors.margins: ThemeManager.spacingMedium
-                spacing: ThemeManager.spacingMedium
-
-                SettingsRow {
-                    label: "Format"
-                    ComboBox {
-                        width: parent.width
-                        model: ["Markdown (.md)", "HTML (.html)"]
-                        currentIndex: exportFormatIndex
-                        onCurrentIndexChanged: exportFormatIndex = currentIndex
-                    }
-                }
-
-                SettingsRow {
-                    label: "Notebooks"
-                    CheckBox {
-                        text: "All notebooks"
-                        checked: exportAllNotebooks
-                        onToggled: exportAllNotebooks = checked
-                    }
-                }
-
-                SettingsRow {
-                    label: "Attachments"
-                    CheckBox {
-                        text: "Include attachments"
-                        checked: exportIncludeAttachments
-                        onToggled: exportIncludeAttachments = checked
-                    }
-                }
-
-                ScrollView {
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: 180
-                    visible: !exportAllNotebooks
-                    clip: true
-
-                    ColumnLayout {
-                        width: parent.width
-                        spacing: 4
-
-                        Repeater {
-                            model: notebooksModel
-                            delegate: CheckBox {
-                                text: model.name
-                                checked: model.selected
-                                onToggled: notebooksModel.setProperty(index, "selected", checked)
-                            }
-                        }
-                    }
-                }
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: ThemeManager.spacingSmall
-
-                    Button {
-                        text: "Choose Folder…"
-                        onClicked: {
-                            exportStatus = ""
-                            exportSucceeded = false
-                            openFolderPicker()
-                        }
-                    }
-
-                    Text {
-                        Layout.fillWidth: true
-                        text: exportDestinationFolder && exportDestinationFolder !== ""
-                            ? exportDestinationFolder.toString().replace("file://", "")
-                            : "No folder selected"
-                        color: ThemeManager.textSecondary
-                        font.pixelSize: ThemeManager.fontSizeSmall
-                        elide: Text.ElideMiddle
-                    }
-                }
-
-                Text {
-                    Layout.fillWidth: true
-                    visible: exportStatus && exportStatus.length > 0
-                    text: exportStatus
-                    color: exportSucceeded ? ThemeManager.success : ThemeManager.danger
-                    font.pixelSize: ThemeManager.fontSizeSmall
-                    wrapMode: Text.Wrap
-                }
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: ThemeManager.spacingSmall
-
-                    Item { Layout.fillWidth: true }
-
-                    Button {
-                        text: "Cancel"
-                        onClicked: exportDialog.close()
-                    }
-
-                    Button {
-                        text: "Export"
-                        enabled: canExport()
-                        onClicked: {
-                            if (!DataStore) return
-                            exportStatus = ""
-                            exportSucceeded = false
-                            const ids = exportAllNotebooks ? [] : selectedNotebookIds()
-                            const fmt = exportFormatIndex === 0 ? "markdown" : "html"
-                            DataStore.setExportLastFolder(exportDestinationFolder)
-                            const ok = DataStore.exportNotebooks(ids, exportDestinationFolder, fmt, exportIncludeAttachments)
-                            if (ok) {
-                                exportSucceeded = true
-                                exportStatus = "Export complete."
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        property Dialog _importDialog: Dialog {
-            id: importDialog
-            title: "Import Notebooks"
-            anchors.centerIn: parent
-            modal: true
-            standardButtons: Dialog.NoButton
-
-            width: isMobile ? parent.width * 0.95 : Math.min(520, parent.width * 0.9)
-
-            background: Rectangle {
-                color: ThemeManager.surface
-                border.width: isMobile ? 0 : 1
-                border.color: ThemeManager.border
-                radius: ThemeManager.radiusLarge
-            }
-
-            contentItem: ColumnLayout {
-                anchors.margins: ThemeManager.spacingMedium
-                spacing: ThemeManager.spacingMedium
-
-                SettingsRow {
-                    label: "Format"
-                    ComboBox {
-                        width: parent.width
-                        model: ["Auto", "Markdown (.md)", "HTML (.html)"]
-                        currentIndex: importFormatIndex
-                        onCurrentIndexChanged: importFormatIndex = currentIndex
-                    }
-                }
-
-                SettingsRow {
-                    label: "Behavior"
-                    CheckBox {
-                        text: "Replace existing data"
-                        checked: importReplaceExisting
-                        onToggled: importReplaceExisting = checked
-                    }
-                }
-
-                Text {
-                    Layout.fillWidth: true
-                    visible: importReplaceExisting
-                    text: "Replacing existing data will erase your current notebooks and attachments before importing."
-                    color: ThemeManager.danger
-                    font.pixelSize: ThemeManager.fontSizeSmall
-                    wrapMode: Text.Wrap
-                }
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: ThemeManager.spacingSmall
-
-                    Button {
-                        text: "Choose Folder…"
-                        onClicked: {
-                            importStatus = ""
-                            importSucceeded = false
-                            openImportFolderPicker()
-                        }
-                    }
-
-                    Text {
-                        Layout.fillWidth: true
-                        text: importSourceFolder && importSourceFolder !== ""
-                            ? importSourceFolder.toString().replace("file://", "")
-                            : "No folder selected"
-                        color: ThemeManager.textSecondary
-                        font.pixelSize: ThemeManager.fontSizeSmall
-                        elide: Text.ElideMiddle
-                    }
-                }
-
-                Text {
-                    Layout.fillWidth: true
-                    visible: importStatus && importStatus.length > 0
-                    text: importStatus
-                    color: importSucceeded ? ThemeManager.success : ThemeManager.danger
-                    font.pixelSize: ThemeManager.fontSizeSmall
-                    wrapMode: Text.Wrap
-                }
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: ThemeManager.spacingSmall
-
-                    Item { Layout.fillWidth: true }
-
-                    Button {
-                        text: "Cancel"
-                        onClicked: importDialog.close()
-                    }
-
-                    Button {
-                        text: "Import"
-                        enabled: importSourceFolder && importSourceFolder !== ""
-                        onClicked: {
-                            if (!DataStore) return
-                            importStatus = ""
-                            importSucceeded = false
-                            const fmt = importFormatIndex === 0 ? "auto" : (importFormatIndex === 1 ? "markdown" : "html")
-                            const ok = DataStore.importNotebooks(importSourceFolder, fmt, importReplaceExisting)
-                            if (ok) {
-                                importSucceeded = true
-                                importStatus = "Import complete."
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        property Dialog _exportFolderPickerDialog: Dialog {
-            id: exportFolderPickerDialog
-            title: "Choose Export Folder"
-            anchors.centerIn: parent
-            modal: true
-            standardButtons: Dialog.NoButton
-
-            width: isMobile ? parent.width * 0.95 : Math.min(560, parent.width * 0.9)
-            height: isMobile ? parent.height * 0.85 : Math.min(520, parent.height * 0.85)
-
-            background: Rectangle {
-                color: ThemeManager.surface
-                border.width: isMobile ? 0 : 1
-                border.color: ThemeManager.border
-                radius: ThemeManager.radiusLarge
-            }
-
-            contentItem: ColumnLayout {
-                anchors.margins: ThemeManager.spacingMedium
-                spacing: ThemeManager.spacingSmall
-
-	                RowLayout {
-	                    Layout.fillWidth: true
-	                    spacing: ThemeManager.spacingSmall
-
-	                    Button {
-	                        text: "Up"
-                        enabled: DataStore && folderPickerCurrentFolder !== "" &&
-                            DataStore.parentFolder(folderPickerCurrentFolder).toString() !== folderPickerCurrentFolder.toString()
-                        onClicked: {
-                            if (!DataStore) return
-                            folderPickerCurrentFolder = DataStore.parentFolder(folderPickerCurrentFolder)
-                            folderPickerSelectedFolder = ""
-                            exportFolderPickerPathText = _localPathFromUrl(folderPickerCurrentFolder)
-                        }
-	                    }
-
-	                    Button {
-	                        text: "New Folder…"
-	                        enabled: folderPickerCurrentFolder && folderPickerCurrentFolder !== ""
-	                        onClicked: {
-	                            newFolderName = ""
-	                            newFolderTarget = "export"
-	                            exportFolderPickerStatus = ""
-	                            newFolderDialog.open()
-	                        }
-	                    }
-
-                        TextField {
-                            objectName: "exportFolderPickerPathField"
-	                        Layout.fillWidth: true
-                            placeholderText: "Path"
-                            text: exportFolderPickerPathText
-                            selectByMouse: true
-                            onTextChanged: exportFolderPickerPathText = text
-                            onAccepted: {
-                                const url = _urlFromUserPathText(exportFolderPickerPathText)
-                                if (!url || url === "") return
-                                exportFolderPickerStatus = ""
-                                folderPickerCurrentFolder = url
-                                folderPickerSelectedFolder = ""
-                            }
-                        color: ThemeManager.textSecondary
-                        font.pixelSize: ThemeManager.fontSizeSmall
-                    }
-                }
-
-                Rectangle {
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    color: ThemeManager.background
-                    radius: ThemeManager.radiusSmall
-                    border.width: 1
-                    border.color: ThemeManager.border
-
-                    ListView {
-                        id: folderListView
-                        anchors.fill: parent
-                        anchors.margins: ThemeManager.spacingSmall
-                        clip: true
-                        model: FolderListModel {
-                            objectName: "exportFolderListModel"
-                            folder: folderPickerCurrentFolder
-                            showDirs: true
-                            showFiles: false
-                            showHidden: true
-                            showDotAndDotDot: false
-                            sortField: FolderListModel.Name
-                        }
-
-	                        delegate: Rectangle {
-	                            readonly property string dirUrl: "file://" + filePath
-	                            width: ListView.view.width
-	                            height: 36
-	                            radius: ThemeManager.radiusSmall
-	                            color: (folderPickerSelectedFolder && folderPickerSelectedFolder.toString() === dirUrl)
-	                                ? ThemeManager.surfaceHover
-	                                : (rowMouse.containsMouse ? ThemeManager.surfaceHover : "transparent")
-
-                            RowLayout {
-                                anchors.fill: parent
-                                anchors.leftMargin: ThemeManager.spacingSmall
-                                anchors.rightMargin: ThemeManager.spacingSmall
-                                spacing: ThemeManager.spacingSmall
-
-                                Text {
-                                    text: "📁"
-                                    font.pixelSize: ThemeManager.fontSizeSmall
-                                }
-
-                                Text {
-                                    Layout.fillWidth: true
-                                    text: fileName
-                                    color: ThemeManager.text
-                                    font.pixelSize: ThemeManager.fontSizeSmall
-                                    elide: Text.ElideRight
-                                }
-                            }
-
-	                            MouseArea {
-	                                id: rowMouse
-	                                anchors.fill: parent
-	                                hoverEnabled: true
-	                                cursorShape: Qt.PointingHandCursor
-	                                onClicked: folderPickerSelectedFolder = dirUrl
-	                                onDoubleClicked: {
-	                                    folderPickerCurrentFolder = dirUrl
-	                                    folderPickerSelectedFolder = ""
-                                        exportFolderPickerPathText = _localPathFromUrl(folderPickerCurrentFolder)
-	                                }
-	                            }
-	                        }
-                    }
-                }
-
-	                RowLayout {
-	                    Layout.fillWidth: true
-	                    spacing: ThemeManager.spacingSmall
-
-	                    Text {
-                        Layout.fillWidth: true
-                        text: folderPickerSelectedFolder && folderPickerSelectedFolder !== ""
-                            ? ("Selected: " + folderPickerSelectedFolder.toString().replace("file://", ""))
-                            : "Selected: (current folder)"
-                        color: ThemeManager.textSecondary
-                        font.pixelSize: ThemeManager.fontSizeSmall
-                        elide: Text.ElideMiddle
-	                    }
-	                }
-
-	                Text {
-	                    Layout.fillWidth: true
-	                    visible: exportFolderPickerStatus && exportFolderPickerStatus.length > 0
-	                    text: exportFolderPickerStatus
-	                    color: ThemeManager.danger
-	                    font.pixelSize: ThemeManager.fontSizeSmall
-	                    wrapMode: Text.Wrap
-	                }
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: ThemeManager.spacingSmall
-
-                    Item { Layout.fillWidth: true }
-
-                    Button {
-                        text: "Cancel"
-                        onClicked: exportFolderPickerDialog.close()
-                    }
-
-                    Button {
-                        text: "Export"
-                        enabled: folderPickerCurrentFolder && folderPickerCurrentFolder !== ""
-                        onClicked: {
-                            const chosen = (folderPickerSelectedFolder && folderPickerSelectedFolder !== "")
-                                ? folderPickerSelectedFolder
-                                : folderPickerCurrentFolder
-                            exportDestinationFolder = chosen
-                            if (DataStore) DataStore.setExportLastFolder(chosen)
-                            exportFolderPickerDialog.close()
-                        }
-                    }
-                }
-            }
-        }
-
-        property Dialog _databaseFolderPickerDialog: Dialog {
-            id: databaseFolderPickerDialog
-            title: "Choose Database Folder"
-            anchors.centerIn: parent
-            modal: true
-            standardButtons: Dialog.NoButton
-
-            width: isMobile ? parent.width * 0.95 : Math.min(560, parent.width * 0.9)
-            height: isMobile ? parent.height * 0.85 : Math.min(520, parent.height * 0.85)
-
-            background: Rectangle {
-                color: ThemeManager.surface
-                border.width: isMobile ? 0 : 1
-                border.color: ThemeManager.border
-                radius: ThemeManager.radiusLarge
-            }
-
-            contentItem: ColumnLayout {
-                anchors.margins: ThemeManager.spacingMedium
-                spacing: ThemeManager.spacingSmall
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: ThemeManager.spacingSmall
-
-                    Button {
-                        text: "Up"
-                        enabled: DataStore && databaseFolderPickerCurrentFolder !== "" &&
-                            DataStore.parentFolder(databaseFolderPickerCurrentFolder).toString() !== databaseFolderPickerCurrentFolder.toString()
-                        onClicked: {
-                            if (!DataStore) return
-                            databaseFolderPickerCurrentFolder = DataStore.parentFolder(databaseFolderPickerCurrentFolder)
-                            databaseFolderPickerSelectedFolder = ""
-                            databaseFolderPickerPathText = _localPathFromUrl(databaseFolderPickerCurrentFolder)
-                        }
-                    }
-
-                    Button {
-                        text: "New Folder…"
-                        enabled: databaseFolderPickerCurrentFolder && databaseFolderPickerCurrentFolder !== ""
-                        onClicked: {
-                            newFolderName = ""
-                            newFolderTarget = "db"
-                            databaseFolderPickerStatus = ""
-                            newFolderDialog.open()
-                        }
-                    }
-
-                    TextField {
-                        objectName: "databaseFolderPickerPathField"
-                        Layout.fillWidth: true
-                        placeholderText: "Path"
-                        text: databaseFolderPickerPathText
-                        selectByMouse: true
-                        onTextChanged: databaseFolderPickerPathText = text
-                        onAccepted: {
-                            const url = _urlFromUserPathText(databaseFolderPickerPathText)
-                            if (!url || url === "") return
-                            databaseFolderPickerStatus = ""
-                            databaseFolderPickerCurrentFolder = url
-                            databaseFolderPickerSelectedFolder = ""
-                        }
-                        color: ThemeManager.textSecondary
-                        font.pixelSize: ThemeManager.fontSizeSmall
-                    }
-                }
-
-                Rectangle {
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    color: ThemeManager.background
-                    radius: ThemeManager.radiusSmall
-                    border.width: 1
-                    border.color: ThemeManager.border
-
-                    ListView {
-                        anchors.fill: parent
-                        anchors.margins: ThemeManager.spacingSmall
-                        clip: true
-                        model: FolderListModel {
-                            objectName: "databaseFolderListModel"
-                            folder: databaseFolderPickerCurrentFolder
-                            showDirs: true
-                            showFiles: false
-                            showHidden: true
-                            showDotAndDotDot: false
-                            sortField: FolderListModel.Name
-                        }
-
-                        delegate: Rectangle {
-                            readonly property string dirUrl: "file://" + filePath
-                            width: ListView.view.width
-                            height: 36
-                            radius: ThemeManager.radiusSmall
-                            color: (databaseFolderPickerSelectedFolder && databaseFolderPickerSelectedFolder.toString() === dirUrl)
-                                ? ThemeManager.surfaceHover
-                                : (rowMouse.containsMouse ? ThemeManager.surfaceHover : "transparent")
-
-                            RowLayout {
-                                anchors.fill: parent
-                                anchors.leftMargin: ThemeManager.spacingSmall
-                                anchors.rightMargin: ThemeManager.spacingSmall
-                                spacing: ThemeManager.spacingSmall
-
-                                Text {
-                                    text: "📁"
-                                    font.pixelSize: ThemeManager.fontSizeSmall
-                                }
-
-                                Text {
-                                    Layout.fillWidth: true
-                                    text: fileName
-                                    color: ThemeManager.text
-                                    font.pixelSize: ThemeManager.fontSizeSmall
-                                    elide: Text.ElideRight
-                                }
-                            }
-
-                            MouseArea {
-                                id: rowMouse
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: databaseFolderPickerSelectedFolder = dirUrl
-                                onDoubleClicked: {
-                                    databaseFolderPickerCurrentFolder = dirUrl
-                                    databaseFolderPickerSelectedFolder = ""
-                                    databaseFolderPickerPathText = _localPathFromUrl(databaseFolderPickerCurrentFolder)
-                                }
-                            }
-                        }
-                    }
-                }
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: ThemeManager.spacingSmall
-
-                    Text {
-                        Layout.fillWidth: true
-                        text: databaseFolderPickerSelectedFolder && databaseFolderPickerSelectedFolder !== ""
-                            ? ("Selected: " + databaseFolderPickerSelectedFolder.toString().replace("file://", ""))
-                            : "Selected: (current folder)"
-                        color: ThemeManager.textSecondary
-                        font.pixelSize: ThemeManager.fontSizeSmall
-                        elide: Text.ElideMiddle
-                    }
-                }
-
-                Text {
-                    Layout.fillWidth: true
-                    visible: databaseFolderPickerStatus && databaseFolderPickerStatus.length > 0
-                    text: databaseFolderPickerStatus
-                    color: ThemeManager.danger
-                    font.pixelSize: ThemeManager.fontSizeSmall
-                    wrapMode: Text.Wrap
-                }
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: ThemeManager.spacingSmall
-
-                    Item { Layout.fillWidth: true }
-
-                    Button {
-                        text: "Cancel"
-                        onClicked: databaseFolderPickerDialog.close()
-                    }
-
-                    Button {
-                        text: databaseFolderPickerMode === "move" ? "Move Here" : "Choose"
-                        enabled: databaseFolderPickerCurrentFolder && databaseFolderPickerCurrentFolder !== ""
-                        onClicked: {
-                            if (!DataStore) return
-                            const chosen = (databaseFolderPickerSelectedFolder && databaseFolderPickerSelectedFolder !== "")
-                                ? databaseFolderPickerSelectedFolder
-                                : databaseFolderPickerCurrentFolder
-                            databaseFolderPickerStatus = ""
-                            if (databaseFolderPickerMode === "move") {
-                                const ok = DataStore.moveDatabaseToFolder(chosen)
-                                if (ok) {
-                                    databaseSucceeded = true
-                                    databaseStatus = "Database moved."
-                                    refreshNotebooks()
-                                    databaseFolderPickerDialog.close()
-                                }
-                            } else {
-                                databaseCreateFolder = chosen
-                                databaseFolderPickerDialog.close()
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        property Dialog _newFolderDialog: Dialog {
-            id: newFolderDialog
-            title: "New Folder"
-            anchors.centerIn: parent
-            modal: true
-            standardButtons: Dialog.NoButton
-
-            width: isMobile ? parent.width * 0.95 : Math.min(420, parent.width * 0.9)
-
-            background: Rectangle {
-                color: ThemeManager.surface
-                border.width: isMobile ? 0 : 1
-                border.color: ThemeManager.border
-                radius: ThemeManager.radiusLarge
-            }
-
-            contentItem: ColumnLayout {
-                anchors.margins: ThemeManager.spacingMedium
-                spacing: ThemeManager.spacingMedium
-
-                TextField {
-                    Layout.fillWidth: true
-                    placeholderText: "Folder name"
-                    text: newFolderName
-                    onTextChanged: newFolderName = text
-                }
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: ThemeManager.spacingSmall
-
-                    Item { Layout.fillWidth: true }
-
-                    Button {
-                        text: "Cancel"
-                        onClicked: newFolderDialog.close()
-                    }
-
-	                    Button {
-	                        text: "Create"
-	                        enabled: newFolderName && newFolderName.trim().length > 0
-	                        onClicked: {
-	                            if (!DataStore) return
-	                            const parentUrl = newFolderTarget === "import"
-	                                ? importFolderPickerCurrentFolder
-	                                : (newFolderTarget === "db" ? databaseFolderPickerCurrentFolder : folderPickerCurrentFolder)
-	                            const created = DataStore.createFolder(parentUrl, newFolderName)
-	                            if (created && created.toString && created.toString() !== "") {
-	                                if (newFolderTarget === "import") {
-	                                    importFolderPickerCurrentFolder = created
-	                                    importFolderPickerSelectedFolder = ""
-	                                    importFolderPickerStatus = ""
-                                        importFolderPickerPathText = _localPathFromUrl(importFolderPickerCurrentFolder)
-	                                } else if (newFolderTarget === "db") {
-	                                    if (databaseFilePickerDialog && databaseFilePickerDialog.visible) {
-	                                        databaseFilePickerCurrentFolder = created
-	                                        databaseFilePickerSelectedFile = ""
-	                                        databaseFilePickerStatus = ""
-                                            databaseFilePickerPathText = _localPathFromUrl(databaseFilePickerCurrentFolder)
-	                                    } else {
-	                                        databaseFolderPickerCurrentFolder = created
-	                                        databaseFolderPickerSelectedFolder = ""
-	                                        databaseFolderPickerStatus = ""
-                                            databaseFolderPickerPathText = _localPathFromUrl(databaseFolderPickerCurrentFolder)
-	                                    }
-	                                } else {
-	                                    folderPickerCurrentFolder = created
-	                                    folderPickerSelectedFolder = ""
-	                                    exportFolderPickerStatus = ""
-                                        exportFolderPickerPathText = _localPathFromUrl(folderPickerCurrentFolder)
-	                                }
-	                            } else {
-	                                const msg = "Could not create folder."
-	                                if (newFolderTarget === "import") importFolderPickerStatus = msg
-	                                else if (newFolderTarget === "db") {
-	                                    if (databaseFilePickerDialog && databaseFilePickerDialog.visible) databaseFilePickerStatus = msg
-	                                    else databaseFolderPickerStatus = msg
-	                                }
-	                                else exportFolderPickerStatus = msg
-	                            }
-	                            newFolderDialog.close()
-	                        }
-	                    }
-                }
-            }
-        }
-
-        property Dialog _createDatabaseDialog: Dialog {
-            id: createDatabaseDialog
-            title: "Create New Database"
-            anchors.centerIn: parent
-            modal: true
-            standardButtons: Dialog.NoButton
-
-            width: isMobile ? parent.width * 0.95 : Math.min(520, parent.width * 0.9)
-
-            background: Rectangle {
-                color: ThemeManager.surface
-                border.width: isMobile ? 0 : 1
-                border.color: ThemeManager.border
-                radius: ThemeManager.radiusLarge
-            }
-
-            contentItem: ColumnLayout {
-                anchors.margins: ThemeManager.spacingMedium
-                spacing: ThemeManager.spacingMedium
-
-                SettingsRow {
-                    label: "Folder"
-                    Button {
-                        text: "Choose Folder…"
-                        onClicked: {
-                            databaseFolderPickerStatus = ""
-                            openDatabaseCreateFolderPicker()
-                        }
-                    }
-                }
-
-                Text {
-                    Layout.fillWidth: true
-                    text: databaseCreateFolder && databaseCreateFolder !== ""
-                        ? databaseCreateFolder.toString().replace("file://", "")
-                        : "(not selected)"
-                    color: ThemeManager.textSecondary
-                    font.pixelSize: ThemeManager.fontSizeSmall
-                    elide: Text.ElideMiddle
-                }
-
-                SettingsRow {
-                    label: "File name"
-                    TextField {
-                        Layout.fillWidth: true
-                        placeholderText: "zinc.db"
-                        text: newDbFileName
-                        onTextChanged: newDbFileName = text
-                    }
-                }
-
-                Text {
-                    Layout.fillWidth: true
-                    visible: databaseFolderPickerStatus && databaseFolderPickerStatus.length > 0
-                    text: databaseFolderPickerStatus
-                    color: ThemeManager.danger
-                    font.pixelSize: ThemeManager.fontSizeSmall
-                    wrapMode: Text.Wrap
-                }
-
-                Text {
-                    Layout.fillWidth: true
-                    visible: databaseStatus && databaseStatus.length > 0
-                    text: databaseStatus
-                    color: databaseSucceeded ? ThemeManager.success : ThemeManager.danger
-                    font.pixelSize: ThemeManager.fontSizeSmall
-                    wrapMode: Text.Wrap
-                }
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: ThemeManager.spacingSmall
-
-                    Item { Layout.fillWidth: true }
-
-                    Button {
-                        text: "Cancel"
-                        onClicked: createDatabaseDialog.close()
-                    }
-
-                    Button {
-                        text: "Create"
-                        enabled: databaseCreateFolder && databaseCreateFolder !== "" && newDbFileName && newDbFileName.trim().length > 0
-                        onClicked: {
-                            if (!DataStore) return
-                            databaseStatus = ""
-                            databaseSucceeded = false
-                            const ok = DataStore.createNewDatabase(databaseCreateFolder, newDbFileName)
-                            if (ok) {
-                                databaseSucceeded = true
-                                databaseStatus = "Database created."
-                                refreshNotebooks()
-                                createDatabaseDialog.close()
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        property Dialog _databaseFilePickerDialog: Dialog {
-            id: databaseFilePickerDialog
-            title: "Open Database"
-            anchors.centerIn: parent
-            modal: true
-            standardButtons: Dialog.NoButton
-
-            width: isMobile ? parent.width * 0.95 : Math.min(560, parent.width * 0.9)
-            height: isMobile ? parent.height * 0.85 : Math.min(520, parent.height * 0.85)
-
-            background: Rectangle {
-                color: ThemeManager.surface
-                border.width: isMobile ? 0 : 1
-                border.color: ThemeManager.border
-                radius: ThemeManager.radiusLarge
-            }
-
-            contentItem: ColumnLayout {
-                anchors.margins: ThemeManager.spacingMedium
-                spacing: ThemeManager.spacingSmall
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: ThemeManager.spacingSmall
-
-                    Button {
-                        text: "Up"
-                        enabled: DataStore && databaseFilePickerCurrentFolder !== "" &&
-                            DataStore.parentFolder(databaseFilePickerCurrentFolder).toString() !== databaseFilePickerCurrentFolder.toString()
-                        onClicked: {
-                            if (!DataStore) return
-                            databaseFilePickerCurrentFolder = DataStore.parentFolder(databaseFilePickerCurrentFolder)
-                            databaseFilePickerSelectedFile = ""
-                            databaseFilePickerPathText = _localPathFromUrl(databaseFilePickerCurrentFolder)
-                        }
-                    }
-
-                    Button {
-                        text: "New Folder…"
-                        enabled: databaseFilePickerCurrentFolder && databaseFilePickerCurrentFolder !== ""
-                        onClicked: {
-                            newFolderName = ""
-                            newFolderTarget = "db"
-                            databaseFilePickerStatus = ""
-                            // Reuse new-folder dialog against current folder.
-                            databaseFolderPickerCurrentFolder = databaseFilePickerCurrentFolder
-                            databaseFolderPickerSelectedFolder = ""
-                            newFolderDialog.open()
-                        }
-                    }
-
-                    TextField {
-                        objectName: "databaseFilePickerPathField"
-                        Layout.fillWidth: true
-                        placeholderText: "Path (folder or database file)"
-                        text: databaseFilePickerPathText
-                        selectByMouse: true
-                        onTextChanged: databaseFilePickerPathText = text
-                        onAccepted: {
-                            if (!DataStore) return
-                            const url = _urlFromUserPathText(databaseFilePickerPathText)
-                            if (!url || url === "") return
-                            databaseFilePickerStatus = ""
-                            if (_looksLikeFilePath(databaseFilePickerPathText)) {
-                                databaseFilePickerSelectedFile = url
-                                databaseFilePickerCurrentFolder = DataStore.parentFolder(url)
-                                return
-                            }
-                            databaseFilePickerCurrentFolder = url
-                            databaseFilePickerSelectedFile = ""
-                        }
-                        color: ThemeManager.textSecondary
-                        font.pixelSize: ThemeManager.fontSizeSmall
-                    }
-                }
-
-                Rectangle {
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    color: ThemeManager.background
-                    radius: ThemeManager.radiusSmall
-                    border.width: 1
-                    border.color: ThemeManager.border
-
-                    ListView {
-                        anchors.fill: parent
-                        anchors.margins: ThemeManager.spacingSmall
-                        clip: true
-                        model: FolderListModel {
-                            objectName: "databaseFileListModel"
-                            folder: databaseFilePickerCurrentFolder
-                            showDirs: true
-                            showFiles: true
-                            showHidden: true
-                            showDotAndDotDot: false
-                            nameFilters: ["*.db", "*.sqlite", "*.sqlite3"]
-                            sortField: FolderListModel.Name
-                        }
-
-                        delegate: Rectangle {
-                            readonly property string itemUrl: "file://" + filePath
-                            width: ListView.view.width
-                            height: 36
-                            radius: ThemeManager.radiusSmall
-                            color: (databaseFilePickerSelectedFile && databaseFilePickerSelectedFile.toString() === itemUrl)
-                                ? ThemeManager.surfaceHover
-                                : (rowMouse.containsMouse ? ThemeManager.surfaceHover : "transparent")
-
-                            RowLayout {
-                                anchors.fill: parent
-                                anchors.leftMargin: ThemeManager.spacingSmall
-                                anchors.rightMargin: ThemeManager.spacingSmall
-                                spacing: ThemeManager.spacingSmall
-
-                                Text {
-                                    text: fileIsDir ? "📁" : "📄"
-                                    font.pixelSize: ThemeManager.fontSizeSmall
-                                }
-
-                                Text {
-                                    Layout.fillWidth: true
-                                    text: fileName
-                                    color: ThemeManager.text
-                                    font.pixelSize: ThemeManager.fontSizeSmall
-                                    elide: Text.ElideRight
-                                }
-                            }
-
-                            MouseArea {
-                                id: rowMouse
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: {
-                                    databaseFilePickerSelectedFile = itemUrl
-                                    databaseFilePickerPathText = _localPathFromUrl(itemUrl)
-                                }
-                                onDoubleClicked: {
-                                    if (fileIsDir) {
-                                        databaseFilePickerCurrentFolder = itemUrl
-                                        databaseFilePickerSelectedFile = ""
-                                        databaseFilePickerPathText = _localPathFromUrl(databaseFilePickerCurrentFolder)
-                                        return
-                                    }
-                                    databaseFilePickerSelectedFile = itemUrl
-                                    databaseFilePickerPathText = _localPathFromUrl(itemUrl)
-                                }
-                            }
-                        }
-                    }
-                }
-
-                Text {
-                    Layout.fillWidth: true
-                    text: databaseFilePickerSelectedFile && databaseFilePickerSelectedFile !== ""
-                        ? ("Selected: " + databaseFilePickerSelectedFile.toString().replace("file://", ""))
-                        : "Selected: (none)"
-                    color: ThemeManager.textSecondary
-                    font.pixelSize: ThemeManager.fontSizeSmall
-                    elide: Text.ElideMiddle
-                }
-
-                Text {
-                    Layout.fillWidth: true
-                    visible: databaseFilePickerStatus && databaseFilePickerStatus.length > 0
-                    text: databaseFilePickerStatus
-                    color: ThemeManager.danger
-                    font.pixelSize: ThemeManager.fontSizeSmall
-                    wrapMode: Text.Wrap
-                }
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: ThemeManager.spacingSmall
-
-                    Item { Layout.fillWidth: true }
-
-                    Button {
-                        text: "Cancel"
-                        onClicked: databaseFilePickerDialog.close()
-                    }
-
-                    Button {
-                        text: "Open"
-                        enabled: databaseFilePickerSelectedFile && databaseFilePickerSelectedFile !== "" && !databaseFilePickerSelectedFile.toString().endsWith("/")
-                        onClicked: {
-                            if (!DataStore) return
-                            databaseFilePickerStatus = ""
-                            const ok = DataStore.openDatabaseFile(databaseFilePickerSelectedFile)
-                            if (ok) {
-                                databaseSucceeded = true
-                                databaseStatus = "Database opened."
-                                refreshNotebooks()
-                                databaseFilePickerDialog.close()
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        property Dialog _importFolderPickerDialog: Dialog {
-            id: importFolderPickerDialog
-            title: "Choose Import Folder"
-            anchors.centerIn: parent
-            modal: true
-            standardButtons: Dialog.NoButton
-
-            width: isMobile ? parent.width * 0.95 : Math.min(520, parent.width * 0.9)
-
-            background: Rectangle {
-                color: ThemeManager.surface
-                border.width: isMobile ? 0 : 1
-                border.color: ThemeManager.border
-                radius: ThemeManager.radiusLarge
-            }
-
-            contentItem: ColumnLayout {
-                anchors.margins: ThemeManager.spacingMedium
-                spacing: ThemeManager.spacingSmall
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: ThemeManager.spacingSmall
-
-                    Button {
-                        text: "Up"
-                        enabled: DataStore && importFolderPickerCurrentFolder && importFolderPickerCurrentFolder !== "" &&
-                                 DataStore.parentFolder(importFolderPickerCurrentFolder).toString() !== importFolderPickerCurrentFolder.toString()
-                        onClicked: {
-                            if (!DataStore) return
-                            importFolderPickerCurrentFolder = DataStore.parentFolder(importFolderPickerCurrentFolder)
-                            importFolderPickerSelectedFolder = ""
-                            importFolderPickerPathText = _localPathFromUrl(importFolderPickerCurrentFolder)
-                        }
-	                    }
-
-	                    Button {
-	                        text: "New Folder…"
-	                        enabled: importFolderPickerCurrentFolder && importFolderPickerCurrentFolder !== ""
-	                        onClicked: {
-	                            newFolderName = ""
-	                            newFolderTarget = "import"
-	                            importFolderPickerStatus = ""
-	                            newFolderDialog.open()
-	                        }
-	                    }
-
-	                    TextField {
-                            objectName: "importFolderPickerPathField"
-	                        Layout.fillWidth: true
-                            placeholderText: "Path"
-                            text: importFolderPickerPathText
-                            selectByMouse: true
-                            onTextChanged: importFolderPickerPathText = text
-                            onAccepted: {
-                                const url = _urlFromUserPathText(importFolderPickerPathText)
-                                if (!url || url === "") return
-                                importFolderPickerStatus = ""
-                                importFolderPickerCurrentFolder = url
-                                importFolderPickerSelectedFolder = ""
-                            }
-                        color: ThemeManager.textSecondary
-                        font.pixelSize: ThemeManager.fontSizeSmall
-                    }
-                }
-
-                FolderListModel {
-                    id: importFolderListModel
-                    objectName: "importFolderListModel"
-                    folder: importFolderPickerCurrentFolder
-                    showDirs: true
-                    showFiles: false
-                    showHidden: true
-                    showDotAndDotDot: false
-                    sortField: FolderListModel.Name
-                }
-
-                ScrollView {
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: 280
-                    clip: true
-
-                    ListView {
-                        width: parent.width
-                        model: importFolderListModel
-                        spacing: 2
-
-	                        delegate: Rectangle {
-	                            readonly property string dirUrl: "file://" + filePath
-	                            width: ListView.view.width
-	                            height: 36
-	                            radius: ThemeManager.radiusSmall
-	                            color: (importFolderPickerSelectedFolder && importFolderPickerSelectedFolder.toString() === dirUrl)
-	                                ? ThemeManager.surfaceHover
-	                                : (rowMouse.containsMouse ? ThemeManager.surfaceHover : "transparent")
-
-                            RowLayout {
-                                anchors.fill: parent
-                                anchors.leftMargin: ThemeManager.spacingSmall
-                                anchors.rightMargin: ThemeManager.spacingSmall
-                                spacing: ThemeManager.spacingSmall
-
-                                Text {
-                                    text: "📁"
-                                    font.pixelSize: ThemeManager.fontSizeSmall
-                                }
-
-                                Text {
-                                    Layout.fillWidth: true
-                                    text: fileName
-                                    color: ThemeManager.text
-                                    font.pixelSize: ThemeManager.fontSizeSmall
-                                    elide: Text.ElideRight
-                                }
-                            }
-
-	                            MouseArea {
-	                                id: rowMouse
-	                                anchors.fill: parent
-	                                hoverEnabled: true
-	                                cursorShape: Qt.PointingHandCursor
-	                                onClicked: importFolderPickerSelectedFolder = dirUrl
-	                                onDoubleClicked: {
-	                                    importFolderPickerCurrentFolder = dirUrl
-	                                    importFolderPickerSelectedFolder = ""
-                                        importFolderPickerPathText = _localPathFromUrl(importFolderPickerCurrentFolder)
-	                                }
-	                            }
-	                        }
-                    }
-                }
-
-	                RowLayout {
-	                    Layout.fillWidth: true
-	                    spacing: ThemeManager.spacingSmall
-
-	                    Text {
-                        Layout.fillWidth: true
-                        text: importFolderPickerSelectedFolder && importFolderPickerSelectedFolder !== ""
-                            ? ("Selected: " + importFolderPickerSelectedFolder.toString().replace("file://", ""))
-                            : "Selected: (current folder)"
-                        color: ThemeManager.textSecondary
-                        font.pixelSize: ThemeManager.fontSizeSmall
-                        elide: Text.ElideMiddle
-	                    }
-	                }
-
-	                Text {
-	                    Layout.fillWidth: true
-	                    visible: importFolderPickerStatus && importFolderPickerStatus.length > 0
-	                    text: importFolderPickerStatus
-	                    color: ThemeManager.danger
-	                    font.pixelSize: ThemeManager.fontSizeSmall
-	                    wrapMode: Text.Wrap
-	                }
-
-	                RowLayout {
-	                    Layout.fillWidth: true
-	                    spacing: ThemeManager.spacingSmall
-
-                    Item { Layout.fillWidth: true }
-
-                    Button {
-                        text: "Cancel"
-                        onClicked: importFolderPickerDialog.close()
-                    }
-
-                    Button {
-                        text: "Choose"
-                        enabled: importFolderPickerCurrentFolder && importFolderPickerCurrentFolder !== ""
-                        onClicked: {
-                            const chosen = (importFolderPickerSelectedFolder && importFolderPickerSelectedFolder !== "")
-                                ? importFolderPickerSelectedFolder
-                                : importFolderPickerCurrentFolder
-                            importSourceFolder = chosen
-                            if (DataStore) DataStore.setExportLastFolder(chosen)
-                            importFolderPickerDialog.close()
-                        }
-                    }
-                }
-            }
-        }
-    }
-    
-    // About Settings
-    component AboutSettings: SettingsPage {
-        SettingsSection {
-            title: "About Zinc"
-            
-            Text {
-                text: "Zinc Notes"
-                color: ThemeManager.text
-                font.pixelSize: ThemeManager.fontSizeXLarge
-                font.weight: Font.Bold
-            }
-            
-            Text {
-                text: "Version 0.3.0"
-                color: ThemeManager.textSecondary
-                font.pixelSize: ThemeManager.fontSizeNormal
-            }
-            
-            Text {
-                Layout.fillWidth: true
-                text: "A local-first, peer-to-peer note-taking app with real-time collaboration."
-                color: ThemeManager.textMuted
-                font.pixelSize: ThemeManager.fontSizeSmall
-                wrapMode: Text.Wrap
             }
         }
     }

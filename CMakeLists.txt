@@ -384,6 +384,18 @@ set(ZINC_QML_FILES
 	    qml/components/SearchDialog.qml
     qml/dialogs/PairingDialog.qml
     qml/dialogs/SettingsDialog.qml
+    qml/dialogs/settings/SettingsPage.qml
+    qml/dialogs/settings/SettingsSection.qml
+    qml/dialogs/settings/SettingsRow.qml
+    qml/dialogs/settings/SettingsButton.qml
+    qml/dialogs/settings/SettingsComboBox.qml
+    qml/dialogs/settings/SettingsSwitch.qml
+    qml/dialogs/settings/GeneralSettingsPage.qml
+    qml/dialogs/settings/EditorSettingsPage.qml
+    qml/dialogs/settings/SyncSettingsPage.qml
+    qml/dialogs/settings/DevicesSettingsPage.qml
+    qml/dialogs/settings/DataSettingsPage.qml
+    qml/dialogs/settings/AboutSettingsPage.qml
     qml/dialogs/PagePickerDialog.qml
     qml/dialogs/ShortcutsDialog.qml
     qml/dialogs/SyncConflictDialog.qml

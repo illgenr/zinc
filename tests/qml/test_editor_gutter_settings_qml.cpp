@@ -16,16 +16,18 @@ QString readAllText(const QString& path) {
 } // namespace
 
 TEST_CASE("QML: SettingsDialog exposes editor gutter setting", "[qml][settings][editor]") {
-    const auto contents = readAllText(QStringLiteral(":/qt/qml/zinc/qml/dialogs/SettingsDialog.qml"));
-    REQUIRE(!contents.isEmpty());
+    const auto dialogContents = readAllText(QStringLiteral(":/qt/qml/zinc/qml/dialogs/SettingsDialog.qml"));
+    const auto editorContents = readAllText(QStringLiteral(":/qt/qml/zinc/qml/dialogs/settings/EditorSettingsPage.qml"));
+    REQUIRE(!dialogContents.isEmpty());
+    REQUIRE(!editorContents.isEmpty());
 
-    REQUIRE(contents.contains(QStringLiteral("Editor")));
-    REQUIRE(contents.contains(QStringLiteral("Gutter position")));
-    REQUIRE(contents.contains(QStringLiteral("gutterPositionPx")));
+    REQUIRE(dialogContents.contains(QStringLiteral("Editor")));
+    REQUIRE(editorContents.contains(QStringLiteral("Gutter position")));
+    REQUIRE(editorContents.contains(QStringLiteral("gutterPositionPx")));
 }
 
 TEST_CASE("QML: SettingsDialog exposes jump-to-new-page setting", "[qml][settings][general]") {
-    const auto contents = readAllText(QStringLiteral(":/qt/qml/zinc/qml/dialogs/SettingsDialog.qml"));
+    const auto contents = readAllText(QStringLiteral(":/qt/qml/zinc/qml/dialogs/settings/GeneralSettingsPage.qml"));
     REQUIRE(!contents.isEmpty());
 
     REQUIRE(contents.contains(QStringLiteral("Jump to new page on creation")));
