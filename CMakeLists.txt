@@ -608,6 +608,7 @@ if(ZINC_BUILD_TESTS)
                     tests/qml/test_settings_dialog_device_name_qml.cpp
 			        tests/qml/test_attachments_disk_storage.cpp
 			        tests/qml/test_block_editor_cursor_visibility_qml.cpp
+                    tests/qml/test_block_editor_remote_refresh_focus_qml.cpp
 			        tests/qml/test_block_editor_enter_logic_qml.cpp
 			        tests/qml/test_block_editor_backspace_delete_empty_block_qml.cpp
 			        tests/qml/test_paragraph_block_destroy_qml.cpp

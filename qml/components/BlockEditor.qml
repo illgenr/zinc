@@ -798,22 +798,27 @@ FocusScope {
         saveTimer.restart()
     }
 
-    function mergeBlocksFromStorage() {
+    function mergeBlocksFromStorage(options) {
         if (!pageId || pageId === "") return
         try {
             const markdown = DataStore ? DataStore.getPageContentMarkdown(pageId) : ""
             if (!markdown) return
-            const restoreFocus = activeFocus && currentBlockIndex >= 0
+            const preserveFocus = !(options && options.preserveFocus === false)
+            const mobileImeVisible = (Qt.platform.os !== "android") || Qt.inputMethod.visible
+            const restoreFocus = preserveFocus && currentBlockIndex >= 0 && mobileImeVisible
             const restoreIndex = currentBlockIndex
             let restorePos = -1
             if (restoreFocus) {
                 const item = blockRepeater.itemAt(restoreIndex)
-                if (item && item.textControl && ("cursorPosition" in item.textControl)) {
+                if (item && item.textControl && item.textControl.activeFocus && ("cursorPosition" in item.textControl)) {
                     restorePos = item.textControl.cursorPosition
+                } else {
+                    // Only refocus when a text control was already focused; otherwise avoid opening the IME.
+                    restorePos = -1
                 }
             }
             loadFromMarkdown(markdown)
-            if (restoreFocus) {
+            if (restoreFocus && restorePos >= 0) {
                 const idx = Math.max(0, Math.min(restoreIndex, blockModel.count - 1))
                 const pos = restorePos
                 Qt.callLater(() => root.focusBlockAt(idx, pos))
@@ -826,7 +831,7 @@ FocusScope {
     onActiveFocusChanged: {
         if (!activeFocus && pendingRemoteRefresh) {
             pendingRemoteRefresh = false
-            mergeBlocksFromStorage()
+            mergeBlocksFromStorage({ preserveFocus: false })
         }
     }
 
