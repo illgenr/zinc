@@ -820,13 +820,49 @@ ApplicationWindow {
     property var blockedReconnectUntilByDeviceId: ({})
     property var repairPromptedUntilByDeviceId: ({})
 
+    function hasPendingConflict(pageId) {
+        if (!pageId || pageId === "") return false
+        if (syncConflictDialog.visible &&
+            syncConflictDialog.conflict &&
+            syncConflictDialog.conflict.pageId === pageId) {
+            return true
+        }
+        for (var i = 0; i < pendingSyncConflicts.length; i++) {
+            var c = pendingSyncConflicts[i]
+            if (c && c.pageId === pageId) return true
+        }
+        return false
+    }
+
+    function enqueueOutstandingConflicts() {
+        if (!DataStore || !DataStore.getPageConflicts) return
+        var conflicts = DataStore.getPageConflicts()
+        if (!conflicts || conflicts.length === 0) return
+        if (root.debugSyncUi) console.log("SYNCUI: enqueueOutstandingConflicts count=", conflicts.length)
+        for (var i = 0; i < conflicts.length; i++) {
+            var conflict = conflicts[i]
+            if (!conflict || !conflict.pageId) continue
+            if (hasPendingConflict(conflict.pageId)) continue
+            if (root.debugSyncUi) console.log("SYNCUI: enqueue conflict pageId=", conflict.pageId)
+            root.showSyncConflict(conflict)
+        }
+    }
+
     function showSyncConflict(conflict) {
         if (!conflict || !conflict.pageId) return
+        var resolvedConflict = conflict
+        if (DataStore && DataStore.getPageConflict) {
+            var fullConflict = DataStore.getPageConflict(conflict.pageId)
+            if (fullConflict && fullConflict.pageId) {
+                resolvedConflict = fullConflict
+            }
+        }
+        if (root.debugSyncUi) console.log("SYNCUI: showSyncConflict pageId=", conflict.pageId, "dialogVisible=", syncConflictDialog.visible)
         if (syncConflictDialog.visible) {
-            pendingSyncConflicts.push(conflict)
+            pendingSyncConflicts.push(resolvedConflict)
             return
         }
-        syncConflictDialog.conflict = conflict
+        syncConflictDialog.conflict = resolvedConflict
         syncConflictDialog.open()
     }
 
@@ -1252,6 +1288,7 @@ ApplicationWindow {
         if (isMobile) {
             Qt.callLater(root.applyStartupPageMobile)
         }
+        Qt.callLater(root.enqueueOutstandingConflicts)
     }
 
     Timer {
@@ -1405,12 +1442,14 @@ ApplicationWindow {
         }
 
         function onPageConflictsChanged() {
-            if (!syncConflictDialog.visible) return
             if (!DataStore || !DataStore.hasPageConflict) return
-            if (!syncConflictDialog.pageId || syncConflictDialog.pageId === "") return
-            if (!DataStore.hasPageConflict(syncConflictDialog.pageId)) {
+            if (syncConflictDialog.visible &&
+                syncConflictDialog.pageId &&
+                syncConflictDialog.pageId !== "" &&
+                !DataStore.hasPageConflict(syncConflictDialog.pageId)) {
                 syncConflictDialog.close()
             }
+            root.enqueueOutstandingConflicts()
         }
     }
 

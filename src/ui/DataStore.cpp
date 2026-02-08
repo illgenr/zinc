@@ -977,6 +977,28 @@ QString normalize_timestamp(const QVariant& value) {
     return dt.toUTC().toString("yyyy-MM-dd HH:mm:ss.zzz");
 }
 
+bool sync_conflict_debug_enabled() {
+    return qEnvironmentVariableIsSet("ZINC_DEBUG_SYNC") ||
+           qEnvironmentVariableIsSet("ZINC_DEBUG_SYNC_CONFLICTS");
+}
+
+QString monotonic_conflict_resolution_timestamp(const QVariantMap& conflict) {
+    auto candidate = parse_timestamp(now_timestamp_utc());
+    if (!candidate.isValid()) {
+        candidate = QDateTime::currentDateTimeUtc();
+    }
+
+    const auto localUpdated = parse_timestamp(conflict.value(QStringLiteral("localUpdatedAt")).toString());
+    const auto remoteUpdated = parse_timestamp(conflict.value(QStringLiteral("remoteUpdatedAt")).toString());
+    if (localUpdated.isValid() && localUpdated >= candidate) {
+        candidate = localUpdated.addMSecs(1);
+    }
+    if (remoteUpdated.isValid() && remoteUpdated >= candidate) {
+        candidate = remoteUpdated.addMSecs(1);
+    }
+    return candidate.toUTC().toString("yyyy-MM-dd HH:mm:ss.zzz");
+}
+
 } // namespace
 
 DataStore::DataStore(QObject* parent)
@@ -1556,7 +1578,7 @@ void DataStore::resolvePageConflict(const QString& pageId, const QString& resolu
     const auto conflict = getPageConflict(pageId);
     if (conflict.isEmpty()) return;
 
-    const auto resolvedUpdatedAt = now_timestamp_utc();
+    const auto resolvedUpdatedAt = monotonic_conflict_resolution_timestamp(conflict);
 
     const auto localTitle = conflict.value(QStringLiteral("localTitle")).toString();
     const auto remoteTitle = conflict.value(QStringLiteral("remoteTitle")).toString();
@@ -1577,6 +1599,18 @@ void DataStore::resolvePageConflict(const QString& pageId, const QString& resolu
         // Default: keep local
         resolvedTitle = normalize_title(localTitle);
         resolvedMd = localMd;
+    }
+
+    if (sync_conflict_debug_enabled()) {
+        qInfo() << "DataStore: resolvePageConflict"
+                << "pageId=" << pageId
+                << "resolution=" << resolution
+                << "localUpdatedAt=" << conflict.value(QStringLiteral("localUpdatedAt")).toString()
+                << "remoteUpdatedAt=" << conflict.value(QStringLiteral("remoteUpdatedAt")).toString()
+                << "resolvedUpdatedAt=" << resolvedUpdatedAt
+                << "localBytes=" << localMd.toUtf8().size()
+                << "remoteBytes=" << remoteMd.toUtf8().size()
+                << "resolvedBytes=" << resolvedMd.toUtf8().size();
     }
 
     m_db.transaction();
@@ -2513,6 +2547,12 @@ void DataStore::applyPageUpdates(const QVariantList& pages) {
         const QString remoteTitle = normalize_title(page.value("title"));
         const bool hasRemoteContent = page.contains(QStringLiteral("contentMarkdown"));
         const QString remoteMd = hasRemoteContent ? page.value("contentMarkdown").toString() : QString();
+        if (sync_conflict_debug_enabled() && hasRemoteContent) {
+            qInfo() << "DataStore: applyPageUpdates incoming page"
+                    << "pageId=" << pageId
+                    << "remoteUpdatedAt=" << remoteUpdated
+                    << "remoteBytes=" << remoteMd.toUtf8().size();
+        }
 
         tombstoneSelect.bindValue(0, pageId);
         QString deletedAt;
@@ -2549,6 +2589,11 @@ void DataStore::applyPageUpdates(const QVariantList& pages) {
             baseMd = selectQuery.value(5).toString();
         }
         selectQuery.finish();
+
+        QDateTime localTime;
+        if (!localUpdated.isEmpty()) {
+            localTime = parse_timestamp(localUpdated);
+        }
 
         // If we already have a conflict for this page, check whether this incoming update is a
         // "resolved" version (newer than both sides at detection time). If so, clear the conflict
@@ -2587,10 +2632,32 @@ void DataStore::applyPageUpdates(const QVariantList& pages) {
             conflictDelete.exec();
             conflictDelete.finish();
             resolvedConflictPageIds.insert(pageId);
+            if (sync_conflict_debug_enabled()) {
+                qInfo() << "DataStore: conflict auto-cleared from incoming newer update"
+                        << "pageId=" << pageId
+                        << "conflictLocalUpdatedAt=" << conflictLocalUpdated
+                        << "conflictRemoteUpdatedAt=" << conflictRemoteUpdated
+                        << "incomingUpdatedAt=" << remoteUpdated
+                        << "localBytes=" << localMd.toUtf8().size()
+                        << "incomingBytes=" << remoteMd.toUtf8().size();
+            }
             return true;
         };
 
         const bool resolvedExistingConflict = tryResolveExistingConflict();
+
+        if (!resolvedExistingConflict &&
+            localTime.isValid() && remoteTime.isValid() && localTime > remoteTime) {
+            if (sync_conflict_debug_enabled()) {
+                qInfo() << "DataStore: skip incoming page (local newer than remote)"
+                        << "pageId=" << pageId
+                        << "localUpdatedAt=" << localUpdated
+                        << "remoteUpdatedAt=" << remoteUpdated
+                        << "localBytes=" << localMd.toUtf8().size()
+                        << "remoteBytes=" << (hasRemoteContent ? remoteMd.toUtf8().size() : -1);
+            }
+            continue;
+        }
 
         const auto maybeStoreConflict = [&]() -> bool {
             if (resolvedExistingConflict) return false;
@@ -2598,13 +2665,23 @@ void DataStore::applyPageUpdates(const QVariantList& pages) {
             if (baseUpdated.isEmpty()) return false;
             if (!remoteTime.isValid()) return false;
 
-            const auto localTime = parse_timestamp(localUpdated);
             const auto baseTime = parse_timestamp(baseUpdated);
             if (!localTime.isValid() || !baseTime.isValid()) return false;
 
             const bool localChangedSinceBase = localTime > baseTime;
             const bool remoteChangedSinceBase = remoteTime > baseTime;
-            if (!localChangedSinceBase || !remoteChangedSinceBase) return false;
+            if (!localChangedSinceBase || !remoteChangedSinceBase) {
+                if (sync_conflict_debug_enabled() && hasRemoteContent && localChangedSinceBase != remoteChangedSinceBase) {
+                    qInfo() << "DataStore: conflict skipped (one side unchanged since base)"
+                            << "pageId=" << pageId
+                            << "localChangedSinceBase=" << localChangedSinceBase
+                            << "remoteChangedSinceBase=" << remoteChangedSinceBase
+                            << "baseUpdatedAt=" << baseUpdated
+                            << "localUpdatedAt=" << localUpdated
+                            << "remoteUpdatedAt=" << remoteUpdated;
+                }
+                return false;
+            }
 
             if (!hasRemoteContent) return false;
 
@@ -2612,6 +2689,13 @@ void DataStore::applyPageUpdates(const QVariantList& pages) {
             const bool sameContent = localMd == remoteMd;
             if (sameTitle && sameContent) {
                 // Both changed timestamps but converged to same content; treat as synced.
+                if (sync_conflict_debug_enabled()) {
+                    qInfo() << "DataStore: conflict skipped (content converged)"
+                            << "pageId=" << pageId
+                            << "baseUpdatedAt=" << baseUpdated
+                            << "localUpdatedAt=" << localUpdated
+                            << "remoteUpdatedAt=" << remoteUpdated;
+                }
                 return false;
             }
 
@@ -2631,7 +2715,13 @@ void DataStore::applyPageUpdates(const QVariantList& pages) {
         };
 
         if (maybeStoreConflict()) {
-            qInfo() << "DataStore: conflict detected pageId=" << pageId;
+            qInfo() << "DataStore: conflict detected"
+                    << "pageId=" << pageId
+                    << "baseUpdatedAt=" << baseUpdated
+                    << "localUpdatedAt=" << localUpdated
+                    << "remoteUpdatedAt=" << remoteUpdated
+                    << "localBytes=" << localMd.toUtf8().size()
+                    << "remoteBytes=" << remoteMd.toUtf8().size();
             conflictPageIds.insert(pageId);
             continue;
         }
@@ -2644,14 +2734,6 @@ void DataStore::applyPageUpdates(const QVariantList& pages) {
                 markSynced.bindValue(1, pageId);
                 markSynced.exec();
                 markSynced.finish();
-                continue;
-            }
-        }
-
-        if (!localUpdated.isEmpty()) {
-            QDateTime localTime = parse_timestamp(localUpdated);
-            if (localTime.isValid() && remoteTime.isValid() && localTime > remoteTime) {
-                qDebug() << "DataStore: skip page" << pageId << "local>remote";
                 continue;
             }
         }

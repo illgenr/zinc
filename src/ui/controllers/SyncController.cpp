@@ -38,6 +38,37 @@ SyncController::SyncController(QObject* parent)
     : QObject(parent)
     , sync_manager_(std::make_unique<network::SyncManager>(this))
 {
+    const auto upsertDiscoveredPeer =
+        [this](const QString& deviceId,
+               const QString& deviceName,
+               const QString& workspaceId,
+               const QString& host,
+               int port) {
+            if (deviceId.isEmpty()) return;
+
+            QVariantMap device;
+            device["deviceId"] = deviceId;
+            device["deviceName"] = deviceName;
+            device["workspaceId"] = workspaceId;
+            device["host"] = host;
+            device["port"] = port;
+            device["lastSeen"] = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
+
+            bool updated = false;
+            for (auto i = 0; i < discovered_peers_.size(); ++i) {
+                const auto existing = discovered_peers_[i].toMap();
+                if (existing.value("deviceId").toString() == deviceId) {
+                    discovered_peers_[i] = device;
+                    updated = true;
+                    break;
+                }
+            }
+            if (!updated) {
+                discovered_peers_.append(device);
+            }
+            emit discoveredPeersChanged();
+        };
+
     connect(sync_manager_.get(), &network::SyncManager::syncingChanged,
             this, &SyncController::syncingChanged);
     connect(sync_manager_.get(), &network::SyncManager::peersChanged,
@@ -61,7 +92,7 @@ SyncController::SyncController(QObject* parent)
                 }
             });
     connect(sync_manager_.get(), &network::SyncManager::peerDiscovered,
-            this, [this](const network::PeerInfo& peer) {
+            this, [this, upsertDiscoveredPeer](const network::PeerInfo& peer) {
                 emit peerDiscovered(
                     QString::fromStdString(peer.device_id.to_string()),
                     peer.device_name,
@@ -69,34 +100,24 @@ SyncController::SyncController(QObject* parent)
                     peer.host.toString(),
                     static_cast<int>(peer.port));
 
-                QVariantMap device;
-                device["deviceId"] = QString::fromStdString(peer.device_id.to_string());
-                device["deviceName"] = peer.device_name;
-                device["workspaceId"] = QString::fromStdString(peer.workspace_id.to_string());
-                device["host"] = peer.host.toString();
-                device["port"] = static_cast<int>(peer.port);
-                device["lastSeen"] = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
-
-                const auto deviceId = device.value("deviceId").toString();
-                bool updated = false;
-                for (auto i = 0; i < discovered_peers_.size(); ++i) {
-                    const auto existing = discovered_peers_[i].toMap();
-                    if (existing.value("deviceId").toString() == deviceId) {
-                        discovered_peers_[i] = device;
-                        updated = true;
-                        break;
-                    }
-                }
-                if (!updated) {
-                    discovered_peers_.append(device);
-                }
-                emit discoveredPeersChanged();
+                upsertDiscoveredPeer(
+                    QString::fromStdString(peer.device_id.to_string()),
+                    peer.device_name,
+                    QString::fromStdString(peer.workspace_id.to_string()),
+                    peer.host.toString(),
+                    static_cast<int>(peer.port));
             });
     connect(sync_manager_.get(), &network::SyncManager::peerHelloReceived,
-            this, [this](const Uuid& device_id,
+            this, [this, upsertDiscoveredPeer](const Uuid& device_id,
                          const QString& device_name,
                          const QString& host,
                          uint16_t port) {
+                upsertDiscoveredPeer(
+                    QString::fromStdString(device_id.to_string()),
+                    device_name,
+                    workspace_id_,
+                    host,
+                    static_cast<int>(port));
                 // If we're in the middle of a "pair to host" attempt and the remote isn't yet in our workspace,
                 // send an explicit pairing request.
                 if (pending_pair_to_host_.has_value() && !workspace_id_.isEmpty()) {
@@ -147,10 +168,16 @@ SyncController::SyncController(QObject* parent)
                     static_cast<int>(port));
             });
     connect(sync_manager_.get(), &network::SyncManager::peerApprovalRequired,
-            this, [this](const Uuid& device_id,
+            this, [this, upsertDiscoveredPeer](const Uuid& device_id,
                          const QString& device_name,
                          const QString& host,
                          uint16_t port) {
+                upsertDiscoveredPeer(
+                    QString::fromStdString(device_id.to_string()),
+                    device_name,
+                    workspace_id_,
+                    host,
+                    static_cast<int>(port));
                 emit peerApprovalRequired(
                     QString::fromStdString(device_id.to_string()),
                     device_name,

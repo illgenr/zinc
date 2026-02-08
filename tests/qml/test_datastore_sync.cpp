@@ -285,6 +285,45 @@ TEST_CASE("DataStore: resolvePageConflict merge applies merged markdown", "[qml]
     REQUIRE_FALSE(merged.contains(QStringLiteral("<<<<<<<")));
 }
 
+TEST_CASE("DataStore: resolvePageConflict uses timestamp newer than both conflict sides", "[qml][datastore]") {
+    zinc::ui::DataStore store;
+    REQUIRE(store.initialize());
+    REQUIRE(store.resetDatabase());
+
+    const auto baseTs = QStringLiteral("2026-01-11 00:00:00.000");
+    QVariantList base;
+    base.append(makePage("p_monotonic", QStringLiteral("Page"), baseTs, QStringLiteral("Base")));
+    store.applyPageUpdates(base);
+
+    store.savePageContentMarkdown(QStringLiteral("p_monotonic"), QStringLiteral("Local edit"));
+    const auto localUpdated = updatedAtForPage(store, QStringLiteral("p_monotonic"));
+    auto localTime = QDateTime::fromString(localUpdated, "yyyy-MM-dd HH:mm:ss.zzz");
+    if (!localTime.isValid()) {
+        localTime = QDateTime::fromString(localUpdated, "yyyy-MM-dd HH:mm:ss");
+    }
+    REQUIRE(localTime.isValid());
+
+    const auto remoteUpdated = localTime.addSecs(10).toUTC().toString("yyyy-MM-dd HH:mm:ss.zzz");
+    QVariantList incoming;
+    incoming.append(makePage("p_monotonic", QStringLiteral("Page"), remoteUpdated, QStringLiteral("Remote edit")));
+    store.applyPageUpdates(incoming);
+    REQUIRE(store.hasPageConflict(QStringLiteral("p_monotonic")));
+
+    store.resolvePageConflict(QStringLiteral("p_monotonic"), QStringLiteral("remote"));
+    REQUIRE_FALSE(store.hasPageConflict(QStringLiteral("p_monotonic")));
+
+    const auto resolvedUpdated = updatedAtForPage(store, QStringLiteral("p_monotonic"));
+    auto resolvedTime = QDateTime::fromString(resolvedUpdated, "yyyy-MM-dd HH:mm:ss.zzz");
+    if (!resolvedTime.isValid()) {
+        resolvedTime = QDateTime::fromString(resolvedUpdated, "yyyy-MM-dd HH:mm:ss");
+    }
+    REQUIRE(resolvedTime.isValid());
+
+    const auto remoteTime = QDateTime::fromString(remoteUpdated, "yyyy-MM-dd HH:mm:ss.zzz");
+    REQUIRE(remoteTime.isValid());
+    REQUIRE(resolvedTime > remoteTime);
+}
+
 TEST_CASE("DataStore: incoming resolved page clears existing conflict", "[qml][datastore]") {
     zinc::ui::DataStore store;
     REQUIRE(store.initialize());
