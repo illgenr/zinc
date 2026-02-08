@@ -10,6 +10,8 @@ Item {
 
     // When a page is created (new page / new child page), jump to it or stay on the current page.
     property bool jumpToNewPageOnCreate: true
+    // Future settings toggle: page-tree keyboard typeahead title matching mode.
+    property bool pageTreeTypeaheadCaseSensitive: false
 
     Loader {
         id: settingsLoader
@@ -17,11 +19,13 @@ Item {
         sourceComponent: Settings {
             category: "General"
             property bool jumpToNewPageOnCreate: true
+            property bool pageTreeTypeaheadCaseSensitive: false
         }
 
         onLoaded: {
             if (item) {
                 root.jumpToNewPageOnCreate = item.jumpToNewPageOnCreate
+                root.pageTreeTypeaheadCaseSensitive = item.pageTreeTypeaheadCaseSensitive
             }
         }
     }
@@ -35,6 +39,12 @@ Item {
                 root.jumpToNewPageOnCreate = settingsLoader.item.jumpToNewPageOnCreate
             }
         }
+
+        function onPageTreeTypeaheadCaseSensitiveChanged() {
+            if (root.pageTreeTypeaheadCaseSensitive !== settingsLoader.item.pageTreeTypeaheadCaseSensitive) {
+                root.pageTreeTypeaheadCaseSensitive = settingsLoader.item.pageTreeTypeaheadCaseSensitive
+            }
+        }
     }
 
     Connections {
@@ -46,6 +56,12 @@ Item {
                 settingsLoader.item.jumpToNewPageOnCreate = root.jumpToNewPageOnCreate
             }
         }
+
+        function onPageTreeTypeaheadCaseSensitiveChanged() {
+            if (settingsLoader.item
+                    && settingsLoader.item.pageTreeTypeaheadCaseSensitive !== root.pageTreeTypeaheadCaseSensitive) {
+                settingsLoader.item.pageTreeTypeaheadCaseSensitive = root.pageTreeTypeaheadCaseSensitive
+            }
+        }
     }
 }
-

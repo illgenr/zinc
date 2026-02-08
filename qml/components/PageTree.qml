@@ -20,6 +20,8 @@ Item {
     property string selectedPageId: ""
     property string sortMode: "alphabetical" // "alphabetical" | "updatedAt" | "createdAt"
     property bool enableContextMenu: true
+    property bool typeaheadCaseSensitive: GeneralPreferences.pageTreeTypeaheadCaseSensitive
+    property int typeaheadTimeoutMs: 700
     
     signal pageSelected(string pageId, string title)
     signal pagesChanged()
@@ -41,6 +43,8 @@ Item {
 
     property string _pendingDeleteNotebookId: ""
     property string _pendingDeleteNotebookTitle: ""
+    property string _typeaheadBuffer: ""
+    property string _typeaheadLastSingleChar: ""
 
     onSortModeChanged: {
         if (!root._componentReady) return
@@ -164,6 +168,13 @@ Item {
         }
     }
 
+    Timer {
+        id: typeaheadTimer
+        interval: root.typeaheadTimeoutMs
+        repeat: false
+        onTriggered: root._typeaheadBuffer = ""
+    }
+
     function movePageTo(parentKind, targetPageId, targetNotebookId, draggedPageId) {
         if (!DataStore) return
         if (!draggedPageId || draggedPageId === "") return
@@ -276,6 +287,34 @@ Item {
         DataStore.saveAllPages(updated)
     }
 
+    function importDroppedFiles(fileUrls, targetKind, targetPageId, targetNotebookId) {
+        if (!DataStore || !DataStore.importPagesFromFiles) return
+        if (!fileUrls || fileUrls.length === 0) return
+
+        let parentId = ""
+        let notebookId = ""
+        if (targetKind === "page") {
+            parentId = targetPageId || ""
+            notebookId = targetNotebookId || ""
+        } else if (targetKind === "notebook") {
+            notebookId = targetNotebookId || ""
+        }
+
+        const imported = DataStore.importPagesFromFiles(fileUrls, parentId, notebookId)
+        if (!imported || imported.length === 0) return
+
+        loadPagesFromStorage()
+        pagesChanged()
+
+        const firstImported = imported[0] || ""
+        if (firstImported && firstImported !== "") {
+            root.selectedPageId = firstImported
+            const row = DataStore.getPage(firstImported)
+            const title = row && row.title ? row.title : "Untitled"
+            root.pageSelected(firstImported, title)
+        }
+    }
+
     function indexOfPageId(pageId) {
         if (!pageId || pageId === "") return -1
         for (let i = 0; i < pageModel.count; i++) {
@@ -314,6 +353,65 @@ Item {
             if (rowVisible(i)) return i
         }
         return -1
+    }
+
+    function currentKeyboardIndex() {
+        if (pageList.currentIndex >= 0) return pageList.currentIndex
+        return indexOfPageId(root.selectedPageId)
+    }
+
+    function normalizeTypeaheadText(text) {
+        const value = (text || "") + ""
+        return root.typeaheadCaseSensitive ? value : value.toLowerCase()
+    }
+
+    function rowMatchesPrefix(rowIndex, query) {
+        if (rowIndex < 0 || rowIndex >= pageModel.count) return false
+        if (!rowVisible(rowIndex)) return false
+        const row = pageModel.get(rowIndex)
+        if (!row || row.kind !== "page") return false
+        const title = normalizeTypeaheadText(row.title || "")
+        return query !== "" && title.indexOf(query) === 0
+    }
+
+    function findTypeaheadMatch(query, startExclusiveIndex) {
+        if (!query || query === "" || pageModel.count <= 0) return -1
+        const total = pageModel.count
+        const start = (startExclusiveIndex >= -1 && startExclusiveIndex < total) ? startExclusiveIndex : -1
+        for (let offset = 1; offset <= total; offset++) {
+            const idx = (start + offset) % total
+            if (rowMatchesPrefix(idx, query)) return idx
+        }
+        return -1
+    }
+
+    function handleTypeahead(event) {
+        if (root._inlineMode !== "") return false
+        const mod = event.modifiers
+        if (mod & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier)) return false
+        const text = (event.text || "")
+        if (text.length !== 1 || text.trim() === "") return false
+
+        const normalizedChar = normalizeTypeaheadText(text)
+        const hasActiveSequence = typeaheadTimer.running && root._typeaheadBuffer !== ""
+        const query = hasActiveSequence ? (root._typeaheadBuffer + normalizedChar) : normalizedChar
+        const cycleSingleChar = !hasActiveSequence
+            && root._typeaheadLastSingleChar !== ""
+            && root._typeaheadLastSingleChar === normalizedChar
+        const current = currentKeyboardIndex()
+        const start = cycleSingleChar ? current : (current - 1)
+        const matchIndex = findTypeaheadMatch(query, start)
+
+        if (matchIndex >= 0) {
+            selectIndex(matchIndex)
+        }
+
+        root._typeaheadBuffer = query
+        if (!hasActiveSequence && query.length === 1) {
+            root._typeaheadLastSingleChar = query
+        }
+        typeaheadTimer.restart()
+        return true
     }
 
     function focusTree() {
@@ -1090,9 +1188,14 @@ Item {
 
             DropArea {
                 anchors.fill: parent
-                keys: ["application/x-zinc-page"]
                 onDropped: function(drop) {
-                    if (!drop || !drop.mimeData) return
+                    if (!drop) return
+                    if (drop.hasUrls && drop.urls && drop.urls.length > 0) {
+                        root.importDroppedFiles(drop.urls, "root", "", "")
+                        drop.accepted = true
+                        return
+                    }
+                    if (!drop.mimeData) return
                     const idx = pageList.indexAt(drop.x, drop.y)
                     if (idx >= 0) return
                     const draggedId = drop.mimeData.getDataAsString("application/x-zinc-page")
@@ -1164,6 +1267,10 @@ Item {
                     }
                     return
                 }
+                if (root.handleTypeahead(event)) {
+                    event.accepted = true
+                    return
+                }
             }
 
             delegate: Item {
@@ -1227,9 +1334,14 @@ Item {
 
                     DropArea {
                         anchors.fill: parent
-                        keys: ["application/x-zinc-page"]
                         onDropped: function(drop) {
-                            if (!drop || !drop.mimeData) return
+                            if (!drop) return
+                            if (drop.hasUrls && drop.urls && drop.urls.length > 0) {
+                                root.importDroppedFiles(drop.urls, model.kind || "page", model.pageId || "", model.notebookId || "")
+                                drop.accepted = true
+                                return
+                            }
+                            if (!drop.mimeData) return
                             const draggedId = drop.mimeData.getDataAsString("application/x-zinc-page")
                             if (!draggedId || draggedId === "") return
                             root.movePageTo(model.kind || "page", model.pageId || "", model.notebookId || "", draggedId)

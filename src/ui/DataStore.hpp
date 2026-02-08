@@ -189,6 +189,14 @@ public:
     Q_INVOKABLE bool importNotebooks(const QUrl& sourceFolder,
                                      const QString& format,
                                      bool replaceExisting);
+    // Import plain files dropped from the OS into pages.
+    // - fileUrls: list of local file URLs (supports .txt, .md, .markdown, .html, .htm)
+    // - targetParentPageId: when set, imported pages become children of this page
+    // - targetNotebookId: used when targetParentPageId is empty; ignored when parent is provided
+    // Returns a list of imported page ids.
+    Q_INVOKABLE QVariantList importPagesFromFiles(const QVariantList& fileUrls,
+                                                  const QString& targetParentPageId,
+                                                  const QString& targetNotebookId);
 
     // Filesystem helpers (used by custom folder pickers)
     // - returns the created folder URL, or an invalid URL on error

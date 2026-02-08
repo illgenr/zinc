@@ -602,6 +602,7 @@ if(ZINC_BUILD_TESTS)
 			        tests/qml/test_datastore_default_pages_content.cpp
 			        tests/qml/test_datastore_export.cpp
 			        tests/qml/test_datastore_import.cpp
+                    tests/qml/test_datastore_file_drop_import.cpp
 			        tests/qml/test_export_folder_settings.cpp
                     tests/qml/test_settings_dialog_path_pickings_qml.cpp
                     tests/qml/test_settings_dialog_endpoint_edit_qml.cpp

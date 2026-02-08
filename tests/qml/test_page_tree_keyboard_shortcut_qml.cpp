@@ -532,3 +532,182 @@ TEST_CASE("QML: Rename notebook updates DataStore and page tree", "[qml][pagetre
     REQUIRE(waitUntil([&]() { return root->property("renameStarted").toBool(); }));
     REQUIRE(waitUntil([&]() { return root->property("renamedOk").toBool(); }));
 }
+
+TEST_CASE("QML: PageTree typeahead keeps continuous repeated chars as a sequence", "[qml][pagetree][shortcuts][typeahead]") {
+    registerTypesOnce();
+
+    QQmlEngine engine;
+    QQmlComponent component(&engine);
+    component.setData(
+        "import QtQuick\n"
+        "import QtQuick.Controls\n"
+        "import zinc\n"
+        "ApplicationWindow {\n"
+        "    width: 800\n"
+        "    height: 600\n"
+        "    visible: true\n"
+        "    Shortcut {\n"
+        "        context: Qt.ApplicationShortcut\n"
+        "        sequence: \"Ctrl+E\"\n"
+        "        onActivated: pageTree.focusTree()\n"
+        "    }\n"
+        "    PageTree {\n"
+        "        id: pageTree\n"
+        "        objectName: \"pageTree\"\n"
+        "        anchors.fill: parent\n"
+        "        Component.onCompleted: {\n"
+        "            if (DataStore) DataStore.resetDatabase()\n"
+        "            resetToDefaults()\n"
+        "            selectPage(\"1\")\n"
+        "        }\n"
+        "    }\n"
+        "}\n",
+        QUrl(QStringLiteral("qrc:/qt/qml/zinc/tests/PageTreeTypeaheadContinuousHost.qml")));
+
+    if (component.status() == QQmlComponent::Error) {
+        FAIL(formatErrors(component.errors()).toStdString());
+    }
+    REQUIRE(component.status() == QQmlComponent::Ready);
+
+    std::unique_ptr<QObject> root(component.create());
+    REQUIRE(root);
+    auto* window = requireWindow(root.get());
+    window->show();
+    QTest::qWait(50);
+
+    auto* pageTree = findOrNull(root.get(), "pageTree");
+    REQUIRE(pageTree);
+    REQUIRE(waitUntil([&]() { return pageTree->property("selectedPageId").toString() == QStringLiteral("1"); }));
+
+    QTest::keyPress(window, Qt::Key_E, Qt::ControlModifier);
+
+    // Uppercase input still matches lowercase page titles by default.
+    QTest::keyClick(window, Qt::Key_P, Qt::ShiftModifier);
+    REQUIRE(waitUntil([&]() { return pageTree->property("selectedPageId").toString() == QStringLiteral("4"); }));
+
+    // No timeout: query becomes "pp", which should not cycle to the next "p..." page.
+    QTest::keyClick(window, Qt::Key_P);
+    QTest::qWait(20);
+    REQUIRE(pageTree->property("selectedPageId").toString() == QStringLiteral("4"));
+}
+
+TEST_CASE("QML: PageTree typeahead cycles same-letter matches after timeout", "[qml][pagetree][shortcuts][typeahead]") {
+    registerTypesOnce();
+
+    QQmlEngine engine;
+    QQmlComponent component(&engine);
+    component.setData(
+        "import QtQuick\n"
+        "import QtQuick.Controls\n"
+        "import zinc\n"
+        "ApplicationWindow {\n"
+        "    width: 800\n"
+        "    height: 600\n"
+        "    visible: true\n"
+        "    Shortcut {\n"
+        "        context: Qt.ApplicationShortcut\n"
+        "        sequence: \"Ctrl+E\"\n"
+        "        onActivated: pageTree.focusTree()\n"
+        "    }\n"
+        "    PageTree {\n"
+        "        id: pageTree\n"
+        "        objectName: \"pageTree\"\n"
+        "        anchors.fill: parent\n"
+        "        Component.onCompleted: {\n"
+        "            if (DataStore) DataStore.resetDatabase()\n"
+        "            resetToDefaults()\n"
+        "            selectPage(\"1\")\n"
+        "        }\n"
+        "    }\n"
+        "}\n",
+        QUrl(QStringLiteral("qrc:/qt/qml/zinc/tests/PageTreeTypeaheadTimeoutHost.qml")));
+
+    if (component.status() == QQmlComponent::Error) {
+        FAIL(formatErrors(component.errors()).toStdString());
+    }
+    REQUIRE(component.status() == QQmlComponent::Ready);
+
+    std::unique_ptr<QObject> root(component.create());
+    REQUIRE(root);
+    auto* window = requireWindow(root.get());
+    window->show();
+    QTest::qWait(50);
+
+    auto* pageTree = findOrNull(root.get(), "pageTree");
+    REQUIRE(pageTree);
+    REQUIRE(waitUntil([&]() { return pageTree->property("selectedPageId").toString() == QStringLiteral("1"); }));
+
+    QTest::keyPress(window, Qt::Key_E, Qt::ControlModifier);
+
+    QTest::keyClick(window, Qt::Key_P);
+    REQUIRE(waitUntil([&]() { return pageTree->property("selectedPageId").toString() == QStringLiteral("4"); }));
+
+    // Wait beyond the typeahead timeout. A fresh "p" should cycle to the next match.
+    QTest::qWait(800);
+    QTest::keyClick(window, Qt::Key_P);
+    REQUIRE(waitUntil([&]() { return pageTree->property("selectedPageId").toString() == QStringLiteral("2"); }));
+}
+
+TEST_CASE("QML: PageTree typeahead honors case-sensitive matching when enabled", "[qml][pagetree][shortcuts][typeahead]") {
+    registerTypesOnce();
+
+    QQmlEngine engine;
+    QQmlComponent component(&engine);
+    component.setData(
+        "import QtQuick\n"
+        "import QtQuick.Controls\n"
+        "import zinc\n"
+        "ApplicationWindow {\n"
+        "    width: 800\n"
+        "    height: 600\n"
+        "    visible: true\n"
+        "    Shortcut {\n"
+        "        context: Qt.ApplicationShortcut\n"
+        "        sequence: \"Ctrl+E\"\n"
+        "        onActivated: pageTree.focusTree()\n"
+        "    }\n"
+        "    PageTree {\n"
+        "        id: pageTree\n"
+        "        objectName: \"pageTree\"\n"
+        "        anchors.fill: parent\n"
+        "        typeaheadCaseSensitive: true\n"
+        "        Component.onCompleted: {\n"
+        "            if (DataStore) DataStore.resetDatabase()\n"
+        "            resetToDefaults()\n"
+        "            selectPage(\"1\")\n"
+        "        }\n"
+        "    }\n"
+        "}\n",
+        QUrl(QStringLiteral("qrc:/qt/qml/zinc/tests/PageTreeTypeaheadCaseSensitiveHost.qml")));
+
+    if (component.status() == QQmlComponent::Error) {
+        FAIL(formatErrors(component.errors()).toStdString());
+    }
+    REQUIRE(component.status() == QQmlComponent::Ready);
+
+    std::unique_ptr<QObject> root(component.create());
+    REQUIRE(root);
+    auto* window = requireWindow(root.get());
+    window->show();
+    QTest::qWait(50);
+
+    auto* pageTree = findOrNull(root.get(), "pageTree");
+    REQUIRE(pageTree);
+    REQUIRE(waitUntil([&]() { return pageTree->property("selectedPageId").toString() == QStringLiteral("1"); }));
+
+    QVariant normalized;
+    REQUIRE(QMetaObject::invokeMethod(
+        pageTree,
+        "normalizeTypeaheadText",
+        Q_RETURN_ARG(QVariant, normalized),
+        Q_ARG(QVariant, QVariant(QStringLiteral("P")))));
+    REQUIRE(normalized.toString() == QStringLiteral("P"));
+
+    pageTree->setProperty("typeaheadCaseSensitive", false);
+    REQUIRE(QMetaObject::invokeMethod(
+        pageTree,
+        "normalizeTypeaheadText",
+        Q_RETURN_ARG(QVariant, normalized),
+        Q_ARG(QVariant, QVariant(QStringLiteral("P")))));
+    REQUIRE(normalized.toString() == QStringLiteral("p"));
+}

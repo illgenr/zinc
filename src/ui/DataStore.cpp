@@ -546,6 +546,54 @@ int normalize_imported_sort_order_from_filename(const QString& baseName) {
     return parse_legacy_page_file_stem(baseName).value(QStringLiteral("sortOrder")).toInt();
 }
 
+bool is_html_extension(const QString& ext) {
+    const auto e = ext.trimmed().toLower();
+    return e == QStringLiteral("html") || e == QStringLiteral("htm");
+}
+
+QString unique_imported_page_title(const QString& desired, const QSet<QString>& existingTitles) {
+    const auto normalized = desired.trimmed();
+    const auto base = normalized.isEmpty() ? QStringLiteral("Untitled") : normalized;
+    if (!existingTitles.contains(base)) return base;
+    for (int i = 2;; ++i) {
+        const auto candidate = QStringLiteral("%1 (%2)").arg(base).arg(i);
+        if (!existingTitles.contains(candidate)) return candidate;
+    }
+}
+
+bool is_probably_binary_payload(const QByteArray& bytes) {
+    if (bytes.isEmpty()) return false;
+
+    int suspiciousControls = 0;
+    for (char c : bytes) {
+        const unsigned char uc = static_cast<unsigned char>(c);
+        if (uc == 0) return true;
+        if ((uc < 0x20 && uc != '\n' && uc != '\r' && uc != '\t') || uc == 0x7F) {
+            ++suspiciousControls;
+        }
+    }
+
+    return suspiciousControls > (bytes.size() / 8);
+}
+
+QString render_ascii_from_bytes(const QByteArray& bytes) {
+    QString out;
+    out.reserve(bytes.size());
+    for (char c : bytes) {
+        const unsigned char uc = static_cast<unsigned char>(c);
+        if (uc == '\n' || uc == '\r' || uc == '\t') {
+            out += QLatin1Char(static_cast<char>(uc));
+            continue;
+        }
+        if (uc >= 0x20 && uc <= 0x7E) {
+            out += QLatin1Char(static_cast<char>(uc));
+            continue;
+        }
+        out += QLatin1Char('.');
+    }
+    return out;
+}
+
 QString mime_from_extension(const QString& ext) {
     const auto e = ext.trimmed().toLower();
     if (e == QStringLiteral("png")) return QStringLiteral("image/png");
@@ -4987,6 +5035,102 @@ bool DataStore::importNotebooks(const QUrl& sourceFolder,
     }
 
     return true;
+}
+
+QVariantList DataStore::importPagesFromFiles(const QVariantList& fileUrls,
+                                             const QString& targetParentPageId,
+                                             const QString& targetNotebookId) {
+    QVariantList importedPageIds;
+    if (!m_ready) {
+        emit error(QStringLiteral("Import failed: database not initialized"));
+        return importedPageIds;
+    }
+
+    QString resolvedParentId = normalize_parent_id(targetParentPageId);
+    QString resolvedNotebookId = targetNotebookId;
+    int resolvedDepth = 0;
+
+    if (!resolvedParentId.isEmpty()) {
+        QSqlQuery parentQuery(m_db);
+        parentQuery.prepare(QStringLiteral("SELECT notebook_id, depth FROM pages WHERE id = ? LIMIT 1"));
+        parentQuery.addBindValue(resolvedParentId);
+        if (!parentQuery.exec() || !parentQuery.next()) {
+            emit error(QStringLiteral("Import failed: target parent page not found"));
+            return importedPageIds;
+        }
+        resolvedNotebookId = parentQuery.value(0).toString();
+        resolvedDepth = parentQuery.value(1).toInt() + 1;
+    }
+
+    QSqlQuery siblingQuery(m_db);
+    siblingQuery.prepare(QStringLiteral(
+        "SELECT sort_order, title FROM pages WHERE notebook_id = ? AND parent_id = ?"));
+    siblingQuery.addBindValue(resolvedNotebookId);
+    siblingQuery.addBindValue(resolvedParentId);
+    if (!siblingQuery.exec()) {
+        emit error(QStringLiteral("Import failed: could not read current pages"));
+        return importedPageIds;
+    }
+
+    int nextSortOrder = 0;
+    QSet<QString> siblingTitles;
+    while (siblingQuery.next()) {
+        nextSortOrder = std::max(nextSortOrder, siblingQuery.value(0).toInt() + 1);
+        siblingTitles.insert(siblingQuery.value(1).toString());
+    }
+
+    for (const auto& value : fileUrls) {
+        const auto fileUrl = value.toUrl();
+        if (!fileUrl.isValid() || !fileUrl.isLocalFile()) continue;
+
+        const QFileInfo info(fileUrl.toLocalFile());
+        if (!info.exists() || !info.isFile()) continue;
+
+        QFile f(info.absoluteFilePath());
+        if (!f.open(QIODevice::ReadOnly)) continue;
+        const auto bytes = f.readAll();
+        const auto rawText = QString::fromUtf8(bytes);
+
+        QString markdown;
+        const auto ext = info.suffix().trimmed().toLower();
+        if (is_html_extension(ext)) {
+            if (const auto embedded = extract_embedded_markdown_from_zinc_html(rawText); embedded) {
+                markdown = *embedded;
+            } else {
+                markdown = rawText;
+            }
+        } else if (is_probably_binary_payload(bytes)) {
+            markdown = render_ascii_from_bytes(bytes);
+        } else {
+            markdown = rawText;
+        }
+
+        const auto titleBase = info.fileName().isEmpty()
+            ? normalize_imported_title_from_filename(info.completeBaseName())
+            : info.fileName();
+        const auto title = unique_imported_page_title(titleBase, siblingTitles);
+        siblingTitles.insert(title);
+
+        const auto pageId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+
+        QVariantMap page;
+        page.insert(QStringLiteral("pageId"), pageId);
+        page.insert(QStringLiteral("notebookId"), resolvedNotebookId);
+        page.insert(QStringLiteral("title"), title);
+        page.insert(QStringLiteral("parentId"), resolvedParentId);
+        page.insert(QStringLiteral("depth"), resolvedDepth);
+        page.insert(QStringLiteral("sortOrder"), nextSortOrder++);
+        page.insert(QStringLiteral("contentMarkdown"), markdown);
+        savePage(page);
+
+        importedPageIds.append(pageId);
+    }
+
+    if (importedPageIds.isEmpty()) {
+        emit error(QStringLiteral("Import failed: no files were dropped"));
+    }
+
+    return importedPageIds;
 }
 
 QUrl DataStore::createFolder(const QUrl& parentFolder, const QString& name) {
