@@ -148,8 +148,9 @@ FocusScope {
         for (let i = 0; i < remoteCursors.length; i++) {
             const c = remoteCursors[i] || {}
             if ((c.pageId || "") !== pageId) continue
+            const block = c.blockIndex === undefined ? -1 : c.blockIndex
             const pos = c.cursorPos === undefined ? -1 : c.cursorPos
-            if (pos >= 0) return pos
+            if (block < 0 && pos >= 0) return pos
         }
         return -1
     }
@@ -1570,6 +1571,15 @@ FocusScope {
                     if (text !== pageTitle) {
                         root.titleEdited(text)
                     }
+                    if (activeFocus) {
+                        root.cursorMoved(-1, cursorPosition)
+                    }
+                }
+
+                onCursorPositionChanged: {
+                    if (activeFocus) {
+                        root.cursorMoved(-1, cursorPosition)
+                    }
                 }
 
                 onActiveFocusChanged: {
@@ -1581,8 +1591,10 @@ FocusScope {
                     if (activeFocus) {
                         root.titleEditingPageId = root.pageId
                         root.titleEditingOriginalTitle = text
+                        root.cursorMoved(-1, cursorPosition)
                         return
                     }
+                    root.cursorMoved(-1, -1)
                     const editedId = root.titleEditingPageId
                     const changed = editedId && editedId !== "" && text !== root.titleEditingOriginalTitle
                     root.titleEditingPageId = ""

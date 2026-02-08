@@ -78,3 +78,10 @@ TEST_CASE("QML: Main displays remote title preview in active page title", "[qml]
     REQUIRE(main.contains(QStringLiteral("function displayPageTitle(pageId, fallbackTitle)")));
     REQUIRE(main.contains(QStringLiteral("pageTitle: currentPage ? root.displayPageTitle(currentPage.id, currentPage.title) : \"\"")));
 }
+
+TEST_CASE("QML: Main does not persist title cursor as block cursor", "[qml][sync][title]") {
+    const auto main = readAllText(QStringLiteral(":/qt/qml/zinc/qml/Main.qml"));
+    REQUIRE(!main.isEmpty());
+    REQUIRE(main.contains(QStringLiteral("if (blockIndex >= 0) {")));
+    REQUIRE(main.contains(QStringLiteral("root.scheduleCursorPersist(pageId, blockIndex, cursorPos)")));
+}

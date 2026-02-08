@@ -461,7 +461,9 @@ ApplicationWindow {
                     root.localCursorPageId = pageId
                     root.localCursorBlockIndex = blockIndex
                     root.localCursorPos = cursorPos
-                    root.scheduleCursorPersist(pageId, blockIndex, cursorPos)
+                    if (blockIndex >= 0) {
+                        root.scheduleCursorPersist(pageId, blockIndex, cursorPos)
+                    }
                     presenceTimer.restart()
                 }
 
@@ -754,7 +756,9 @@ ApplicationWindow {
                             root.localCursorPageId = pageId
                             root.localCursorBlockIndex = blockIndex
                             root.localCursorPos = cursorPos
-                            root.scheduleCursorPersist(pageId, blockIndex, cursorPos)
+                            if (blockIndex >= 0) {
+                                root.scheduleCursorPersist(pageId, blockIndex, cursorPos)
+                            }
                             presenceTimer.restart()
                         }
 
@@ -796,6 +800,22 @@ ApplicationWindow {
                             if (root.debugSyncUi) {
                                 console.log("SYNCUI: titleEditingFinished markdown pageId=", pageId,
                                             "committedTitle=", newTitle)
+                            }
+                            presenceTimer.restart()
+                        }
+
+                        onCursorMoved: function(blockIndex, cursorPos) {
+                            const pageId = markdownEditor.pageId
+                            if (root.localCursorPageId === pageId &&
+                                root.localCursorBlockIndex === blockIndex &&
+                                root.localCursorPos === cursorPos) {
+                                return
+                            }
+                            root.localCursorPageId = pageId
+                            root.localCursorBlockIndex = blockIndex
+                            root.localCursorPos = cursorPos
+                            if (blockIndex >= 0) {
+                                root.scheduleCursorPersist(pageId, blockIndex, cursorPos)
                             }
                             presenceTimer.restart()
                         }
