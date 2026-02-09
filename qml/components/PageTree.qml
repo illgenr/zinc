@@ -1628,7 +1628,7 @@ Item {
                         font.pixelSize: ThemeManager.fontSizeSmall
                         elide: Text.ElideNone
                         wrapMode: Text.Wrap
-                        verticalAlignment: Text.AlignTop
+                        verticalAlignment: lineCount > 1 ? Text.AlignTop : Text.AlignVCenter
                         visible: !parent.editingThisRow
                     }
 
