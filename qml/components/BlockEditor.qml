@@ -1681,6 +1681,15 @@ FocusScope {
                         }
                         root.scheduleEnsureFocusedCursorVisible()
                     }
+
+                    onLanguageEdited: function(newLanguage) {
+                        if (model.language === newLanguage) {
+                            return
+                        }
+                        model.language = newLanguage
+                        currentBlockIndex = index
+                        scheduleAutosave()
+                    }
                     
                     onBlockEnterPressed: {
                         root.handleEnterPressedAt(index)

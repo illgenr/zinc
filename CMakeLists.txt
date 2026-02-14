@@ -656,6 +656,7 @@ if(ZINC_BUILD_TESTS)
 		        tests/qml/test_pairing_dialog_qml.cpp
 		        tests/qml/test_search_dialog_qml.cpp
 		        tests/qml/test_markdown_editor_qml.cpp
+		        tests/qml/test_code_block_qml.cpp
 		        tests/qml/test_slash_menu_qml.cpp
 				        tests/qml/test_image_block_interactions.cpp
 				        tests/qml/test_page_tree_keyboard_shortcut_qml.cpp

@@ -11,8 +11,10 @@ Rectangle {
     property var editor: null
     property int blockIndex: -1
     property bool multiBlockSelectionActive: false
+    property bool copyFeedbackVisible: false
     
     signal contentEdited(string newContent)
+    signal languageEdited(string newLanguage)
     signal blockFocused()
     
     implicitHeight: Math.max(codeEdit.contentHeight + 60, 80)
@@ -33,6 +35,7 @@ Rectangle {
             
             TextField {
                 id: langField
+                objectName: "codeBlockLanguageField"
                 
                 Layout.preferredWidth: 120
                 
@@ -45,14 +48,37 @@ Rectangle {
                 background: Rectangle {
                     color: "transparent"
                 }
+
+                onTextChanged: {
+                    if (text !== root.codeLanguage) {
+                        root.languageEdited(text)
+                    }
+                }
             }
             
             Item { Layout.fillWidth: true }
+
+            Text {
+                text: "Copied"
+                visible: root.copyFeedbackVisible
+                opacity: root.copyFeedbackVisible ? 1 : 0
+                color: ThemeManager.textSecondary
+                font.pixelSize: ThemeManager.fontSizeSmall
+                font.family: ThemeManager.monoFontFamily
+            }
             
             // Copy button
             ToolButton {
+                objectName: "codeBlockCopyButton"
                 width: 24
                 height: 24
+                onClicked: {
+                    Clipboard.setText(root.content)
+                    root.copyFeedbackVisible = true
+                    copiedFeedbackTimer.restart()
+                }
+                onReleased: down = false
+                onCanceled: down = false
                 
                 contentItem: Text {
                     text: "📋"
@@ -162,6 +188,13 @@ Rectangle {
                 }
             }
         }
+    }
+
+    Timer {
+        id: copiedFeedbackTimer
+        interval: 1200
+        repeat: false
+        onTriggered: root.copyFeedbackVisible = false
     }
 
     Timer {

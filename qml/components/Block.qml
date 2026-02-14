@@ -36,6 +36,7 @@ Item {
     signal requestMoveDown()
     signal blockCheckedToggled()
     signal blockCollapseToggled()
+    signal languageEdited(string newLanguage)
     signal blockFocused()
     signal linkClicked(string pageId)
     signal cursorMoved(int cursorPos)
@@ -434,6 +435,7 @@ Item {
             blockIndex: root.blockIndex
             multiBlockSelectionActive: root.editor ? root.editor.hasCrossBlockSelection : false
             onContentEdited: (newContent) => root.contentEdited(newContent)
+            onLanguageEdited: (newLanguage) => root.languageEdited(newLanguage)
             onBlockFocused: root.blockFocused()
         }
     }
