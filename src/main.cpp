@@ -6,6 +6,7 @@
 #include <QLoggingCategory>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
+#include <QQmlError>
 #include <QStyleHints>
 #include <QQuickStyle>
 #include <QTextStream>
@@ -314,6 +315,28 @@ int main(int argc, char *argv[])
     // Set up QML engine
     QQmlApplicationEngine engine;
     engine.addImageProvider(QStringLiteral("attachments"), new zinc::ui::AttachmentImageProvider());
+
+    QObject::connect(
+        &engine,
+        &QQmlApplicationEngine::warnings,
+        &app,
+        [](const QList<QQmlError>& warnings) {
+            for (const auto& warning : warnings) {
+                qWarning().noquote() << "QML warning:" << warning.toString();
+            }
+        });
+
+    QObject::connect(
+        &engine,
+        &QQmlApplicationEngine::objectCreated,
+        &app,
+        [](QObject* object, const QUrl& url) {
+            if (object) {
+                qInfo() << "QML root object created:" << url;
+            } else {
+                qCritical() << "QML root object creation returned null for" << url;
+            }
+        });
     
     // Handle creation failures
     QObject::connect(
@@ -325,6 +348,10 @@ int main(int argc, char *argv[])
     
     // Load main QML
     engine.loadFromModule("zinc", "Main");
+    if (engine.rootObjects().isEmpty()) {
+        qCritical() << "No QML root objects loaded; exiting.";
+        return -1;
+    }
 
     return app.exec();
 }

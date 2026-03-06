@@ -325,7 +325,7 @@ QVariantList MarkdownBlocks::parse(const QString& markdown) const {
     };
 
     QStringList paragraph;
-    for (int i = start; i < lines.size(); ++i) {
+    for (int i = start; i < lines.size(); ++i) {	
         const auto line = lines[i];
         const auto trimmed = line.trimmed();
 

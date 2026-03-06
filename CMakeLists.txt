@@ -20,7 +20,10 @@ else()
 endif()
 
 # Find Qt packages
-find_package(Qt6 REQUIRED COMPONENTS Quick QuickControls2 Sql Network Multimedia Svg Test)
+find_package(Qt6 REQUIRED COMPONENTS Quick QuickControls2 Sql Network Svg Test)
+if(ZINC_ENABLE_QR)
+    find_package(Qt6 REQUIRED COMPONENTS Multimedia)
+endif()
 
 qt_standard_project_setup(REQUIRES 6.8)
 
@@ -296,7 +299,11 @@ qt_add_resources(zinc_ui zinc_default_pages
 set(CMARK_LIB_FUZZER OFF CACHE BOOL "" FORCE)
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
+set(_ZINC_SAVED_CMAKE_MACOSX_BUNDLE ${CMAKE_MACOSX_BUNDLE})
+set(CMAKE_MACOSX_BUNDLE OFF)
 add_subdirectory(third_party/cmark EXCLUDE_FROM_ALL)
+set(CMAKE_MACOSX_BUNDLE ${_ZINC_SAVED_CMAKE_MACOSX_BUNDLE})
+unset(_ZINC_SAVED_CMAKE_MACOSX_BUNDLE)
 target_link_libraries(zinc_ui PRIVATE cmark)
 
 if(ZINC_ENABLE_QR)
@@ -340,8 +347,11 @@ target_link_libraries(zinc_ui PUBLIC
     zinc_storage
     zinc_network
     Qt6::Quick
-    Qt6::Multimedia
 )
+
+if(ZINC_ENABLE_QR)
+    target_link_libraries(zinc_ui PUBLIC Qt6::Multimedia)
+endif()
 
 target_sources(zinc_ui PRIVATE
     src/ui/controllers/sync_presence.cpp
@@ -454,6 +464,27 @@ if(ANDROID)
     set_property(TARGET appzinc PROPERTY QT_ANDROID_PACKAGE_SOURCE_DIR "${CMAKE_SOURCE_DIR}/android")
 endif()
 
+if(IOS)
+    set(ZINC_IOS_APPICON_ASSETCATALOG
+        "${CMAKE_CURRENT_SOURCE_DIR}/ios/AppIcon.xcassets"
+    )
+    target_sources(appzinc PRIVATE
+        ${ZINC_IOS_APPICON_ASSETCATALOG}
+    )
+    set(_zinc_ios_scope_args)
+    if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.18")
+        set(_zinc_ios_scope_args TARGET_DIRECTORY appzinc)
+    endif()
+    set_source_files_properties(${ZINC_IOS_APPICON_ASSETCATALOG} ${_zinc_ios_scope_args}
+        PROPERTIES MACOSX_PACKAGE_LOCATION Resources
+    )
+    unset(_zinc_ios_scope_args)
+    set_target_properties(appzinc PROPERTIES
+        XCODE_ATTRIBUTE_ASSETCATALOG_COMPILER_APPICON_NAME AppIcon
+        XCODE_ATTRIBUTE_ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS YES
+    )
+endif()
+
 
 
 target_link_libraries(appzinc PRIVATE
@@ -464,9 +495,20 @@ target_link_libraries(appzinc PRIVATE
     Qt6::Quick
     Qt6::QuickControls2
     Qt6::Sql
-    Qt6::Multimedia
     Qt6::Svg
 )
+
+if(ZINC_ENABLE_QR)
+    target_link_libraries(appzinc PRIVATE Qt6::Multimedia)
+endif()
+
+# On iOS with static Qt, QML import scanning can auto-link multimedia plugins.
+# When QR is disabled, force-disable multimedia plugins to avoid FFmpeg link failures.
+if(IOS AND NOT ZINC_ENABLE_QR)
+    qt_import_plugins(appzinc
+        EXCLUDE Qt6::quickmultimedia Qt6::QFFmpegMediaPlugin Qt6::QDarwinMediaPlugin
+    )
+endif()
 
 include(GNUInstallDirs)
 install(TARGETS appzinc
