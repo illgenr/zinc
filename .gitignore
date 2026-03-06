@@ -56,3 +56,6 @@ CMakeCache.txt
 
 # Cursor plans
 .plan*
+
+# Mac ignores
+.DS_Store
